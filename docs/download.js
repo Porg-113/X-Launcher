@@ -6,22 +6,6 @@ const info = document.querySelector("#release-info");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 if (!reduceMotion) {
-  let pointerX = window.innerWidth / 2;
-  let pointerY = window.innerHeight / 3;
-  let framePending = false;
-
-  window.addEventListener("pointermove", (event) => {
-    pointerX = event.clientX;
-    pointerY = event.clientY;
-    if (framePending) return;
-    framePending = true;
-    requestAnimationFrame(() => {
-      document.documentElement.style.setProperty("--mouse-x", `${pointerX}px`);
-      document.documentElement.style.setProperty("--mouse-y", `${pointerY}px`);
-      framePending = false;
-    });
-  }, { passive: true });
-
   document.querySelectorAll(".tilt-card").forEach((card) => {
     card.addEventListener("pointermove", (event) => {
       const box = card.getBoundingClientRect();
