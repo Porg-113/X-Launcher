@@ -1,6 +1,5 @@
 const repo = "Porg-113/X-Launcher";
 const primary = document.querySelector("#download");
-const secondary = document.querySelector("#download-bottom");
 const info = document.querySelector("#release-info");
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -52,7 +51,6 @@ fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
 
     if (!installer) throw new Error("Keine EXE gefunden");
     primary.href = installer.browser_download_url;
-    secondary.href = installer.browser_download_url;
     info.textContent = `${release.tag_name} · ${(installer.size / 1024 / 1024).toFixed(0)} MB`;
   })
   .catch(() => {
