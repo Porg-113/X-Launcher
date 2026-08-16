@@ -15,11 +15,11 @@ body { margin: 0; background: radial-gradient(circle at 75% 8%, #003942 0, trans
 .glow-two { width: 420px; height: 420px; background: #00d8ff; opacity: .1; left: -240px; top: 520px; }
 .nav, main, footer { width: min(1120px, calc(100% - 40px)); margin: auto; }
 .nav { height: 100px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(0, 255, 255, .08); }
-.live-stats { display: flex; align-items: center; justify-content: center; gap: clamp(28px, 5vw, 68px); margin-left: auto; margin-right: clamp(18px, 4vw, 48px); }
-.live-stats > span { min-width: 72px; text-align: center; }
+.live-stats { display: flex; align-items: center; justify-content: center; gap: clamp(38px, 7vw, 80px); margin: 26px auto -10px; }
+.live-stats > span { min-width: 86px; text-align: center; }
 .live-stats strong, .live-stats small { display: block; }
 .live-stats strong { color: #fff; font-size: clamp(1.8rem, 3vw, 2.5rem); line-height: .95; font-weight: 900; font-variant-numeric: tabular-nums; text-shadow: 0 0 18px rgba(255,255,255,.2); }
-.live-stats small { color: var(--muted); margin-top: 7px; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.live-stats small { color: var(--muted); margin-top: 5px; font-size: .55rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 900; letter-spacing: .03em; }
 .brand img { object-fit: contain; filter: drop-shadow(0 0 13px rgba(0, 255, 255, .55)); transition: transform .35s cubic-bezier(.2,.8,.2,1), filter .35s ease; }
 .brand:hover img { transform: rotate(-7deg) scale(1.08); filter: drop-shadow(0 0 22px rgba(0, 255, 255, .8)); }
@@ -75,8 +75,8 @@ footer { display: flex; justify-content: space-between; color: #548087; font-siz
   .nav, main, footer { width: min(100% - 28px, 1120px); }
   footer { gap: 12px; flex-direction: column; }
   .github-link { font-size: .9rem; }
-  .live-stats { gap: 14px; margin: 0 10px 0 auto; }
-  .live-stats > span { min-width: 56px; }
+  .live-stats { gap: 28px; margin: 22px auto -12px; }
+  .live-stats > span { min-width: 70px; }
   .live-stats strong { font-size: 1.55rem; }
   .live-stats small { font-size: .55rem; }
 }
