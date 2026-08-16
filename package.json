@@ -1,0 +1,92 @@
+{
+  "name": "x-launcher",
+  "version": "1.4.4",
+  "description": "Minecraft Fabric launcher for Windows",
+  "author": "X",
+  "main": "src/main.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "set ELECTRON_RUN_AS_NODE=&& electron .",
+    "dev": "set ELECTRON_RUN_AS_NODE=&& electron . --dev",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis portable --publish never",
+    "build:installer": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish never",
+    "build:portable": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win portable --publish never",
+    "release:github": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish always",
+    "pack": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --dir",
+    "test": "node --test",
+    "download:fabric-mods": "node scripts/modrinth-fabric-downloader.js",
+    "build:x-menu-mod": "node scripts/build-x-launcher-menu-mod.js",
+    "build:instant-break-server-mod": "node scripts/build-x-instant-break-server-mod.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "node-fetch": "^2.6.7",
+    "prismarine-auth": "^3.1.1",
+    "skinview3d": "^3.4.2"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  },
+  "build": {
+    "appId": "com.x.launcher.app",
+    "productName": "X Launcher",
+    "artifactName": "X-Launcher-${version}-${arch}.${ext}",
+    "asar": true,
+    "npmRebuild": false,
+    "electronUpdaterCompatibility": ">=2.16",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Porg-113",
+        "repo": "X-Launcher"
+      }
+    ],
+    "afterPack": "scripts/apply-windows-icon.js",
+    "files": [
+      "src/**/*",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "modern-launcher.css",
+      "package.json",
+      "node_modules/skinview3d/bundles/**/*",
+      "icons/**/*",
+      "assets/**/*"
+    ],
+    "directories": {
+      "buildResources": "icons",
+      "output": "dist"
+    },
+    "win": {
+      "icon": "icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "shortcutName": "X Launcher"
+    },
+    "portable": {
+      "artifactName": "X-Launcher-Portable-${version}.${ext}"
+    }
+  }
+}
