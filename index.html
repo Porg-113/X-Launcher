@@ -1,0 +1,1011 @@
+﻿<!DOCTYPE html><html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X Launcher</title>
+  <script>
+    // Apply the persisted accent before the stylesheets paint to avoid a default-color flash.
+    (() => {
+      const color = localStorage.getItem('primaryColor');
+      if (!/^#[0-9a-f]{6}$/i.test(color || '')) return;
+      const value = Number.parseInt(color.slice(1), 16);
+      const red = (value >> 16) & 255;
+      const green = (value >> 8) & 255;
+      const blue = value & 255;
+      const luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255;
+      document.documentElement.style.setProperty('--primary-color', color);
+      document.documentElement.style.setProperty('--primary-rgb', `${red}, ${green}, ${blue}`);
+      document.documentElement.style.setProperty('--accent-contrast', luminance > 0.57 ? '#050708' : '#ffffff');
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="modern-launcher.css">
+</head>
+<body>
+  <div class="window-drag-region" aria-hidden="true"></div>
+  <div class="window-controls global-window-controls">
+    <button id="window-minimize-btn" class="window-btn" type="button" aria-label="Minimieren" title="Minimieren">
+      <span class="window-icon window-icon-minimize" aria-hidden="true"></span>
+    </button>
+    <button id="window-maximize-btn" class="window-btn" type="button" aria-label="Maximieren" title="Maximieren">
+      <span class="window-icon window-icon-maximize" aria-hidden="true"></span>
+    </button>
+    <button id="window-close-btn" class="window-btn close" type="button" aria-label="Schließen" title="Schließen">
+      <span class="window-icon window-icon-close" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <div id="login-screen" class="screen active">
+    <div class="login-container">
+      <div class="login-box">
+        <h1 class="login-title">X Launcher</h1>
+        <p class="login-subtitle">Fabric Mod Loader Edition</p>
+
+        <div class="login-form">
+          <p id="login-config-status" class="login-config-status">Xbox/Microsoft-Weblogin wird vorbereitet...</p>
+          <button id="login-btn" class="btn btn-primary login-btn">
+            MIT XBOX ANMELDEN
+          </button>
+        </div>
+
+        <div class="login-info">
+          <p>Login über die offizielle Xbox/Microsoft-Webseite</p>
+          <p>Der Browser wird automatisch geöffnet</p>
+          <p>Nach erfolgreicher Anmeldung wirst du direkt übernommen</p>
+          <p>Offline-Modus verfügbar</p>
+          <button id="offline-btn" class="btn btn-secondary" style="margin-top:10px; background-color:black; color:white;">
+            OFFLINE SPIELEN
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="main-screen" class="screen">
+    <div class="container">
+      <header class="header">
+        <div class="header-content">
+          <div class="header-brand">
+            <div id="header-skin-head" class="skin-head hidden" aria-hidden="true">
+              <div class="skin-head-layer base"></div>
+              <div class="skin-head-layer hat"></div>
+            </div>
+            <div class="header-title-group">
+              <h1 class="title">X Launcher</h1>
+            </div>
+          </div>
+          <div class="header-social-links" aria-label="X Client Community">
+            <button class="header-social-link discord" type="button" data-open-url="https://discord.gg/9xTWsqeqY" aria-label="Discord öffnen" title="X Client Discord">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.34A16.3 16.3 0 0 0 15.44 4l-.5 1.02a15.2 15.2 0 0 0-5.88 0L8.54 4A16.5 16.5 0 0 0 4.5 5.35C1.93 9.17 1.23 12.9 1.58 16.58a16.7 16.7 0 0 0 4.98 2.5l1.2-1.65a10.8 10.8 0 0 1-1.88-.9l.46-.36c3.63 1.69 7.57 1.69 11.15 0l.47.36c-.6.36-1.24.66-1.89.9l1.2 1.65a16.6 16.6 0 0 0 4.97-2.5c.42-4.27-.72-7.97-2.84-11.24ZM8.68 14.33c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.88 2.23-1.98 2.23Zm6.64 0c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.87 2.23-1.98 2.23Z"/></svg>
+            </button>
+            <button class="header-social-link youtube" type="button" data-open-url="https://www.youtube.com/@x-client" aria-label="YouTube öffnen" title="X Client auf YouTube">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.12C19.55 3.58 12 3.58 12 3.58s-7.55 0-9.4.5A3 3 0 0 0 .5 6.2 31.2 31.2 0 0 0 0 12a31.2 31.2 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.12c1.85.5 9.4.5 9.4.5s7.55 0 9.4-.5a3 3 0 0 0 2.1-2.12A31.2 31.2 0 0 0 24 12a31.2 31.2 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.26 3.6-6.26 3.6Z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="header-user">
+          <span id="admin-status" class="admin-status hidden" aria-label="XClient Owner">Owner</span>
+          <button id="username-display" class="username-button" type="button" aria-label="Accounts öffnen" title="Accounts öffnen">Player</button>
+          <button id="logout-btn" class="btn-logout">Abmelden</button>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <aside class="sidebar">
+          <nav class="nav-menu">
+            <button class="nav-item active" data-section="dashboard" aria-label="Start" title="Start"><img src="assets/icons/nav-home.svg" alt=""></button>
+            <button class="nav-item" data-section="mods" aria-label="Mods" title="Mods"><img src="assets/icons/nav-mods.svg" alt=""></button>
+            <button class="nav-item" data-section="modrinth" aria-label="Modrinth" title="Modrinth"><img src="assets/icons/nav-modrinth.svg" alt=""></button>
+            <button class="nav-item" data-section="packs" aria-label="Profile" title="Profile"><img src="assets/icons/nav-profiles.svg" alt=""></button>
+            <button class="nav-item" data-section="servers" aria-label="Server" title="Server"><img src="assets/icons/nav-servers.svg" alt=""></button>
+            <button class="nav-item hidden" data-section="hosting" aria-label="Hosting" title="Hosting"><img src="assets/icons/nav-hosting.svg" alt=""></button>
+            <button class="nav-item" data-section="skins" aria-label="Skins" title="Skins"><img src="assets/icons/nav-skins.svg" alt=""></button>
+            <button class="nav-item" data-section="settings" aria-label="Einstellungen" title="Einstellungen"><img src="assets/icons/nav-settings.svg" alt=""></button>
+          </nav>
+          <div class="sidebar-footer" aria-hidden="true">
+            <span class="sidebar-footer-dot"></span>
+            <span>READY TO PLAY</span>
+          </div>
+        </aside>
+
+        <section id="dashboard" class="content-section active">
+          <div class="start-layout">
+            <article class="start-hero-card">
+              <div class="start-hero-copy">
+                <span class="start-eyebrow">X CLIENT · FABRIC EDITION</span>
+                <p class="start-description">Schnell starten, Mods verwalten und direkt mit deinen Freunden spielen.</p>
+              </div>
+              <div class="dashboard-skin-stage">
+                <div id="dashboard-skin-empty" class="dashboard-skin-empty" aria-label="Kein aktiver Skin"></div>
+                <canvas id="dashboard-skin-canvas" class="dashboard-skin-canvas hidden" aria-hidden="true"></canvas>
+              </div>
+
+              <p id="minecraft-status" class="start-status" aria-live="polite">Status wird geladen...</p>
+              <select id="start-pack-select" class="input-field start-pack-select" aria-label="Profil auswählen"></select>
+              <button id="launch-btn" class="btn btn-primary start-launch-btn" type="button" aria-live="polite">
+                <span class="launch-progress-label">Play</span>
+                <span class="launch-progress-percent" aria-hidden="true"></span>
+              </button>
+              <div class="start-direct-server">
+                <div id="start-server-list" class="start-server-list" aria-label="Server-Favoriten"></div>
+              </div>
+              <div class="start-meta-strip" aria-hidden="true">
+                <div><strong>FABRIC</strong><span>Optimiert</span></div>
+                <div><strong>MODRINTH</strong><span>Integriert</span></div>
+                <div><strong>X CLIENT</strong><span>Bereit</span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="mods" class="content-section">
+          <div class="section-header">
+            <h2>Mods verwalten</h2>
+            <div class="section-actions">
+              <select id="mods-profile-version-select" class="input-field mods-profile-version-select" aria-label="Minecraft-Version dieses Profils ändern" title="Profil-Version ändern"></select>
+              <button id="update-all-btn" class="btn btn-primary" type="button" data-launcher-action="update-all-mods">Alle anpassen</button>
+              <button id="load-mods-folder-btn" class="btn btn-secondary mods-folder-icon-btn" type="button" aria-label="Mods-Ordner öffnen" title="Mods-Ordner öffnen">
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+                  <path d="M3 6.5h7l2 2h9v10H3zM3 6.5V5h7l2 2h9v1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <button id="remove-incompatible-mods-btn" class="btn btn-danger mods-cleanup-icon-btn" type="button" data-launcher-action="remove-incompatible-mods" aria-label="Unpassende Mods löschen" title="Unpassende Mods löschen" disabled>
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+                  <path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="mods-tools mods-tools-single">
+            <section class="installed-mods-panel">
+              <div class="panel-header-inline">
+                <h3 id="mods-section-title" class="mods-subtitle">Mods für diese Version</h3>
+                <p id="mods-context-label" class="panel-context-text">Launcher-Standard ist aktiv.</p>
+              </div>
+              <div id="mods-view-tabs" class="modrinth-type-tabs mods-view-tabs" role="tablist" aria-label="Installierte Inhalte">
+                <button class="modrinth-type-tab active" type="button" data-mods-view="mod" aria-selected="true">Mods</button>
+                <button class="modrinth-type-tab" type="button" data-mods-view="resourcepack" aria-selected="false">Ressourcenpakete</button>
+                <button class="modrinth-type-tab" type="button" data-mods-view="shader" aria-selected="false">Shader</button>
+                <button class="modrinth-type-tab" type="button" data-mods-view="hidden" aria-selected="false">Ausgeblendet</button>
+              </div>
+              <div id="mods-drop-zone" class="mods-drop-zone" role="button" tabindex="0">
+                <strong>Mods hier ablegen</strong>
+                <span>JAR-Dateien</span>
+              </div>
+              <div id="mods-list" class="mods-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="modrinth" class="content-section">
+          <div class="section-header">
+            <h2>Modrinth</h2>
+          </div>
+
+          <section class="modrinth-panel">
+            <div class="panel-header-inline">
+              <h3 class="mods-subtitle">Mods herunterladen</h3>
+              <p id="modrinth-context-label" class="panel-context-text">Installiert in den Launcher-Standard.</p>
+            </div>
+            <div id="modrinth-type-tabs" class="modrinth-type-tabs" role="tablist" aria-label="Modrinth Typen">
+              <button class="modrinth-type-tab active" type="button" data-modrinth-type="mod" aria-selected="true">Mods</button>
+              <button class="modrinth-type-tab" type="button" data-modrinth-type="modpack" aria-selected="false">Modpacks</button>
+              <button class="modrinth-type-tab" type="button" data-modrinth-type="shader" aria-selected="false">Shader</button>
+              <button class="modrinth-type-tab" type="button" data-modrinth-type="resourcepack" aria-selected="false">Ressourcenpakete</button>
+            </div>
+            <div class="modrinth-search-row">
+              <div class="modrinth-search-box">
+                <input id="modrinth-search-input" class="input-field" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Auf Modrinth nach Fabric-Mods suchen...">
+              </div>
+              <select id="modrinth-version-filter" class="input-field modrinth-version-filter is-hidden" aria-label="Modpack-Version filtern"></select>
+              <button id="modrinth-search-btn" class="btn btn-primary">Suchen</button>
+            </div>
+            <p id="modrinth-search-status" class="modrinth-status">Suche Mods passend zu deiner ausgewählten Fabric-Version.</p>
+            <div id="modrinth-results" class="mods-list modrinth-results"></div>
+          </section>
+        </section>
+        <section id="packs" class="content-section">
+          <div class="section-header">
+            <h2>Profile</h2>
+          </div>
+
+          <div class="packs-layout">
+            <section class="pack-creator-card">
+              <h3>Neues Profil</h3>
+              <p class="pack-helper-text">Jedes Profil hat genau eine Fabric-Version und einen eigenen Mods-Ordner.</p>
+              <div class="pack-form">
+                <input id="pack-name-input" class="input-field" type="text" maxlength="40" placeholder="Profil-Name eingeben...">
+                <select id="pack-version-select" class="input-field"></select>
+                <button id="create-pack-btn" class="btn btn-primary">Profil erstellen</button>
+              </div>
+            </section>
+
+            <section class="pack-list-panel">
+              <div class="panel-header-inline">
+                <h3 class="mods-subtitle">Deine Profile</h3>
+                <p id="packs-status" class="panel-context-text">Launcher-Standard ist aktiv.</p>
+              </div>
+              <div id="packs-list" class="packs-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="servers" class="content-section">
+          <div class="section-header">
+            <h2>Server</h2>
+          </div>
+
+          <div class="servers-layout">
+            <section class="server-card">
+              <h3>Server speichern</h3>
+              <div class="server-form">
+                <input id="server-name-input" class="input-field" type="text" maxlength="42" placeholder="Name">
+                <input id="server-host-input" class="input-field" type="text" maxlength="253" placeholder="Adresse oder IP">
+                <button id="add-server-btn" class="btn btn-primary" type="button">Speichern</button>
+              </div>
+            </section>
+
+            <section class="server-list-panel">
+              <div class="panel-header-inline">
+                <h3 class="mods-subtitle">Favoriten</h3>
+                <p id="servers-status" class="panel-context-text">Noch keine Server geladen.</p>
+              </div>
+              <div id="servers-list" class="servers-list"></div>
+            </section>
+          </div>
+
+        </section>
+
+        <section id="hosting" class="content-section hosting-dashboard-section oracle-hosting-section local-hosting-section">
+          <div class="hosting-hero">
+            <div>
+              <span class="hosting-kicker">Lokaler Minecraft Java Server · direkte Verbindung</span>
+              <h2>Minecraft Hosting</h2>
+              <p id="hosted-server-status" class="panel-context-text">Serverstatus wird geladen...</p>
+            </div>
+            <div class="section-actions hosting-hero-actions">
+              <button id="oracle-hosting-refresh-btn" class="btn btn-secondary btn-large" type="button">Aktualisieren</button>
+              <button id="hosted-server-create-btn" class="btn btn-primary btn-large" type="button">Server erstellen</button>
+            </div>
+          </div>
+
+          <div class="host-layout hosting-dashboard">
+            <aside class="hosting-card hosting-server-sidebar" aria-label="Serverliste">
+                <div class="hosting-card-header">
+                  <div>
+                    <h3>Deine Server</h3>
+                    <p id="hosted-server-list-status" class="panel-context-text">Noch keine Server geladen.</p>
+                  </div>
+                </div>
+              <div id="hosted-server-list" class="hosting-server-list"></div>
+            </aside>
+
+            <section id="hosted-server-editor" class="hosting-workspace">
+              <div class="hosting-overview-grid">
+                <article class="hosting-card server-summary-card">
+                  <div class="server-summary-top">
+                    <div>
+                      <span id="hosting-status-pill" class="hosting-status-pill offline">Offline</span>
+                      <h3 id="hosted-server-editor-title">Dashboard</h3>
+                      <p id="hosting-server-subtitle" class="panel-context-text">Wähle einen lokalen Server oder erstelle einen neuen.</p>
+                    </div>
+                    <div class="server-actions hosting-power-actions">
+                      <button id="hosted-server-start-btn" class="btn btn-success btn-large" type="button">Starten &amp; Online</button>
+                      <button id="hosted-server-restart-btn" class="btn btn-secondary btn-large" type="button">Neustart</button>
+                    </div>
+                  </div>
+
+                  <div class="server-address-section">
+                    <div class="address-display">
+                      <label class="field-label">Adresse</label>
+                      <div class="address-box">
+                        <strong id="hosted-server-address">Nicht gestartet</strong>
+                        <span id="direct-connection-status" class="direct-connection-status offline">Offline</span>
+                        <button id="hosted-server-copy-address-btn" class="btn btn-compact" type="button" title="Adresse kopieren">Kopieren</button>
+                        <button id="hosted-server-router-btn" class="btn btn-compact hidden" type="button">Automatisch freigeben</button>
+                      </div>
+                      <p id="hosted-server-fallback-address" class="server-host-ip"></p>
+                    </div>
+                  </div>
+
+                  <div id="hosted-server-runtime" class="hosting-metric-grid"></div>
+                </article>
+              </div>
+
+              <div class="hosting-grid-main">
+                <section class="hosting-card live-players-card">
+                  <div class="hosting-card-header">
+                    <div>
+                      <h3>Live-Spieler</h3>
+                      <p id="hosting-players-summary" class="panel-context-text">Spieler werden über die Konsole erkannt.</p>
+                    </div>
+                    <div class="hosting-toolbar">
+                      <input id="hosting-player-search" class="input-field" type="search" placeholder="Spieler suchen">
+                      <select id="hosting-player-sort" class="input-field" aria-label="Spieler sortieren">
+                        <option value="name">Name</option>
+                        <option value="ping">Ping</option>
+                        <option value="time">Spielzeit</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div id="hosting-player-list" class="hosting-player-list"></div>
+                </section>
+
+                <section class="hosting-card moderation-card">
+                  <div class="hosting-card-header">
+                    <div>
+                      <h3>Dateien und Backups</h3>
+                      <p class="panel-context-text">Plugins, Welten und Sicherungen im Serverordner.</p>
+                    </div>
+                    <div class="server-actions">
+                      <button id="hosting-open-folder-btn" class="btn btn-secondary" type="button">Ordner öffnen</button>
+                      <button id="hosting-create-backup-btn" class="btn btn-secondary" type="button">Backup erstellen</button>
+                    </div>
+                  </div>
+                  <div class="hosting-ban-tools">
+                    <input id="hosting-plugin-upload-input" class="input-field" type="file" multiple accept=".jar">
+                    <input id="hosting-backup-restore-input" class="input-field" type="text" placeholder="Backup-Dateiname wiederherstellen">
+                    <button id="hosting-restore-backup-btn" class="btn btn-secondary" type="button">Wiederherstellen</button>
+                  </div>
+                  <div id="hosting-file-list" class="hosting-history-list"></div>
+                </section>
+              </div>
+
+              <section class="hosting-card server-host-console-panel">
+                <div class="hosting-card-header">
+                  <div>
+                    <h3>Live-Konsole</h3>
+                    <p class="panel-context-text">systemd-Logs, Paper-Konsole und RCON-Befehle.</p>
+                  </div>
+                  <input id="hosting-console-search" class="input-field" type="search" placeholder="Konsole durchsuchen">
+                </div>
+                <pre id="hosted-server-console" class="server-host-console">Noch keine Konsolen-Ausgabe.</pre>
+                <div class="server-command-row">
+                  <input id="hosted-server-command-input" class="input-field" type="text" maxlength="160" placeholder="Befehl senden, z.B. list">
+                  <button id="hosted-server-command-send-btn" class="btn btn-primary" type="button">Senden</button>
+                </div>
+              </section>
+
+              <section class="hosting-card hosting-settings-card">
+                <div class="hosting-card-header">
+                  <div>
+                    <h3 id="hosted-server-settings-title">Server erstellen und konfigurieren</h3>
+                    <p class="panel-context-text">Paper wird automatisch heruntergeladen, EULA wird akzeptiert.</p>
+                  </div>
+                  <div class="server-actions">
+                    <button id="hosted-server-final-create-btn" class="btn btn-primary" type="button">Server erstellen</button>
+                    <button id="hosted-server-cancel-create-btn" class="btn btn-secondary" type="button">Abbrechen</button>
+                    <button id="hosted-server-save-btn" class="btn btn-primary" type="button">Speichern</button>
+                    <button id="hosted-server-delete-btn" class="btn btn-danger" type="button">Löschen</button>
+                  </div>
+                </div>
+
+                <div class="server-host-form">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="field-label" for="hosted-server-name-input">Servername</label>
+                      <input id="hosted-server-name-input" class="input-field" type="text" maxlength="32" placeholder="z.B. Survival">
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label" for="hosted-server-version-input">Version</label>
+                      <select id="hosted-server-version-input" class="input-field"></select>
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label" for="hosted-server-ram-input">RAM (GB)</label>
+                      <input id="hosted-server-ram-input" class="input-field" type="number" min="1" max="24" step="1" value="4">
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label" for="hosted-server-port-input">Port</label>
+                      <input id="hosted-server-port-input" class="input-field" type="number" min="1024" max="65535" step="1" value="25565">
+                    </div>
+                  </div>
+
+                  <details class="hosting-server-advanced">
+                    <summary>Server-Einstellungen</summary>
+                    <div class="form-row">
+                      <div class="form-group hidden">
+                        <label class="field-label" for="hosted-server-edition-select">Edition</label>
+                        <select id="hosted-server-edition-select" class="input-field">
+                          <option value="java" selected>Java</option>
+                        </select>
+                      </div>
+                      <div class="form-group hidden">
+                        <label class="field-label" for="hosted-server-software-select">Software</label>
+                        <select id="hosted-server-software-select" class="input-field">
+                          <option value="paper" selected>Paper</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-java-input">Java-Version</label>
+                        <select id="hosted-server-java-input" class="input-field">
+                          <option value="21" selected>Java 21</option>
+                          <option value="17">Java 17</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-max-players-input">Max. Spieler</label>
+                        <input id="hosted-server-max-players-input" class="input-field" type="number" min="1" max="100" step="1" value="20">
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-seed-input">Seed</label>
+                        <input id="hosted-server-seed-input" class="input-field" type="text" maxlength="80" placeholder="Optional">
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-domain-input">Domain/Subdomain</label>
+                        <input id="hosted-server-domain-input" class="input-field" type="text" maxlength="253" placeholder="play.example.de">
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-difficulty-select">Schwierigkeit</label>
+                        <select id="hosted-server-difficulty-select" class="input-field">
+                          <option value="peaceful">Friedlich</option>
+                          <option value="easy">Einfach</option>
+                          <option value="normal" selected>Normal</option>
+                          <option value="hard">Schwer</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-gamemode-select">Gamemode</label>
+                        <select id="hosted-server-gamemode-select" class="input-field">
+                          <option value="survival" selected>Survival</option>
+                          <option value="creative">Creative</option>
+                          <option value="adventure">Adventure</option>
+                          <option value="spectator">Spectator</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-view-distance-input">View Distance</label>
+                        <input id="hosted-server-view-distance-input" class="input-field" type="number" min="2" max="32" step="1" value="10">
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-simulation-distance-input">Simulation Distance</label>
+                        <input id="hosted-server-simulation-distance-input" class="input-field" type="number" min="2" max="32" step="1" value="10">
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label" for="hosted-server-spawn-protection-input">Spawn Protection</label>
+                        <input id="hosted-server-spawn-protection-input" class="input-field" type="number" min="0" max="64" step="1" value="16">
+                      </div>
+                    </div>
+                  </details>
+
+                  <div class="server-host-toggles">
+                    <label class="checkbox-row" for="hosted-server-pvp-checkbox">
+                      <input id="hosted-server-pvp-checkbox" type="checkbox" checked>
+                      <span>PVP aktiviert</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-whitelist-checkbox">
+                      <input id="hosted-server-whitelist-checkbox" type="checkbox">
+                      <span>Whitelist</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-online-mode-checkbox">
+                      <input id="hosted-server-online-mode-checkbox" type="checkbox" checked>
+                      <span>Online-Mode</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-command-block-checkbox">
+                      <input id="hosted-server-command-block-checkbox" type="checkbox">
+                      <span>Command Blocks</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-hardcore-checkbox">
+                      <input id="hosted-server-hardcore-checkbox" type="checkbox">
+                      <span>Hardcore</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-nether-checkbox">
+                      <input id="hosted-server-nether-checkbox" type="checkbox" checked>
+                      <span>Nether aktiviert</span>
+                    </label>
+                    <label class="checkbox-row" for="hosted-server-end-checkbox">
+                      <input id="hosted-server-end-checkbox" type="checkbox" checked>
+                      <span>End aktiviert</span>
+                    </label>
+                    <label class="checkbox-row server-host-eula" for="hosted-server-eula-checkbox">
+                      <input id="hosted-server-eula-checkbox" type="checkbox" checked>
+                      <span>Minecraft EULA akzeptiert</span>
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+            </section>
+          </div>
+        </section>
+
+        <section id="accounts" class="content-section">
+          <div class="section-header">
+            <h2>Accounts</h2>
+            <div class="section-actions">
+              <button id="add-microsoft-account-btn" class="btn btn-primary" type="button">Microsoft hinzufügen</button>
+            </div>
+          </div>
+
+          <div class="accounts-layout">
+            <section class="account-card">
+              <h3>Offline-Account</h3>
+              <div class="account-form">
+                <input id="offline-account-name-input" class="input-field" type="text" maxlength="16" placeholder="Spielername">
+                <button id="add-offline-account-btn" class="btn btn-secondary" type="button">Offline hinzufügen</button>
+              </div>
+            </section>
+
+            <section class="account-list-panel">
+              <div class="panel-header-inline">
+                <h3 class="mods-subtitle">Gespeicherte Accounts</h3>
+                <p id="accounts-status" class="panel-context-text">Noch keine Accounts geladen.</p>
+              </div>
+              <div id="accounts-list" class="accounts-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="skins" class="content-section">
+          <div class="section-header">
+            <h2>Skin Auswahl</h2>
+            <div class="section-actions">
+              <button id="choose-skin-btn" class="btn btn-primary">Skin importieren</button>
+            </div>
+          </div>
+
+          <div class="skin-layout">
+            <div class="skin-card skin-preview-card">
+              <div class="skin-preview-head-wrap">
+                <canvas id="skin-preview-canvas" class="skin-front-preview hidden" aria-hidden="true"></canvas>
+                <div id="skin-preview-empty" class="skin-preview-empty">Kein aktiver Skin</div>
+              </div>
+
+              <p id="skin-status" class="skin-status">Noch kein Skin ausgewählt.</p>
+
+              <div class="skin-actions">
+                <button id="clear-skin-btn" class="btn btn-secondary" disabled>Aktiven Skin entfernen</button>
+              </div>
+
+              <div class="saved-skins-panel">
+                <h4>Gespeicherte Skins</h4>
+                <div id="skins-list" class="skins-list"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="settings" class="content-section">
+          <div class="section-header settings-section-header">
+            <div>
+              <h2>Einstellungen</h2>
+              <p class="settings-section-subtitle">Design, Verhalten, Wartung und Speicherorte auf einen Blick.</p>
+            </div>
+          </div>
+
+          <div class="settings-container">
+            <nav class="settings-quick-nav" aria-label="Einstellungsbereiche">
+              <a href="#settings-appearance">Darstellung</a>
+              <a href="#settings-automation">Automatik</a>
+              <a href="#settings-maintenance">Wartung</a>
+              <a href="#settings-storage">Speicherorte</a>
+              <a href="#settings-extras">Extras</a>
+              <a href="#settings-cleanup">Bereinigung</a>
+            </nav>
+
+            <section id="settings-appearance" class="settings-group">
+              <div class="settings-group-header">
+                <span class="settings-group-index">01</span>
+                <div>
+                  <h3>Darstellung</h3>
+                  <p>Optik, Sprache und Sound des Launchers.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid">
+                <article class="setting-item setting-item-wide">
+                  <div class="setting-heading">
+                    <h4>Design-Farbe</h4>
+                    <p>Primärfarbe für Akzente, Buttons und Markierungen.</p>
+                  </div>
+
+                  <label class="setting-toggle appearance-mode-toggle">
+                    <input type="checkbox" id="appearance-mode-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>Hellmodus</strong>
+                      <small id="appearance-mode-status">Dunkelmodus aktiv</small>
+                    </span>
+                    <span class="theme-mode-icon" aria-hidden="true">
+                      <span class="theme-mode-icon-sun"></span>
+                      <span class="theme-mode-icon-moon"></span>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+
+                  <label class="setting-toggle rgb-mode-toggle">
+                    <input type="checkbox" id="rgb-mode-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>RGB-Modus</strong>
+                      <small>Farben wechseln automatisch durch das Spektrum.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+
+                  <div class="rgb-sliders">
+                    <div class="slider-group">
+                      <label for="red-slider">Rot: <span id="red-value">0</span></label>
+                      <input type="range" id="red-slider" class="rgb-slider" min="0" max="255" value="0">
+                    </div>
+
+                    <div class="slider-group">
+                      <label for="green-slider">Grün: <span id="green-value">255</span></label>
+                      <input type="range" id="green-slider" class="rgb-slider" min="0" max="255" value="217">
+                    </div>
+
+                    <div class="slider-group">
+                      <label for="blue-slider">Blau: <span id="blue-value">255</span></label>
+                      <input type="range" id="blue-slider" class="rgb-slider" min="0" max="255" value="255">
+                    </div>
+
+                    <div class="color-preview" id="color-preview"></div>
+                  </div>
+
+                  <label class="setting-toggle skin-color-toggle">
+                    <input type="checkbox" id="skin-color-sync-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>Farbe vom aktiven Skin übernehmen</strong>
+                      <small>Der Launcher nutzt automatisch eine passende Skin-Farbe.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+
+                </article>
+
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Sprache</h4>
+                    <p id="language-status">Automatisch an Systemsprache anpassen.</p>
+                  </div>
+                  <select id="language-select" class="input-field">
+                    <option value="auto">Automatisch (System)</option>
+                    <option value="de">Deutsch</option>
+                    <option value="en">English</option>
+                  </select>
+                </article>
+
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Sound</h4>
+                    <p>Feedback beim Klicken und Bedienen.</p>
+                  </div>
+                  <div class="sound-controls">
+                    <div class="slider-group">
+                      <label for="sound-volume-slider">Lautstärke: <span id="sound-volume-value">4%</span></label>
+                      <input type="range" id="sound-volume-slider" class="rgb-slider" min="0" max="100" value="4">
+                    </div>
+
+                    <div class="sound-select-row">
+                      <label class="sound-select-label" for="click-sound-select">
+                        Klick Sound
+                        <select id="click-sound-select" class="input-field">
+                          <option value="soft">Soft Tap</option>
+                          <option value="crystal">Crystal</option>
+                          <option value="wood">Wood</option>
+                          <option value="bubble">Bubble</option>
+                          <option value="paper">Paper</option>
+                        </select>
+                      </label>
+                      <button id="sound-preview-btn" class="btn btn-secondary" type="button" data-skip-click-sound="true">Anhören</button>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="settings-automation" class="settings-group">
+              <div class="settings-group-header">
+                <span class="settings-group-index">02</span>
+                <div>
+                  <h3>Automatik</h3>
+                  <p>Regeln für Mods.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid settings-grid-compact">
+                <article class="setting-item setting-toggle-card">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="auto-update-mods" checked>
+                    <span class="setting-toggle-copy">
+                      <strong>Mods automatisch updaten</strong>
+                      <small>Verwaltete Mods werden beim Prüfen aktuell gehalten.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                </article>
+
+                <article class="setting-item setting-toggle-card">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="require-dropped-mod-approval" checked>
+                    <span class="setting-toggle-copy">
+                      <strong>Eigene Mods einzeln akzeptieren</strong>
+                      <small>Unbekannte Drag-and-drop-JARs landen zuerst ausgeschaltet in der Modliste.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                </article>
+
+                <article class="setting-item setting-item-wide">
+                  <div class="setting-heading">
+                    <h4>Launcher automatisch updaten</h4>
+                    <p id="launcher-update-status">Der installierte Launcher prüft beim Start automatisch nach Updates.</p>
+                  </div>
+                  <div class="settings-actions">
+                    <button id="check-launcher-update-btn" class="btn btn-secondary" type="button">Jetzt prüfen</button>
+                    <button id="install-launcher-update-btn" class="btn btn-primary hidden" type="button">Update installieren</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="settings-maintenance" class="settings-group">
+              <div class="settings-group-header">
+                <span class="settings-group-index">03</span>
+                <div>
+                  <h3>Wartung</h3>
+                  <p>Diagnose, Logs und Tutorial.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid">
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Diagnose</h4>
+                    <p id="diagnostics-status">Logs und Integritätsprüfung bereit.</p>
+                  </div>
+                  <label class="setting-toggle setting-toggle-inline">
+                    <input type="checkbox" id="debug-mode-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>Debug-Modus</strong>
+                      <small>Schreibt ausführlichere Logs.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                  <div class="settings-actions">
+                    <button id="run-diagnostics-btn" class="btn btn-secondary" type="button">Diagnose ausführen</button>
+                    <button id="open-diagnostics-folder-btn" class="btn btn-secondary" type="button">Logs öffnen</button>
+                  </div>
+                </article>
+
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Tutorial</h4>
+                    <p>Starte die geführte Erklärung des Launchers erneut.</p>
+                  </div>
+                  <button id="replay-tutorial-btn" class="btn btn-secondary" type="button">Tutorial nochmal spielen</button>
+                </article>
+
+              </div>
+            </section>
+
+            <section id="settings-storage" class="settings-group">
+              <div class="settings-group-header">
+                <span class="settings-group-index">04</span>
+                <div>
+                  <h3>Speicherorte</h3>
+                  <p>Ordner und Pfade, die der Launcher verwendet.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid">
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Windows Name</h4>
+                    <p id="minecraft-path" class="setting-path">Wird geladen...</p>
+                  </div>
+                  <div class="setting-field-row">
+                    <input id="minecraft-windows-user-input" class="input-field" type="text" maxlength="80" placeholder="Windows Benutzername">
+                    <button id="change-path-btn" class="btn btn-secondary" disabled>Namen speichern</button>
+                  </div>
+                </article>
+
+                <article class="setting-item">
+                  <div class="setting-heading">
+                    <h4>Standard Mods-Ordner</h4>
+                    <p id="standard-mods-path" class="setting-path">Wird geladen...</p>
+                  </div>
+                  <div class="settings-actions">
+                    <button id="choose-standard-mods-path-btn" class="btn btn-secondary" type="button">Ordner wählen</button>
+                    <button id="reset-standard-mods-path-btn" class="btn btn-secondary" type="button">Zurücksetzen</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="settings-extras" class="settings-group">
+              <div class="settings-group-header">
+                <span class="settings-group-index">05</span>
+                <div>
+                  <h3>Extras</h3>
+                  <p>Optionale Bereiche und visuelle Effekte.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid settings-grid-compact">
+                <article id="hosting-beta-setting" class="setting-item setting-item-wide hidden">
+                  <div class="setting-heading">
+                    <h4>Hosting Tab</h4>
+                    <p id="hosting-beta-status">Hosting ist ausgeschaltet.</p>
+                  </div>
+                  <label id="hosting-beta-toggle-row" class="setting-toggle setting-toggle-inline">
+                    <input type="checkbox" id="hosting-beta-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>Hosting anzeigen</strong>
+                      <small>Blendet den Hosting-Tab in der Seitenleiste ein oder aus.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                </article>
+
+                <article class="setting-item setting-item-wide">
+                  <div class="setting-heading">
+                    <h4>Neon-Rahmen</h4>
+                    <p id="neon-frame-status">Neon-Rahmen sind ausgeschaltet.</p>
+                  </div>
+                  <label class="setting-toggle setting-toggle-inline">
+                    <input type="checkbox" id="neon-frame-toggle">
+                    <span class="setting-toggle-copy">
+                      <strong>Neon-Rahmen anzeigen</strong>
+                      <small>Aktiviert die leuchtenden Rahmen-Striche in Mausnähe.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                </article>
+              </div>
+            </section>
+
+            <section id="settings-cleanup" class="settings-group settings-group-danger">
+              <div class="settings-group-header">
+                <span class="settings-group-index">06</span>
+                <div>
+                  <h3>Bereinigung</h3>
+                  <p>Gefährliche Aufräumaktionen für Mod-Dateien.</p>
+                </div>
+              </div>
+
+              <div class="settings-grid">
+                <article class="setting-item setting-item-wide danger">
+                  <div class="setting-heading">
+                    <h4>Alle -2-Mods löschen</h4>
+                    <p id="numbered-mod-cleanup-status">Löscht jede Mod-JAR mit „-2.jar“ am Dateiende aus allen Launcher-Modordnern – auch Pflichtmods.</p>
+                  </div>
+                  <div class="settings-actions">
+                    <button id="cleanup-numbered-mods-btn" class="btn btn-danger" type="button">Alle -2-Mods löschen</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-label="Aktion läuft" aria-hidden="true">
+    <div class="loader-shell">
+      <div class="loader-brand-stack" aria-hidden="true">
+        <div class="loader-brand">Minecraft</div>
+      </div>
+      <div class="loader-welcome-line" aria-live="polite">
+        <span class="loader-welcome" hidden>Welcome back</span>
+        <span class="loader-player" hidden></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="update-overlay" class="update-overlay hidden" role="status" aria-live="assertive" aria-label="Launcher Update läuft" aria-hidden="true">
+    <div class="update-shell">
+      <div class="update-heading">
+        <span id="update-version-label" class="update-version-label">Launcher-Update</span>
+        <h2 id="update-title">Update wird vorbereitet</h2>
+        <p id="update-message">Bitte den Launcher geöffnet lassen. Die neue Version wird automatisch installiert.</p>
+      </div>
+      <div class="update-progress-row">
+        <div class="update-progress-track" aria-hidden="true">
+          <div id="update-progress" class="update-progress-bar"></div>
+        </div>
+        <span id="update-percent" class="update-percent">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirm-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="confirm-box">
+      <div class="confirm-icon" aria-hidden="true">!</div>
+      <div class="confirm-content">
+        <h3 id="confirm-title">Aktion bestätigen</h3>
+        <p id="confirm-message">Bist du sicher?</p>
+      </div>
+      <div class="confirm-actions">
+        <button id="confirm-cancel-btn" class="btn btn-secondary" type="button">Abbrechen</button>
+        <button id="confirm-ok-btn" class="btn btn-danger" type="button">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="router-password-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="router-password-title">
+    <div class="confirm-box">
+      <div class="confirm-icon" aria-hidden="true">R</div>
+      <div class="confirm-content">
+        <h3 id="router-password-title">Swisscom Internet-Box verbinden</h3>
+        <p>Gib das Admin-Passwort deiner Internet-Box ein. Es wird nicht gespeichert.</p>
+        <input id="router-password-input" class="input-field" type="password" autocomplete="current-password" placeholder="Router-Admin-Passwort">
+      </div>
+      <div class="confirm-actions">
+        <button id="router-password-cancel-btn" class="btn btn-secondary" type="button">Abbrechen</button>
+        <button id="router-password-ok-btn" class="btn btn-primary" type="button">Automatisch freigeben</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="skin-variant-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="skin-variant-title" aria-describedby="skin-variant-message">
+    <div class="confirm-box skin-variant-box">
+      <div class="confirm-icon" aria-hidden="true">S</div>
+      <div class="confirm-content">
+        <h3 id="skin-variant-title">Skin-Modell wählen</h3>
+        <p id="skin-variant-message">Wähle zuerst, ob dein Skin Slim oder Wide verwenden soll.</p>
+      </div>
+      <div class="skin-variant-actions">
+        <button id="skin-variant-slim-btn" class="btn btn-primary" type="button">Slim</button>
+        <button id="skin-variant-wide-btn" class="btn btn-secondary" type="button">Wide</button>
+      </div>
+      <button id="skin-variant-cancel-btn" class="btn btn-secondary skin-variant-cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+
+  <div id="tutorial-overlay" class="tutorial-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-message">
+    <div class="tutorial-blur-pane tutorial-blur-top" aria-hidden="true"></div>
+    <div class="tutorial-blur-pane tutorial-blur-right" aria-hidden="true"></div>
+    <div class="tutorial-blur-pane tutorial-blur-bottom" aria-hidden="true"></div>
+    <div class="tutorial-blur-pane tutorial-blur-left" aria-hidden="true"></div>
+    <div class="tutorial-blur-corner tutorial-blur-corner-top-left" aria-hidden="true"></div>
+    <div class="tutorial-blur-corner tutorial-blur-corner-top-right" aria-hidden="true"></div>
+    <div class="tutorial-blur-corner tutorial-blur-corner-bottom-left" aria-hidden="true"></div>
+    <div class="tutorial-blur-corner tutorial-blur-corner-bottom-right" aria-hidden="true"></div>
+    <div id="tutorial-highlight" class="tutorial-highlight" aria-hidden="true"></div>
+    <div id="tutorial-arrow" class="tutorial-arrow" aria-hidden="true"></div>
+
+    <div id="tutorial-card" class="tutorial-card" role="document">
+      <div class="tutorial-progress-row">
+        <span id="tutorial-step-label" class="tutorial-step-label">Schritt 1</span>
+        <button id="tutorial-skip-btn" class="tutorial-skip-btn" type="button">Tutorial überspringen</button>
+      </div>
+
+      <div class="tutorial-progress-track" aria-hidden="true">
+        <div id="tutorial-progress-bar" class="tutorial-progress-bar"></div>
+      </div>
+
+      <h3 id="tutorial-title">Tutorial</h3>
+      <p id="tutorial-message"></p>
+
+      <div id="tutorial-color-controls" class="tutorial-color-controls hidden">
+        <div class="slider-group">
+          <label for="tutorial-red-slider">Rot: <span id="tutorial-red-value">0</span></label>
+          <input type="range" id="tutorial-red-slider" class="rgb-slider" min="0" max="255" value="0">
+        </div>
+        <div class="slider-group">
+          <label for="tutorial-green-slider">Grün: <span id="tutorial-green-value">217</span></label>
+          <input type="range" id="tutorial-green-slider" class="rgb-slider" min="0" max="255" value="217">
+        </div>
+        <div class="slider-group">
+          <label for="tutorial-blue-slider">Blau: <span id="tutorial-blue-value">255</span></label>
+          <input type="range" id="tutorial-blue-slider" class="rgb-slider" min="0" max="255" value="255">
+        </div>
+        <div id="tutorial-color-preview" class="tutorial-color-preview"></div>
+        <p id="tutorial-color-required" class="tutorial-color-required">Du kannst die eingestellte Startfarbe behalten oder mit den Reglern ändern.</p>
+      </div>
+
+      <div class="tutorial-actions">
+        <button id="tutorial-prev-btn" class="btn btn-secondary" type="button">Zurück</button>
+        <button id="tutorial-next-btn" class="btn btn-primary" type="button">Weiter</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+
+  <div id="service-status-stack" class="service-status-stack" aria-live="polite" aria-label="Statusmeldungen"></div>
+
+  <script src="node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
