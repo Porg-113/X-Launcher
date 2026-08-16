@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#00191f">
   <title>X Launcher – Download</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -17,6 +17,10 @@
       <img src="icon.ico" alt="X Launcher Logo" width="48" height="48">
       <span>X Client</span>
     </a>
+    <section class="live-stats" aria-label="Live statistics">
+      <span><strong id="total-player-count">0</strong><small>All logins</small></span>
+      <span><strong id="active-player-count">0</strong><small>Active</small></span>
+    </section>
     <nav class="nav-links" aria-label="Community und Quellcode">
       <a class="social-link discord" href="https://discord.gg/9xTWsqeqY" target="_blank" rel="noreferrer" aria-label="X Client Discord" title="Discord">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.34A16.3 16.3 0 0 0 15.44 4l-.5 1.02a15.2 15.2 0 0 0-5.88 0L8.54 4A16.5 16.5 0 0 0 4.5 5.35C1.93 9.17 1.23 12.9 1.58 16.58a16.7 16.7 0 0 0 4.98 2.5l1.2-1.65a10.8 10.8 0 0 1-1.88-.9l.46-.36c3.63 1.69 7.57 1.69 11.15 0l.47.36c-.6.36-1.24.66-1.89.9l1.2 1.65a16.6 16.6 0 0 0 4.97-2.5c.42-4.27-.72-7.97-2.84-11.24ZM8.68 14.33c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.88 2.23-1.98 2.23Zm6.64 0c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.87 2.23-1.98 2.23Z"/></svg>
@@ -27,19 +31,6 @@
       <a class="github-link" href="https://github.com/Porg-113/X-Launcher" target="_blank" rel="noreferrer">GitHub ↗</a>
     </nav>
   </header>
-
-  <section class="live-stats" aria-label="Anonyme Live-Statistik">
-    <div class="stat-item">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.7 0-8.5 2.4-8.5 5.4 0 .9.7 1.6 1.6 1.6h13.8c.9 0 1.6-.7 1.6-1.6 0-3-3.8-5.4-8.5-5.4Z"/></svg>
-      <span><strong id="total-player-count">–</strong><small>Spieler insgesamt</small></span>
-    </div>
-    <div class="stat-separator"></div>
-    <div class="stat-item">
-      <span class="status-pulse" aria-hidden="true"></span>
-      <span><strong id="active-player-count">–</strong><small>gerade aktiv</small></span>
-    </div>
-    <p id="stats-status">Anonyme Live-Daten · Aktualisierung jede Minute</p>
-  </section>
 
   <main id="top">
     <section class="hero reveal">
@@ -66,6 +57,6 @@
   </main>
 
   <footer><span>© 2026 X Launcher</span><span>Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=13"></script>
+  <script src="download.js?v=14"></script>
 </body>
 </html>
