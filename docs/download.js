@@ -36,6 +36,60 @@ const revealObserver = new IntersectionObserver((entries) => {
 
 document.querySelectorAll(".reveal").forEach((element) => revealObserver.observe(element));
 
+const featureStory = document.querySelector(".feature-story");
+const featureCards = [...document.querySelectorAll(".features article")];
+const featureScenes = [
+  [
+    ["Modrinth integriert", "Suche und installiere Mods, Modpacks, Shader sowie Ressourcenpakete direkt im Launcher – passend zu deiner Fabric-Version."],
+    ["Profile und Skins", "Erstelle Profile mit getrennten Mods-Ordnern. Importiere eigene Skins und sieh sie direkt in der Vorschau an."],
+    ["Server und Updates", "Speichere Server-Favoriten und starte sie direkt. Installierte Launcher-Versionen suchen automatisch nach neuen Updates."]
+  ],
+  [
+    ["Microsoft-Anmeldung", "Melde dich über Microsoft und Xbox an oder verwende den Offline-Modus. Danach kannst du Minecraft direkt starten."],
+    ["Fabric-Versionen", "Wähle und verwalte unterschiedliche Minecraft-Versionen mit Fabric Mod Loader direkt in deinen Profilen."],
+    ["Mods automatisch anpassen", "Der Launcher erkennt verwaltete Mods und kann sie gemeinsam auf eine ausgewählte Minecraft-Version abstimmen."]
+  ],
+  [
+    ["Alles übersichtlich", "Mods, Shader und Ressourcenpakete erscheinen in getrennten Ansichten und lassen sich mit wenigen Klicks verwalten."],
+    ["Dein eigener Look", "Importiere einen Minecraft-Skin und kontrolliere ihn direkt in der integrierten dreidimensionalen Vorschau."],
+    ["Automatisch aktuell", "Die installierte Windows-Version prüft GitHub Releases auf Updates und installiert sie nach einem Neustart."]
+  ]
+];
+
+let activeFeatureScene = 0;
+let featureFramePending = false;
+
+function showFeatureScene(sceneIndex) {
+  if (sceneIndex === activeFeatureScene) return;
+  activeFeatureScene = sceneIndex;
+  featureCards.forEach((card, cardIndex) => {
+    const copy = card.querySelector(".feature-copy");
+    copy.classList.add("text-changing");
+    window.setTimeout(() => {
+      const [title, description] = featureScenes[sceneIndex][cardIndex];
+      copy.querySelector("h2").textContent = title;
+      copy.querySelector("p").textContent = description;
+      copy.classList.remove("text-changing");
+    }, reduceMotion ? 0 : 220);
+  });
+}
+
+function updateFeatureStory() {
+  featureFramePending = false;
+  if (!featureStory || window.innerWidth <= 760) return;
+  const bounds = featureStory.getBoundingClientRect();
+  const scrollRange = Math.max(1, featureStory.offsetHeight - window.innerHeight);
+  const progress = Math.min(1, Math.max(0, -bounds.top / scrollRange));
+  showFeatureScene(Math.min(featureScenes.length - 1, Math.floor(progress * featureScenes.length)));
+}
+
+window.addEventListener("scroll", () => {
+  if (featureFramePending) return;
+  featureFramePending = true;
+  requestAnimationFrame(updateFeatureStory);
+}, { passive: true });
+updateFeatureStory();
+
 fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
   headers: { Accept: "application/vnd.github+json" }
 })
