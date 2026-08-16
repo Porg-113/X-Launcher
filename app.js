@@ -6268,7 +6268,7 @@ class MinecraftLauncher {
     const minuteKey = this.getAnonymousStatsMinuteKey();
     if (this.anonymousStatsLastMinute === minuteKey) return;
     this.anonymousStatsLastMinute = minuteKey;
-    await this.hitAnonymousCounter(`xlauncher-prod-a7f3-active-${minuteKey}`);
+    await window.electronAPI.setAnonymousPresence(true);
   }
 
   startAnonymousStats() {
@@ -6294,11 +6294,8 @@ class MinecraftLauncher {
   closeAnonymousStatsSession() {
     if (!this.anonymousStatsActive || !this.anonymousStatsLastMinute) return;
     this.anonymousStatsActive = false;
-    const closeKey = `xlauncher-prod-a7f3-closed-${this.getAnonymousStatsMinuteKey()}`;
-    void fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(closeKey)}`, {
-      cache: 'no-store',
-      keepalive: true
-    }).catch(() => {});
+    this.anonymousStatsLastMinute = '';
+    void window.electronAPI.setAnonymousPresence(false).catch(() => {});
   }
 
   async launchMinecraft(options = {}) {
