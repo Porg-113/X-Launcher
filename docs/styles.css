@@ -18,6 +18,12 @@ body { margin: 0; background: radial-gradient(circle at 75% 8%, #003942 0, trans
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 900; letter-spacing: .03em; }
 .brand img { object-fit: contain; filter: drop-shadow(0 0 13px rgba(0, 255, 255, .55)); transition: transform .35s cubic-bezier(.2,.8,.2,1), filter .35s ease; }
 .brand:hover img { transform: rotate(-7deg) scale(1.08); filter: drop-shadow(0 0 22px rgba(0, 255, 255, .8)); }
+.nav-links { display: flex; align-items: center; gap: 10px; }
+.social-link { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; color: #9bc8cd; background: rgba(0, 255, 255, .035); transition: transform .25s ease, color .25s ease, border-color .25s ease, background .25s ease, box-shadow .25s ease; }
+.social-link svg { width: 19px; height: 19px; fill: currentColor; }
+.social-link:hover { transform: translateY(-3px); color: #fff; }
+.social-link.discord:hover { border-color: #5865f2; background: rgba(88,101,242,.2); box-shadow: 0 8px 25px rgba(88,101,242,.2); }
+.social-link.youtube:hover { border-color: #ff0000; background: rgba(255,0,0,.16); box-shadow: 0 8px 25px rgba(255,0,0,.16); }
 .github-link, .secondary { color: #a7d9de; text-decoration: none; font-weight: 700; }
 .github-link:hover, .secondary:hover { color: var(--cyan); }
 .hero { min-height: 700px; padding: 76px 0 88px; max-width: 980px; margin: auto; text-align: center; display: flex; flex-direction: column; align-items: center; }
