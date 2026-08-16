@@ -3,7 +3,6 @@ const primary = document.querySelector("#download");
 const info = document.querySelector("#release-info");
 const totalPlayerCount = document.querySelector("#total-player-count");
 const activePlayerCount = document.querySelector("#active-player-count");
-const statsStatus = document.querySelector("#stats-status");
 
 const counterBaseUrl = "https://countapi.mileshilliard.com/api/v1/get/";
 
@@ -30,10 +29,7 @@ async function updateLiveStats() {
     ]);
     totalPlayerCount.textContent = total.toLocaleString("de-CH");
     activePlayerCount.textContent = Math.max(currentActive, previousActive).toLocaleString("de-CH");
-    statsStatus.textContent = "Anonyme Live-Daten · Aktualisierung jede Minute";
-  } catch (_) {
-    statsStatus.textContent = "Live-Daten gerade nicht erreichbar";
-  }
+  } catch (_) {}
 }
 
 updateLiveStats();
