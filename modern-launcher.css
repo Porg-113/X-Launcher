@@ -136,10 +136,20 @@ html:not(.theme-light) #login-screen {
 }
 
 .header-social-links {
+  position: fixed;
+  right: 22px;
+  bottom: 18px;
+  z-index: 80;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 18px;
+  margin-left: 0;
+  padding: 7px;
+  border: 1px solid rgba(var(--primary-rgb), 0.13);
+  border-radius: 14px;
+  background: rgba(8, 9, 14, 0.72);
+  backdrop-filter: blur(18px) saturate(135%);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
   -webkit-app-region: no-drag;
 }
 
