@@ -15,7 +15,7 @@ body { margin: 0; background: radial-gradient(circle at 75% 8%, #003942 0, trans
 .glow-two { width: 420px; height: 420px; background: #00d8ff; opacity: .1; left: -240px; top: 520px; }
 .nav, main, footer { width: min(1120px, calc(100% - 40px)); margin: auto; }
 .nav { height: 100px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(0, 255, 255, .08); }
-.live-stats { width: min(720px, calc(100% - 32px)); margin: 20px auto 0; min-height: 82px; padding: 14px 24px; display: flex; align-items: center; justify-content: center; gap: 24px; border: 1px solid var(--line); border-radius: 18px; background: rgba(0, 255, 255, .045); box-shadow: inset 0 1px rgba(255,255,255,.05), 0 16px 45px rgba(0,0,0,.16); backdrop-filter: blur(16px); }
+.live-stats { width: min(720px, calc(100% - 32px)); margin: 20px auto 0; min-height: 82px; padding: 14px 24px; display: flex; align-items: center; justify-content: center; gap: 24px; border: 1px solid rgba(0,255,255,.48); border-radius: 18px; background: rgba(0, 255, 255, .09); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 0 34px rgba(0,255,255,.1), 0 16px 45px rgba(0,0,0,.16); backdrop-filter: blur(16px); }
 .stat-item { display: flex; align-items: center; gap: 11px; min-width: 155px; }
 .stat-item svg { width: 25px; height: 25px; fill: var(--cyan); filter: drop-shadow(0 0 9px rgba(0,255,255,.45)); }
 .stat-item strong, .stat-item small { display: block; }
