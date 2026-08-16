@@ -1417,7 +1417,8 @@ class MinecraftLauncher {
     this.startupLoadingStartedAt = Date.now();
     this.showLoading('Launcher wird vorbereitet...', {
       progress: 12,
-      playerName: this.user?.username || ''
+      playerName: this.user?.username || '',
+      waitForCompletion: true
     });
     this.setupEventListeners();
     this.setupNavigation();
@@ -12600,9 +12601,9 @@ class MinecraftLauncher {
       this.loadingWelcomeTimer = null;
     }
 
-    // Never let a stalled operation trap the user behind the loading overlay.
-    // Progress updates do not restart this deadline.
-    if (isNewPresentation) {
+    // Normal actions keep a safety deadline. Startup explicitly waits until
+    // every required dataset and preview has finished loading.
+    if (isNewPresentation && !options.waitForCompletion) {
       if (this.loadingAutoHideTimer) {
         clearTimeout(this.loadingAutoHideTimer);
       }
