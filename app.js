@@ -697,6 +697,9 @@ class MinecraftLauncher {
     this.user = null;
     this.anonymousStatsTimer = null;
     this.anonymousLoginCountPending = false;
+    this.anonymousStatsActive = false;
+    this.anonymousStatsLastMinute = '';
+    window.addEventListener('beforeunload', () => this.closeAnonymousStatsSession());
     this.mods = [];
     this.skinConfig = null;
     this.minecraftPath = null;
@@ -6261,18 +6264,16 @@ class MinecraftLauncher {
   }
 
   async sendAnonymousHeartbeat() {
-    if (!this.user) return;
+    if (!this.user || !this.anonymousStatsActive) return;
     const minuteKey = this.getAnonymousStatsMinuteKey();
-    const storageKey = 'xLauncherAnonymousLastHeartbeatV1';
-    try {
-      if (localStorage.getItem(storageKey) === minuteKey) return;
-      localStorage.setItem(storageKey, minuteKey);
-    } catch (_) {}
+    if (this.anonymousStatsLastMinute === minuteKey) return;
+    this.anonymousStatsLastMinute = minuteKey;
     await this.hitAnonymousCounter(`xlauncher-prod-a7f3-active-${minuteKey}`);
   }
 
   startAnonymousStats() {
     if (!this.user) return;
+    this.anonymousStatsActive = true;
     void this.recordAnonymousFirstLogin();
     void this.sendAnonymousHeartbeat();
     if (!this.anonymousStatsTimer) {
@@ -6283,9 +6284,21 @@ class MinecraftLauncher {
   }
 
   stopAnonymousStats() {
-    if (!this.anonymousStatsTimer) return;
-    window.clearInterval(this.anonymousStatsTimer);
-    this.anonymousStatsTimer = null;
+    this.closeAnonymousStatsSession();
+    if (this.anonymousStatsTimer) {
+      window.clearInterval(this.anonymousStatsTimer);
+      this.anonymousStatsTimer = null;
+    }
+  }
+
+  closeAnonymousStatsSession() {
+    if (!this.anonymousStatsActive || !this.anonymousStatsLastMinute) return;
+    this.anonymousStatsActive = false;
+    const closeKey = `xlauncher-prod-a7f3-closed-${this.getAnonymousStatsMinuteKey()}`;
+    void fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(closeKey)}`, {
+      cache: 'no-store',
+      keepalive: true
+    }).catch(() => {});
   }
 
   async launchMinecraft(options = {}) {
