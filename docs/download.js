@@ -1,6 +1,43 @@
 const repo = "Porg-113/X-Launcher";
 const primary = document.querySelector("#download");
 const info = document.querySelector("#release-info");
+const totalPlayerCount = document.querySelector("#total-player-count");
+const activePlayerCount = document.querySelector("#active-player-count");
+const statsStatus = document.querySelector("#stats-status");
+
+const counterBaseUrl = "https://countapi.mileshilliard.com/api/v1/get/";
+
+function counterMinuteKey(date) {
+  return date.toISOString().slice(0, 16).replace(/[-:t]/gi, "");
+}
+
+async function readCounter(key) {
+  const response = await fetch(`${counterBaseUrl}${encodeURIComponent(key)}`, { cache: "no-store" });
+  if (response.status === 404) return 0;
+  if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
+  const result = await response.json();
+  return Number.isFinite(Number(result.value)) ? Number(result.value) : 0;
+}
+
+async function updateLiveStats() {
+  const now = new Date();
+  const previousMinute = new Date(now.getTime() - 60 * 1000);
+  try {
+    const [total, currentActive, previousActive] = await Promise.all([
+      readCounter("xlauncher-prod-a7f3-total"),
+      readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(now)}`),
+      readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(previousMinute)}`)
+    ]);
+    totalPlayerCount.textContent = total.toLocaleString("de-CH");
+    activePlayerCount.textContent = Math.max(currentActive, previousActive).toLocaleString("de-CH");
+    statsStatus.textContent = "Anonyme Live-Daten · Aktualisierung jede Minute";
+  } catch (_) {
+    statsStatus.textContent = "Live-Daten gerade nicht erreichbar";
+  }
+}
+
+updateLiveStats();
+window.setInterval(updateLiveStats, 30 * 1000);
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
