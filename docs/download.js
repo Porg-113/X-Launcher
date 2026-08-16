@@ -22,18 +22,22 @@ async function updateLiveStats() {
   const now = new Date();
   const previousMinute = new Date(now.getTime() - 60 * 1000);
   try {
-    const [total, currentActive, previousActive] = await Promise.all([
+    const [total, currentActive, previousActive, currentClosed] = await Promise.all([
       readCounter("xlauncher-prod-a7f3-total"),
       readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(now)}`),
-      readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(previousMinute)}`)
+      readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(previousMinute)}`),
+      readCounter(`xlauncher-prod-a7f3-closed-${counterMinuteKey(now)}`)
     ]);
     totalPlayerCount.textContent = total.toLocaleString("de-CH");
-    activePlayerCount.textContent = Math.max(currentActive, previousActive).toLocaleString("de-CH");
+    const active = currentActive > 0
+      ? Math.max(0, currentActive - currentClosed)
+      : Math.max(0, previousActive - currentClosed);
+    activePlayerCount.textContent = active.toLocaleString("de-CH");
   } catch (_) {}
 }
 
 updateLiveStats();
-window.setInterval(updateLiveStats, 30 * 1000);
+window.setInterval(updateLiveStats, 5 * 1000);
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
