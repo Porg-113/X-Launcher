@@ -6405,30 +6405,12 @@ async function refreshServerFavoriteIcons(state, { force = false } = {}) {
 async function getServerFavoritesConfig() {
   const state = readServerFavoritesState();
   const enrichedState = await refreshServerFavoriteIcons(state);
-  let officialServers = [];
-  try {
-    officialServers = listServers(DEFAULT_MINECRAFT_DIR).map((server) => {
-      const parsed = parseServerAddress(server.address);
-      return {
-        id: `official-${serverIdFor(parsed.host, parsed.port)}`,
-        name: server.name,
-        host: parsed.host,
-        port: parsed.port,
-        iconDataUrl: sanitizeServerIconDataUrl(server.iconDataUrl),
-        motd: '',
-        official: true
-      };
-    }).filter((server) => server.host);
-  } catch (error) {
-    logger.warn('Official servers.dat could not be read', { error: serializeError(error) });
-  }
-  const customIds = new Set(enrichedState.servers.map((server) => serverIdFor(server.host, server.port)));
   return {
     success: true,
-    servers: [
-      ...enrichedState.servers,
-      ...officialServers.filter((server) => !customIds.has(serverIdFor(server.host, server.port)))
-    ]
+    // Only explicitly saved favorites belong in the launcher favorites UI.
+    // Minecraft's servers.dat may contain many normal multiplayer entries and
+    // must not be merged into this list automatically.
+    servers: enrichedState.servers
       .slice()
       .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))
   };
