@@ -695,6 +695,8 @@ const X_LAUNCHER_TRANSLATION_PATTERNS = [
 class MinecraftLauncher {
   constructor() {
     this.user = null;
+    this.anonymousStatsTimer = null;
+    this.anonymousLoginCountPending = false;
     this.mods = [];
     this.skinConfig = null;
     this.minecraftPath = null;
@@ -6180,6 +6182,7 @@ class MinecraftLauncher {
   }
 
   showLoginScreen() {
+    this.stopAnonymousStats();
     document.getElementById('login-screen').classList.add('active');
     document.getElementById('main-screen').classList.remove('active');
     this.scheduleScrollFadeUpdate();
@@ -6204,6 +6207,85 @@ class MinecraftLauncher {
     document.getElementById('main-screen').classList.add('active');
     this.updateUsernameDisplays();
     this.scheduleScrollFadeUpdate();
+    this.startAnonymousStats();
+  }
+
+  getAnonymousStatsAccountKey() {
+    const localIdentity = this.user?.uuid || this.user?.id || this.user?.username;
+    return localIdentity ? String(localIdentity).trim().toLowerCase() : '';
+  }
+
+  getAnonymousStatsMinuteKey(date = new Date()) {
+    return date.toISOString().slice(0, 16).replace(/[-:t]/gi, '');
+  }
+
+  async hitAnonymousCounter(key) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(key)}`, {
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
+      return true;
+    } catch (error) {
+      console.warn('Anonymous launcher statistics are temporarily unavailable:', error);
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async recordAnonymousFirstLogin() {
+    const accountKey = this.getAnonymousStatsAccountKey();
+    if (!accountKey || this.anonymousLoginCountPending) return;
+
+    const storageKey = 'xLauncherAnonymousCountedAccountsV1';
+    let countedAccounts = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (Array.isArray(stored)) countedAccounts = stored;
+    } catch (_) {}
+    if (countedAccounts.includes(accountKey)) return;
+
+    this.anonymousLoginCountPending = true;
+    const counted = await this.hitAnonymousCounter('xlauncher-prod-a7f3-total');
+    this.anonymousLoginCountPending = false;
+    if (!counted) return;
+
+    countedAccounts.push(accountKey);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...new Set(countedAccounts)]));
+    } catch (_) {}
+  }
+
+  async sendAnonymousHeartbeat() {
+    if (!this.user) return;
+    const minuteKey = this.getAnonymousStatsMinuteKey();
+    const storageKey = 'xLauncherAnonymousLastHeartbeatV1';
+    try {
+      if (localStorage.getItem(storageKey) === minuteKey) return;
+      localStorage.setItem(storageKey, minuteKey);
+    } catch (_) {}
+    await this.hitAnonymousCounter(`xlauncher-prod-a7f3-active-${minuteKey}`);
+  }
+
+  startAnonymousStats() {
+    if (!this.user) return;
+    void this.recordAnonymousFirstLogin();
+    void this.sendAnonymousHeartbeat();
+    if (!this.anonymousStatsTimer) {
+      this.anonymousStatsTimer = window.setInterval(() => {
+        void this.sendAnonymousHeartbeat();
+      }, 60 * 1000);
+    }
+  }
+
+  stopAnonymousStats() {
+    if (!this.anonymousStatsTimer) return;
+    window.clearInterval(this.anonymousStatsTimer);
+    this.anonymousStatsTimer = null;
   }
 
   async launchMinecraft(options = {}) {
