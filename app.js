@@ -3881,14 +3881,16 @@ class MinecraftLauncher {
     }
     this.updateLoadingState({ text: 'Server-Favoriten...', progress: 82 });
     await this.loadServerFavorites();
-    this.updateLoadingState({ text: 'Launcher-Daten...', progress: 86 });
+    this.updateLoadingState({ text: 'Skin...', progress: 85 });
+    await this.loadSkinConfig();
+    this.updateLoadingState({ text: 'Serverstatus...', progress: 88 });
+    await this.loadHostedServerStatus();
+    this.updateLoadingState({ text: 'Launcher-Daten...', progress: 90 });
     this.updateModrinthTypeUI();
     this.initializeRGBSliders();
     await Promise.allSettled([
       this.searchModrinthMods({ showLoading: false }),
-      this.loadSkinConfig(),
       this.loadAccounts(),
-      this.loadHostedServerStatus(),
       this.loadStandardModsPath(),
       this.loadDiagnosticSettings(),
       this.loadAuthConfig(),
@@ -9009,7 +9011,7 @@ class MinecraftLauncher {
       if (result.warning) {
         console.warn(result.warning);
       }
-      this.updateSkinUI();
+      await this.updateSkinUI();
       if (result.autoImportedAccountSkin) {
         this.showNotification(result.message || 'Dein aktueller Account-Skin wurde automatisch importiert.');
       }
@@ -9031,7 +9033,7 @@ class MinecraftLauncher {
     return this.skinConfig?.skins?.find((skin) => skin.id === skinId) || null;
   }
 
-  updateSkinUI() {
+  async updateSkinUI() {
     const statusEl = document.getElementById('skin-status');
     const clearButton = document.getElementById('clear-skin-btn');
 
@@ -9053,8 +9055,10 @@ class MinecraftLauncher {
     }
 
     this.renderSkinLibrary();
-    this.updateSkinHeads(activeSkin);
-    this.updateAdaptiveSkinColor(activeSkin);
+    await Promise.allSettled([
+      this.updateSkinHeads(activeSkin),
+      this.updateAdaptiveSkinColor(activeSkin)
+    ]);
   }
 
   async updateAdaptiveSkinColor(activeSkin) {
@@ -10018,26 +10022,30 @@ class MinecraftLauncher {
     this.skinPreviewAnimationFrame = requestAnimationFrame(animate);
   }
 
-  updateSkinHeads(activeSkin) {
+  async updateSkinHeads(activeSkin) {
     const emptyEl = document.getElementById('skin-preview-empty');
     const canvas = document.getElementById('skin-preview-canvas');
     const configured = Boolean(activeSkin?.previewDataUrl);
 
     this.setSkinHeadTexture('header-skin-head', activeSkin);
-    this.setDashboardSkinPreview(activeSkin).catch((error) => {
-      console.error('Dashboard skin preview error:', error);
+    const [dashboardResult, previewResult] = await Promise.allSettled([
+      this.setDashboardSkinPreview(activeSkin),
+      this.renderSkinPreview(activeSkin)
+    ]);
+    if (dashboardResult.status === 'rejected') {
+      console.error('Dashboard skin preview error:', dashboardResult.reason);
       const dashboardCanvas = document.getElementById('dashboard-skin-canvas');
       const dashboardEmpty = document.getElementById('dashboard-skin-empty');
       dashboardCanvas?.classList.add('hidden');
       dashboardCanvas?.setAttribute('aria-hidden', 'true');
       dashboardEmpty?.classList.remove('hidden');
       dashboardEmpty?.setAttribute('aria-hidden', 'false');
-    });
-    this.renderSkinPreview(activeSkin).catch((error) => {
-      console.error('Skin preview error:', error);
+    }
+    if (previewResult.status === 'rejected') {
+      console.error('Skin preview error:', previewResult.reason);
       canvas?.classList.add('hidden');
       emptyEl?.classList.remove('hidden');
-    });
+    }
 
     if (emptyEl) {
       emptyEl.classList.toggle('hidden', configured);
