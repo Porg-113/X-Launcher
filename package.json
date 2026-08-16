@@ -1,6 +1,6 @@
 {
   "name": "x-launcher",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Minecraft Fabric launcher for Windows",
   "author": "X",
   "main": "src/main.js",
