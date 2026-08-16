@@ -62,6 +62,9 @@ const hostedServerProcesses = new Map();
 const hostedServerUpnpMappings = new Map();
 const hostedServerFirewallRules = new Map();
 let activeMinecraftProcess = null;
+let launcherPresenceActive = false;
+let anonymousPresenceTimer = null;
+let anonymousPresenceLastMinute = '';
 let minecraftLaunchReserved = false;
 
 const PROJECT_ROOT_DIR = path.join(__dirname, '..');
@@ -1370,6 +1373,47 @@ function registerIpcHandler(channel, handler, options = {}) {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+function getAnonymousPresenceMinuteKey(date = new Date()) {
+  return date.toISOString().slice(0, 16).replace(/[-:t]/gi, '');
+}
+
+function isMinecraftProcessActive() {
+  return Boolean(activeMinecraftProcess && activeMinecraftProcess.exitCode === null && !activeMinecraftProcess.killed);
+}
+
+async function hitAnonymousPresenceCounter(key) {
+  try {
+    await fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(key)}`);
+  } catch (error) {
+    logger.warn('Anonymous presence counter is unavailable', { message: error.message });
+  }
+}
+
+function sendAnonymousPresenceHeartbeat() {
+  if (!launcherPresenceActive && !isMinecraftProcessActive()) return;
+  const minuteKey = getAnonymousPresenceMinuteKey();
+  if (anonymousPresenceLastMinute === minuteKey) return;
+  anonymousPresenceLastMinute = minuteKey;
+  void hitAnonymousPresenceCounter(`xlauncher-prod-a7f3-active-${minuteKey}`);
+}
+
+function refreshAnonymousPresence() {
+  const shouldBeActive = launcherPresenceActive || isMinecraftProcessActive();
+  if (shouldBeActive) {
+    sendAnonymousPresenceHeartbeat();
+    if (!anonymousPresenceTimer) anonymousPresenceTimer = setInterval(sendAnonymousPresenceHeartbeat, 15 * 1000);
+    return;
+  }
+  if (anonymousPresenceTimer) {
+    clearInterval(anonymousPresenceTimer);
+    anonymousPresenceTimer = null;
+  }
+  if (anonymousPresenceLastMinute) {
+    void hitAnonymousPresenceCounter(`xlauncher-prod-a7f3-closed-${getAnonymousPresenceMinuteKey()}`);
+    anonymousPresenceLastMinute = '';
+  }
+}
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
@@ -1401,8 +1445,10 @@ if (hasSingleInstanceLock) {
 }
 
 app.on('window-all-closed', () => {
+  launcherPresenceActive = false;
+  refreshAnonymousPresence();
   if (process.platform !== 'darwin') {
-    app.quit();
+    if (!isMinecraftProcessActive()) app.quit();
   }
 });
 
@@ -1417,6 +1463,11 @@ app.on('activate', () => {
 });
 
 registerIpcHandler('get-user-info', async () => readSavedUser(), { fallback: () => null, logArgs: false });
+registerIpcHandler('set-anonymous-presence', async (_event, active) => {
+  launcherPresenceActive = active === true;
+  refreshAnonymousPresence();
+  return { success: true, active: launcherPresenceActive || isMinecraftProcessActive() };
+}, { fallback: () => ({ success: false }), logArgs: false });
 registerIpcHandler('get-app-version', async () => ({
   success: true,
   version: app.getVersion()
@@ -11122,6 +11173,7 @@ async function startMinecraftProcess({ javaPath, versionId, versionData, minecra
     });
 
     activeMinecraftProcess = child;
+    refreshAnonymousPresence();
     minecraftLaunchReserved = false;
     sendMinecraftLifecycleEvent('minecraft-process-created', {
       pid: child.pid,
@@ -11148,6 +11200,8 @@ function monitorMinecraftExit(child, launchLogPath, minecraftDir, sourceWindow =
     if (activeMinecraftProcess === child) {
       activeMinecraftProcess = null;
     }
+    refreshAnonymousPresence();
+    if (getLiveLauncherWindows().length === 0) app.quit();
     minecraftLaunchReserved = false;
     sendMinecraftLifecycleEvent('minecraft-closed', {
       pid: child.pid,
@@ -11175,6 +11229,8 @@ function monitorMinecraftExit(child, launchLogPath, minecraftDir, sourceWindow =
     if (activeMinecraftProcess === child) {
       activeMinecraftProcess = null;
     }
+    refreshAnonymousPresence();
+    if (getLiveLauncherWindows().length === 0) app.quit();
     minecraftLaunchReserved = false;
   });
 }
