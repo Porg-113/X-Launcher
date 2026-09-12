@@ -37,6 +37,7 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteHtml, /id="site-menu-toggle"/u);
   assert.match(websiteHtml, />Über X Client</u);
   assert.match(websiteCss, /strong, b, h1, h2, h3, h4, h5, h6/u);
-  assert.match(websiteCss, /fonts\/Minecraft-Bold\.otf/u);
-  assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft-Bold.otf')));
+  assert.match(websiteCss, /fonts\/Minecraft\.otf/u);
+  assert.match(websiteCss, /body, body \* \{ font-weight: 400 !important; \}/u);
+  assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft.otf')));
 });
