@@ -1,0 +1,4544 @@
+    if (packsStatusEl) {
+      packsStatusEl.textContent = activePack
+        ? `${activePack.name} ist aktiv.`
+        : 'Launcher-Standard ist aktiv.';
+    }
+
+    this.renderStartPackSelect();
+    this.renderModsProfileVersionSelect();
+    this.updateModsCheckStatus();
+  }
+
+  renderModsProfileVersionSelect() {
+    const selectEl = document.getElementById('mods-profile-version-select');
+    if (!selectEl) return;
+    selectEl.classList.remove('hidden');
+    const versions = this.getProfileAvailableVersions();
+    const activeVersionId = this.getActiveContextVersionId();
+    selectEl.innerHTML = versions.length
+      ? versions.map((version) => (
+          `<option value="${this.escapeHtml(version.id)}" ${version.id === activeVersionId ? 'selected' : ''}>Minecraft ${this.escapeHtml(this.getVersionDisplayName(version))}</option>`
+        )).join('')
+      : '<option value="">Keine Version ab 1.8 verfügbar</option>';
+    selectEl.disabled = versions.length === 0;
+  }
+
+  async changeActiveProfileVersion(versionId) {
+    const normalizedVersionId = String(versionId || '').trim();
+    if (!normalizedVersionId || normalizedVersionId === this.getActiveContextVersionId()) return;
+    try {
+      const result = await window.electronAPI.setSelectedVersion(normalizedVersionId);
+      if (!result.success) {
+        this.renderModsProfileVersionSelect();
+        return;
+      }
+      this.selectedVersionId = result.selectedVersionId || normalizedVersionId;
+      await this.refreshPackContext({ reloadMods: false, reloadSearch: false });
+      this.loadMods({ skipManagedSync: true }).catch((error) => {
+        console.error('Background profile-version mod load failed:', error);
+      });
+    } catch (error) {
+      console.error('Profile version change failed:', error);
+      this.renderModsProfileVersionSelect();
+    }
+  }
+
+  renderPacks() {
+    const versionSelectEl = document.getElementById('pack-version-select');
+    const createButton = document.getElementById('create-pack-btn');
+    const packsListEl = document.getElementById('packs-list');
+    const versions = this.availableVersions || [];
+    const standardVersions = this.getStandardAvailableVersions();
+
+    if (versionSelectEl) {
+      versionSelectEl.innerHTML = '';
+
+      if (!versions.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Keine Fabric-Version verfügbar';
+        versionSelectEl.appendChild(option);
+        versionSelectEl.disabled = true;
+      } else {
+        versions.forEach((version) => {
+          const option = document.createElement('option');
+          option.value = version.id;
+          option.textContent = this.getVersionDisplayName(version);
+          option.selected = version.id === this.selectedVersionId;
+          versionSelectEl.appendChild(option);
+        });
+        versionSelectEl.disabled = false;
+      }
+    }
+
+    if (createButton) {
+      createButton.disabled = versions.length === 0;
+    }
+
+    if (!packsListEl) {
+      return;
+    }
+
+    const packs = this.packsConfig?.packs || [];
+    const activePackId = this.packsConfig?.activePackId || '';
+    const standardVersionId = this.packsConfig?.standardVersionId || (!activePackId ? this.selectedVersionId : '');
+    const standardVersionAllowed = standardVersions.some((version) => version.id === standardVersionId);
+    const standardVersion = standardVersionId && standardVersionAllowed ? this.getVersionDisplayName(standardVersionId) : '';
+    const standardCard = `
+      <article class="pack-card${activePackId ? '' : ' active'}">
+        <div class="pack-card-head">
+          <div>
+            <h4>Launcher-Standard</h4>
+            <p>Nutze den offiziellen .minecraft-Mods-Ordner ohne eigenes Profil.</p>
+          </div>
+          <div class="pack-head-actions">
+            ${activePackId ? '' : '<span class="pack-badge">Aktiv</span>'}
+            <details class="pack-more-menu">
+              <summary aria-label="Profil-Aktionen">•••</summary>
+              <div class="pack-more-popover">
+                <button type="button" data-pack-action="copy-settings" data-pack-id="">Einstellungen kopieren</button>
+                ${this.hasCopiedProfileSettings ? '<button type="button" data-pack-action="paste-settings" data-pack-id="">Einstellungen einfügen</button>' : ''}
+              </div>
+            </details>
+          </div>
+        </div>
+          <div class="pack-meta">
+            ${standardVersion ? `<span class="pack-tag">Fabric ${this.escapeHtml(standardVersion)}</span>` : ''}
+            <span class="pack-tag">Standard-Mods-Ordner</span>
+          </div>
+          <div class="pack-actions">
+          <button class="btn btn-secondary" data-pack-action="activate-standard" ${activePackId ? '' : 'disabled'}>Aktivieren</button>
+        </div>
+      </article>
+    `;
+
+    const packCards = packs.map((pack) => {
+      const isActive = pack.id === activePackId;
+      const versionName = this.getVersionDisplayName(pack.versionId);
+      return `
+        <article class="pack-card${isActive ? ' active' : ''}">
+          <div class="pack-card-head">
+            <div>
+              <h4>${this.escapeHtml(pack.name)}</h4>
+              <p>Eigener Mods-Ordner und genau eine Fabric-Version pro Profil.</p>
+            </div>
+            <div class="pack-head-actions">
+              ${isActive ? '<span class="pack-badge">Aktiv</span>' : ''}
+              <details class="pack-more-menu">
+                <summary aria-label="Profil-Aktionen">•••</summary>
+                <div class="pack-more-popover">
+                  <button type="button" data-pack-action="copy-settings" data-pack-id="${this.escapeHtml(pack.id)}" data-pack-name="${this.escapeHtml(pack.name)}">Einstellungen kopieren</button>
+                  ${this.hasCopiedProfileSettings ? `<button type="button" data-pack-action="paste-settings" data-pack-id="${this.escapeHtml(pack.id)}" data-pack-name="${this.escapeHtml(pack.name)}">Einstellungen einfügen</button>` : ''}
+                  <button type="button" data-pack-action="duplicate" data-pack-id="${this.escapeHtml(pack.id)}" data-pack-name="${this.escapeHtml(pack.name)}">Profil duplizieren</button>
+                  <button type="button" class="is-danger" data-pack-action="delete" data-pack-id="${this.escapeHtml(pack.id)}" data-pack-name="${this.escapeHtml(pack.name)}">Profil löschen</button>
+                </div>
+              </details>
+            </div>
+          </div>
+          <div class="pack-meta">
+            <span class="pack-tag">${String(pack.versionId || '').startsWith('fabric-loader-') ? 'Fabric ' : 'Vanilla '}${this.escapeHtml(versionName || pack.versionId)}</span>
+            <span class="pack-tag">eigener Mods-Ordner</span>
+          </div>
+          <div class="pack-actions">
+            <button class="btn btn-primary" data-pack-action="activate" data-pack-id="${this.escapeHtml(pack.id)}" data-pack-name="${this.escapeHtml(pack.name)}" ${isActive ? 'disabled' : ''}>Aktivieren</button>
+          </div>
+        </article>
+      `;
+    });
+
+    packsListEl.innerHTML = [standardCard, ...packCards].join('');
+    this.prepareMotionGroup(packsListEl, ':scope > *', 34);
+    this.renderStartPackSelect();
+  }
+
+  renderStartPackSelect() {
+    const startPackSelectEl = document.getElementById('start-pack-select');
+    if (!startPackSelectEl) {
+      return;
+    }
+
+    const packs = this.packsConfig?.packs || [];
+    const activePackId = this.packsConfig?.activePackId || this.launcherStatus?.activePackId || '';
+    const standardVersion = this.getStandardVersionDisplayName();
+    const options = [
+      {
+        id: '',
+        name: standardVersion ? `Launcher-Standard (${standardVersion})` : 'Launcher-Standard'
+      },
+      ...packs.map((pack) => {
+        const versionName = this.getVersionDisplayName(pack.versionId);
+        return {
+          id: pack.id,
+          name: versionName ? `${pack.name} (${versionName})` : pack.name
+        };
+      })
+    ];
+
+    startPackSelectEl.innerHTML = options.map((option) => (
+      `<option value="${this.escapeHtml(option.id)}" ${option.id === activePackId ? 'selected' : ''}>${this.escapeHtml(option.name)}</option>`
+    )).join('');
+    startPackSelectEl.disabled = options.length <= 1;
+  }
+
+  async refreshPackContext(options = {}) {
+    const reloadSearch = options.reloadSearch !== false;
+    const reloadMods = options.reloadMods !== false;
+    await Promise.all([
+      window.electronAPI.getLauncherStatus().then((status) => { this.launcherStatus = status; }),
+      this.loadAvailableVersions(),
+      this.loadPacks()
+    ]);
+    this.updateVersionStatus();
+    this.updateMinecraftStatus();
+    this.updateJavaStatus();
+    if (reloadMods) {
+      await this.loadMods({ force: Boolean(options.force) });
+    } else {
+      this.updateModsCheckStatus('Mod-Prüfung läuft im Hintergrund.');
+    }
+
+    if (reloadSearch) {
+      await this.searchModrinthMods({ showLoading: false });
+      return;
+    }
+
+    this.updateModrinthSearchStatus();
+    this.renderModrinthResults();
+  }
+
+  handlePacksListClick(event) {
+    const button = event.target.closest('[data-pack-action]');
+    if (!button) {
+      return;
+    }
+
+    const action = button.getAttribute('data-pack-action') || '';
+    const packId = button.getAttribute('data-pack-id') || '';
+    const packName = button.getAttribute('data-pack-name') || '';
+
+    if (action === 'activate-standard') {
+      this.setPackContext('', 'Launcher-Standard');
+      return;
+    }
+
+    if (action === 'activate' && packId) {
+      this.setPackContext(packId, packName);
+      return;
+    }
+
+    if (action === 'delete' && packId) {
+      this.deletePack(packId, packName);
+      return;
+    }
+
+    if (action === 'duplicate' && packId) {
+      this.duplicatePack(packId);
+      return;
+    }
+
+    if (action === 'copy-settings') {
+      this.copyProfileSettings(packId);
+      return;
+    }
+
+    if (action === 'paste-settings') {
+      this.pasteProfileSettings(packId, packName || 'Launcher-Standard');
+    }
+  }
+
+  async copyProfileSettings(packId) {
+    try {
+      const result = await window.electronAPI.copyProfileSettings(packId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hasCopiedProfileSettings = true;
+      this.renderPacks();
+      this.showNotification(result.message || 'Einstellungen kopiert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async duplicatePack(packId) {
+    try {
+      const result = await window.electronAPI.duplicatePack(packId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.packsConfig = { ...this.packsConfig, packs: result.packs || [], activePackId: result.activePackId };
+      this.renderPacks();
+      await this.refreshPackContext({ reloadSearch: false });
+      this.showNotification(result.message || 'Profil wurde dupliziert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async pasteProfileSettings(packId, packName) {
+    try {
+      const result = await window.electronAPI.pasteProfileSettings(packId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.showNotification(result.message || `Einstellungen in ${packName} eingefügt.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  handleStartPackChange(event) {
+    const selectEl = event.target;
+    const packId = selectEl?.value || '';
+    const activePackId = this.packsConfig?.activePackId || this.launcherStatus?.activePackId || '';
+
+    if (packId === activePackId) {
+      return;
+    }
+
+    const selectedOption = selectEl?.selectedOptions?.[0];
+    const packName = selectedOption?.textContent || (packId ? 'Profil' : 'Launcher-Standard');
+    this.setPackContext(packId, packName);
+  }
+
+  handlePacksListChange(event) {
+    const selectEl = event.target?.closest('[data-pack-action="set-standard-version"]');
+    if (!selectEl) {
+      return;
+    }
+
+    this.setStandardVersionFromPacks(selectEl.value);
+  }
+
+  async createPack() {
+    const nameInput = document.getElementById('pack-name-input');
+    const versionSelectEl = document.getElementById('pack-version-select');
+    const packName = nameInput?.value.trim() || '';
+    const versionId = versionSelectEl?.value || '';
+
+    if (!packName) {
+      this.showNotification('Bitte gib einen Profil-Namen ein.');
+      return;
+    }
+
+    if (!versionId) {
+      this.showNotification('Bitte wähle eine Fabric-Version für das Profil aus.');
+      return;
+    }
+
+    this.showLoading(`Erstelle Profil ${packName}...`);
+
+    try {
+      const result = await window.electronAPI.createPack(packName, versionId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      if (nameInput) {
+        nameInput.value = '';
+      }
+
+      await this.refreshPackContext();
+      this.showNotification(result.message || `Profil ${packName} wurde erstellt.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async setPackContext(packId, packName = '') {
+    this.showLoading(packId ? `Aktiviere ${packName || 'Profil'}...` : 'Aktiviere Launcher-Standard...');
+
+    try {
+      const result = await window.electronAPI.setActivePack(packId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      await this.refreshPackContext();
+      this.showNotification(result.message || `${packName || 'Profil'} aktiviert.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async setStandardVersionFromPacks(versionId) {
+    const normalizedVersionId = String(versionId || '').trim();
+    if (!normalizedVersionId) {
+      return;
+    }
+
+    this.showLoading(`Speichere Launcher-Standard ${this.getVersionDisplayName(normalizedVersionId)}...`);
+
+    try {
+      const result = await window.electronAPI.setStandardVersion(normalizedVersionId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      await this.refreshPackContext({ reloadMods: false, reloadSearch: false });
+      this.loadMods().catch((error) => console.error('Background mod reload failed:', error));
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      const syncText = result.syncPending ? ' Mods werden im Hintergrund geprüft.' : '';
+      this.showNotification(`Launcher-Standard nutzt jetzt Fabric ${this.getVersionDisplayName(result.selectedVersionId || normalizedVersionId)}.${syncText}${warningText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async deletePack(packId, packName) {
+    const confirmed = await this.showConfirm({
+      title: 'Profil löschen',
+      message: `Profil "${packName}" wirklich löschen? Die zugehörigen Profil-Daten werden entfernt.`,
+      confirmText: 'Profil löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.showLoading(`Lösche Profil ${packName}...`);
+
+    const previousPacksConfig = this.packsConfig;
+    const deletingActivePack = String(this.packsConfig?.activePackId || '') === String(packId);
+    this.packsConfig = {
+      ...(this.packsConfig || {}),
+      activePackId: deletingActivePack ? '' : (this.packsConfig?.activePackId || ''),
+      packs: (this.packsConfig?.packs || []).filter((pack) => pack.id !== packId)
+    };
+    if (deletingActivePack) {
+      this.mods = [];
+      this.installedModProjectIds = new Set();
+      this.modrinthLoadedResults = this.modrinthLoadedResults.map((project) => ({ ...project, installed: false }));
+      this.modrinthResults = this.modrinthResults.map((project) => ({ ...project, installed: false }));
+      this.renderMods();
+      this.renderModrinthResults({ force: true });
+    }
+    this.renderPacks();
+    this.renderStartPackSelect();
+    try {
+      const result = await window.electronAPI.deletePack(packId);
+      if (!result.success) {
+        this.packsConfig = previousPacksConfig;
+        this.renderPacks();
+        this.renderStartPackSelect();
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      await this.refreshPackContext({ reloadMods: true, reloadSearch: false });
+      const nameInput = document.getElementById('pack-name-input');
+      if (nameInput) {
+        nameInput.value = packName || '';
+        nameInput.focus();
+        nameInput.select();
+      }
+      this.showNotification(result.message || `${packName} wurde gelöscht.`);
+    } catch (error) {
+      this.packsConfig = previousPacksConfig;
+      this.renderPacks();
+      this.renderStartPackSelect();
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async loadSkinConfig() {
+    try {
+      const result = await window.electronAPI.getSkinConfig();
+      if (!result.success) {
+        return;
+      }
+
+      this.skinConfig = result;
+      this.skinConfigLoaded = true;
+      if (result.warning) {
+        console.warn(result.warning);
+      }
+      await this.updateSkinUI();
+      if (result.autoImportedAccountSkin) {
+        this.showNotification(result.message || 'Dein aktueller Account-Skin wurde automatisch importiert.');
+      }
+    } catch (error) {
+      console.error('Skin config error:', error);
+    }
+  }
+
+  async loadCapeConfig() {
+    if (this.capeConfigRequest) {
+      return this.capeConfigRequest;
+    }
+    this.capeConfigRequest = (async () => {
+      try {
+        const result = await window.electronAPI.getCapeConfig();
+        if (result?.success) {
+          this.capeConfig = result;
+          this.renderCapes();
+        }
+        return result;
+      } catch (error) {
+        console.error('Cape config error:', error);
+        return null;
+      } finally {
+        this.capeConfigRequest = null;
+      }
+    })();
+    return this.capeConfigRequest;
+  }
+
+  renderCapes() {
+    const activeId = this.capeConfig?.activeCapeId || '';
+    const renderCard = (cape, locked = false, custom = false) => {
+      const preview = cape.previewDataUrl || cape.url || '';
+      const previewStyle = preview ? ` style="--cape-preview:url('${this.escapeHtml(preview)}')"` : '';
+      const card = `<button class="cape-card ${cape.id === activeId ? 'active' : ''}" type="button" data-cape-id="${this.escapeHtml(cape.id)}" ${locked ? 'disabled' : ''}><div class="cape-card-preview"${previewStyle} aria-hidden="true"></div><span>${this.escapeHtml(cape.name)}</span></button>`;
+      return custom ? `<div class="cape-card-wrap">${card}<button class="cape-card-action cape-edit-btn" type="button" data-edit-cape-id="${this.escapeHtml(cape.id)}" aria-label="Edit ${this.escapeHtml(cape.name)}" title="Edit cape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4"/></svg></button><button class="cape-card-action cape-delete-btn" type="button" data-delete-cape-id="${this.escapeHtml(cape.id)}" aria-label="Delete ${this.escapeHtml(cape.name)}" title="Delete cape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5"/></svg></button></div>` : card;
+    };
+    const custom = document.getElementById('custom-capes-list');
+    const official = document.getElementById('official-capes-list');
+    const createButton = this.capeConfig?.canCreateCustomCapes
+      ? '<button class="cape-add-btn" type="button" data-open-cape-editor aria-label="Create new cape" title="Create new cape"><span>+</span><strong>New cape</strong></button>'
+      : '';
+    if (custom) custom.innerHTML = `${createButton}${(this.capeConfig?.custom || []).map((cape) => renderCard(cape, false, true)).join('')}`;
+    if (official) official.innerHTML = (this.capeConfig?.official || []).length ? this.capeConfig.official.map((cape) => renderCard(cape)).join('') : '<p class="cape-empty">No official capes found for this account.</p>';
+    const unequip = document.getElementById('unequip-cape-btn');
+    if (unequip) unequip.disabled = !activeId;
+  }
+
+  handleCapeClick(event) {
+    const button = event.target.closest('[data-cape-id]');
+    if (button && !button.disabled) this.activateCape(button.dataset.capeId || '');
+  }
+
+  async activateCape(capeId) {
+    const result = await window.electronAPI.setActiveCape(capeId);
+    if (!result?.success) {
+      this.showNotification('Error: ' + (result?.error || 'Cape could not be changed.'));
+      return;
+    }
+    await this.loadCapeConfig();
+    this.showNotification(capeId ? 'Cape equipped. Restart Minecraft to see it.' : 'Cape unequipped.');
+  }
+
+  async deleteCustomCape(capeId) {
+    const cape = (this.capeConfig?.custom || []).find((entry) => entry.id === capeId);
+    if (!cape) return;
+    const confirmed = await this.showConfirm({ title: 'Delete cape', message: `Delete “${cape.name}” permanently?`, confirmText: 'Delete' });
+    if (!confirmed) return;
+    const result = await window.electronAPI.deleteCustomCape(capeId);
+    if (!result?.success) {
+      this.showNotification('Error: ' + (result?.error || 'Cape could not be deleted.'));
+      return;
+    }
+    await this.loadCapeConfig();
+    this.showNotification(result.unequipped ? 'Active cape unequipped and deleted.' : 'Cape deleted.');
+  }
+
+  setupCapeCanvas() {
+    const canvas = document.getElementById('cape-editor-canvas');
+    if (!canvas) return;
+    this.capeTextureCanvas = document.createElement('canvas');
+    this.capeTextureCanvas.width = 64;
+    this.capeTextureCanvas.height = 32;
+    document.getElementById('cape-face-tabs')?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-cape-face]');
+      if (button) this.selectCapeFace(button.dataset.capeFace);
+    });
+    document.getElementById('cape-color-input')?.addEventListener('input', (event) => this.setCapeColor(event.target.value));
+    document.getElementById('cape-eraser-btn')?.addEventListener('click', () => this.setCapeEraser(!this.capeEraser));
+    document.getElementById('cape-undo-btn')?.addEventListener('click', () => this.undoCapeEdit());
+    document.getElementById('cape-redo-btn')?.addEventListener('click', () => this.redoCapeEdit());
+    document.getElementById('cape-elytra-toggle')?.addEventListener('change', (event) => this.setCapeElytra(event.target.checked));
+    const pixelFromEvent = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - rect.left) * canvas.width / rect.width))), y: Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - rect.top) * canvas.height / rect.height))) };
+    };
+    const paint = (point) => {
+      const face = this.getCapeFaces()[this.capeActiveFace];
+      const context = this.capeTextureCanvas?.getContext('2d');
+      if (!face || !context) return;
+      context.fillStyle = document.getElementById('cape-color-input')?.value || '#ffffff';
+      const previous = this.capeLastPixel || point;
+      const steps = Math.max(Math.abs(point.x - previous.x), Math.abs(point.y - previous.y), 1);
+      for (let step = 0; step <= steps; step += 1) {
+        const x = face.x + Math.round(previous.x + ((point.x - previous.x) * step / steps));
+        const y = face.y + Math.round(previous.y + ((point.y - previous.y) * step / steps));
+        if (this.capeEraser) context.clearRect(x, y, 1, 1);
+        else context.fillRect(x, y, 1, 1);
+      }
+      this.capeLastPixel = point;
+      this.refreshCapeEditor();
+    };
+    canvas.addEventListener('pointerdown', (event) => { this.pushCapeHistory(); this.capeDrawing = true; this.capeLastPixel = null; canvas.setPointerCapture(event.pointerId); paint(pixelFromEvent(event)); });
+    canvas.addEventListener('pointermove', (event) => { if (this.capeDrawing) paint(pixelFromEvent(event)); });
+    canvas.addEventListener('pointerup', () => { this.capeDrawing = false; this.capeLastPixel = null; });
+    canvas.addEventListener('pointercancel', () => { this.capeDrawing = false; this.capeLastPixel = null; });
+    document.getElementById('cape-editor')?.addEventListener('keydown', (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) this.redoCapeEdit(); else this.undoCapeEdit();
+      } else if (event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        this.redoCapeEdit();
+      }
+    });
+  }
+
+  async openCapeEditor(capeId = '') {
+    const editedCape = capeId ? (this.capeConfig?.custom || []).find((cape) => cape.id === capeId) : null;
+    if (capeId && !editedCape) {
+      this.showNotification('Cape could not be opened for editing.');
+      return;
+    }
+    this.capeEditingId = editedCape?.id || '';
+    const editor = document.getElementById('cape-editor');
+    if (editor && editor.parentElement !== document.body) document.body.appendChild(editor);
+    editor?.classList.remove('hidden');
+    editor?.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('cape-editor-open');
+    const color = document.getElementById('cape-color-input');
+    if (color) color.value = '#ffffff';
+    this.capeTextureCanvas?.getContext('2d')?.clearRect(0, 0, 64, 32);
+    this.setCapeEditorError('');
+    if (editedCape?.previewDataUrl && this.capeTextureCanvas) {
+      try {
+        const image = new Image();
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+          image.src = editedCape.previewDataUrl;
+        });
+        const context = this.capeTextureCanvas.getContext('2d');
+        context.imageSmoothingEnabled = false;
+        context.drawImage(image, 0, 0, 64, 32);
+      } catch (_error) {
+        this.setCapeEditorError('Cape texture could not be loaded.');
+      }
+    }
+    this.capeUndoStack = [];
+    this.capeRedoStack = [];
+    this.updateCapeHistoryButtons();
+    this.setCapeColor('#ffffff');
+    this.setCapeEraser(false);
+    this.setCapeElytra(Boolean(editedCape?.useAsElytra));
+    this.selectCapeFace('front');
+    const name = document.getElementById('cape-name-input');
+    if (name) name.value = editedCape?.name || '';
+    this.refreshCapeEditor();
+    document.getElementById('cape-name-input')?.focus();
+  }
+
+  closeCapeEditor() {
+    document.getElementById('cape-editor')?.classList.add('hidden');
+    document.getElementById('cape-editor')?.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('cape-editor-open');
+  }
+
+  getCapeFaces() {
+    return {
+      back: { x: 12, y: 1, w: 10, h: 16, label: 'Back · visible outside' },
+      front: { x: 1, y: 1, w: 10, h: 16, label: 'Front · facing the player' },
+      left: { x: 0, y: 1, w: 1, h: 16, label: 'Left edge' },
+      right: { x: 11, y: 1, w: 1, h: 16, label: 'Right edge' },
+      top: { x: 1, y: 0, w: 10, h: 1, label: 'Top edge' },
+      bottom: { x: 11, y: 0, w: 10, h: 1, label: 'Bottom edge' }
+    };
+  }
+
+  selectCapeFace(faceName) {
+    const face = this.getCapeFaces()[faceName];
+    const canvas = document.getElementById('cape-editor-canvas');
+    if (!face || !canvas) return;
+    this.capeActiveFace = faceName;
+    canvas.width = face.w;
+    canvas.height = face.h;
+    const scale = face.w === 1 ? 12 : face.h === 1 ? 18 : 12;
+    canvas.style.width = `${face.w * scale}px`;
+    canvas.style.height = `${face.h * scale}px`;
+    canvas.style.setProperty('--cape-pixel-size', `${scale}px`);
+    document.querySelectorAll('[data-cape-face]').forEach((button) => button.classList.toggle('active', button.dataset.capeFace === faceName));
+    const label = document.getElementById('cape-active-face-label');
+    if (label) label.textContent = face.label;
+    this.refreshCapeEditor();
+  }
+
+  refreshCapeEditor() {
+    const face = this.getCapeFaces()[this.capeActiveFace];
+    const canvas = document.getElementById('cape-editor-canvas');
+    if (!face || !canvas || !this.capeTextureCanvas) return;
+    const context = canvas.getContext('2d');
+    context.imageSmoothingEnabled = false;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(this.capeTextureCanvas, face.x, face.y, face.w, face.h, 0, 0, face.w, face.h);
+    [['cape-preview-back', 'back'], ['cape-preview-front', 'front']].forEach(([id, name]) => {
+      const preview = document.getElementById(id);
+      const previewFace = this.getCapeFaces()[name];
+      const previewContext = preview?.getContext('2d');
+      if (!previewContext) return;
+      previewContext.imageSmoothingEnabled = false;
+      previewContext.clearRect(0, 0, preview.width, preview.height);
+      previewContext.drawImage(this.capeTextureCanvas, previewFace.x, previewFace.y, previewFace.w, previewFace.h, 0, 0, preview.width, preview.height);
+    });
+  }
+
+  setCapeColor(color) {
+    const normalized = String(color || '#ffffff').toLowerCase();
+    const input = document.getElementById('cape-color-input');
+    if (input) input.value = normalized;
+    const current = document.getElementById('cape-current-color');
+    if (current) current.textContent = normalized.toUpperCase();
+    document.querySelectorAll('[data-cape-color]').forEach((button) => button.classList.toggle('active', button.dataset.capeColor === normalized));
+    this.setCapeEraser(false);
+  }
+
+  setCapeEraser(active) {
+    this.capeEraser = Boolean(active);
+    const button = document.getElementById('cape-eraser-btn');
+    button?.classList.toggle('active', this.capeEraser);
+    button?.setAttribute('aria-pressed', String(this.capeEraser));
+  }
+
+  setCapeElytra(active) {
+    this.capeUseAsElytra = Boolean(active);
+    const toggle = document.getElementById('cape-elytra-toggle');
+    if (toggle) toggle.checked = this.capeUseAsElytra;
+  }
+
+  pushCapeHistory() {
+    const context = this.capeTextureCanvas?.getContext('2d');
+    if (!context) return;
+    this.capeUndoStack.push(context.getImageData(0, 0, 64, 32));
+    if (this.capeUndoStack.length > 50) this.capeUndoStack.shift();
+    this.capeRedoStack = [];
+    this.updateCapeHistoryButtons();
+  }
+
+  undoCapeEdit() {
+    const context = this.capeTextureCanvas?.getContext('2d');
+    const previous = this.capeUndoStack.pop();
+    if (!context || !previous) return;
+    this.capeRedoStack.push(context.getImageData(0, 0, 64, 32));
+    context.putImageData(previous, 0, 0);
+    this.updateCapeHistoryButtons();
+    this.refreshCapeEditor();
+  }
+
+  redoCapeEdit() {
+    const context = this.capeTextureCanvas?.getContext('2d');
+    const next = this.capeRedoStack.pop();
+    if (!context || !next) return;
+    this.capeUndoStack.push(context.getImageData(0, 0, 64, 32));
+    context.putImageData(next, 0, 0);
+    this.updateCapeHistoryButtons();
+    this.refreshCapeEditor();
+  }
+
+  updateCapeHistoryButtons() {
+    const undo = document.getElementById('cape-undo-btn');
+    const redo = document.getElementById('cape-redo-btn');
+    if (undo) undo.disabled = this.capeUndoStack.length === 0;
+    if (redo) redo.disabled = this.capeRedoStack.length === 0;
+  }
+
+  setCapeEditorError(message) {
+    const error = document.getElementById('cape-editor-error');
+    if (!error) return;
+    error.textContent = message;
+    error.classList.toggle('hidden', !message);
+  }
+
+  async saveCustomCape() {
+    if (!this.capeTextureCanvas) return;
+    const name = document.getElementById('cape-name-input')?.value.trim() || '';
+    if (!name) {
+      this.setCapeEditorError('Please enter a name for your cape.');
+      document.getElementById('cape-name-input')?.focus();
+      return;
+    }
+    const result = await window.electronAPI.saveCustomCape(this.capeTextureCanvas.toDataURL('image/png'), name, this.capeUseAsElytra, this.capeEditingId);
+    if (!result?.success) {
+      this.setCapeEditorError(result?.error || 'Cape could not be saved.');
+      return;
+    }
+    this.closeCapeEditor();
+    await this.loadCapeConfig();
+    this.showNotification(result.updated ? 'Custom cape updated and equipped locally.' : 'Custom cape saved and equipped locally.');
+  }
+
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  getSkinById(skinId) {
+    return this.skinConfig?.skins?.find((skin) => skin.id === skinId) || null;
+  }
+
+  async updateSkinUI() {
+    const statusEl = document.getElementById('skin-status');
+    const clearButton = document.getElementById('clear-skin-btn');
+
+    if (!statusEl) {
+      return;
+    }
+
+    const activeSkin = this.skinConfig?.activeSkin || null;
+    const configured = Boolean(activeSkin);
+    const skinCount = this.skinConfig?.skins?.length || 0;
+
+    statusEl.textContent = configured
+      ? `Aktiver Skin: ${activeSkin.name}${skinCount > 1 ? ` · ${skinCount} gespeichert` : ''}`
+      : 'Noch kein Skin ausgewählt.';
+    statusEl.style.color = configured ? 'var(--success)' : 'var(--text-gray)';
+
+    if (clearButton) {
+      clearButton.disabled = !configured;
+    }
+
+    this.renderSkinLibrary();
+    await Promise.allSettled([
+      this.updateSkinHeads(activeSkin),
+      this.updateAdaptiveSkinColor(activeSkin)
+    ]);
+  }
+
+  async updateAdaptiveSkinColor(activeSkin) {
+    this.updateSkinColorSettingUI();
+    const requestId = ++this.skinColorRequestId;
+
+    if (!this.skinColorSyncEnabled || !activeSkin?.previewDataUrl) {
+      this.skinPrimaryColor = null;
+      this.applyTheme();
+      return;
+    }
+
+    try {
+      const color = await this.extractPrimaryColorFromSkin(activeSkin);
+      if (requestId !== this.skinColorRequestId) {
+        return;
+      }
+
+      this.skinPrimaryColor = color;
+      this.applyTheme();
+    } catch (error) {
+      if (requestId !== this.skinColorRequestId) {
+        return;
+      }
+
+      console.warn('Skin color sync error:', error);
+      this.skinPrimaryColor = null;
+      this.applyTheme();
+    }
+  }
+
+  async extractPrimaryColorFromSkin(activeSkin) {
+    const texture = await this.loadSkinTexture(activeSkin.previewDataUrl);
+    const width = texture.sourceCanvas.width;
+    const height = texture.sourceCanvas.height;
+    const imageData = texture.sourceContext.getImageData(0, 0, width, height).data;
+    const hueBinCount = 36;
+    const hueWindowRadius = 4;
+    const colorBins = Array.from({ length: hueBinCount }, () => ({
+      x: 0,
+      y: 0,
+      score: 0,
+      saturation: 0,
+      lightness: 0,
+      brightLightness: 0,
+      brightScore: 0
+    }));
+    const neutralBuckets = new Map();
+    const neutralBucketSize = 16;
+    const minColoredSaturation = 0.16;
+    const minUsableLuminance = 0.18;
+    const minUsableLightness = 0.22;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = ((y * width) + x) * 4;
+        const a = imageData[index + 3];
+        if (a < 150) {
+          continue;
+        }
+
+        const r = imageData[index];
+        const g = imageData[index + 1];
+        const b = imageData[index + 2];
+        const hsl = this.rgbToHsl(r, g, b);
+        const luminance = ((0.2126 * r) + (0.7152 * g) + (0.0722 * b)) / 255;
+        const alphaWeight = a / 255;
+        if (hsl.s >= minColoredSaturation) {
+          const hueIndex = Math.floor(hsl.h * hueBinCount) % hueBinCount;
+          const angle = hsl.h * Math.PI * 2;
+          const score = alphaWeight * (0.55 + hsl.s);
+          const bin = colorBins[hueIndex];
+
+          bin.x += Math.cos(angle) * score;
+          bin.y += Math.sin(angle) * score;
+          bin.score += score;
+          bin.saturation += hsl.s * score;
+          bin.lightness += hsl.l * score;
+          if (luminance >= minUsableLuminance && hsl.l >= minUsableLightness) {
+            bin.brightLightness += hsl.l * score;
+            bin.brightScore += score;
+          }
+          continue;
+        }
+
+        if (luminance >= minUsableLuminance && hsl.l >= minUsableLightness) {
+          const key = `${Math.floor(r / neutralBucketSize)}:${Math.floor(g / neutralBucketSize)}:${Math.floor(b / neutralBucketSize)}`;
+          const bucket = neutralBuckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+
+          bucket.r += r * alphaWeight;
+          bucket.g += g * alphaWeight;
+          bucket.b += b * alphaWeight;
+          bucket.count += alphaWeight;
+          neutralBuckets.set(key, bucket);
+        }
+      }
+    }
+
+    let bestHueCenter = -1;
+    let bestHueScore = 0;
+    for (let center = 0; center < hueBinCount; center += 1) {
+      let windowScore = 0;
+      for (let offset = -hueWindowRadius; offset <= hueWindowRadius; offset += 1) {
+        const index = (center + offset + hueBinCount) % hueBinCount;
+        windowScore += colorBins[index].score;
+      }
+
+      if (windowScore > bestHueScore) {
+        bestHueScore = windowScore;
+        bestHueCenter = center;
+      }
+    }
+
+    if (bestHueCenter >= 0 && bestHueScore > 0) {
+      const combined = {
+        x: 0,
+        y: 0,
+        score: 0,
+        saturation: 0,
+        lightness: 0,
+        brightLightness: 0,
+        brightScore: 0
+      };
+
+      for (let offset = -hueWindowRadius; offset <= hueWindowRadius; offset += 1) {
+        const index = (bestHueCenter + offset + hueBinCount) % hueBinCount;
+        const bin = colorBins[index];
+
+        combined.x += bin.x;
+        combined.y += bin.y;
+        combined.score += bin.score;
+        combined.saturation += bin.saturation;
+        combined.lightness += bin.lightness;
+        combined.brightLightness += bin.brightLightness;
+        combined.brightScore += bin.brightScore;
+      }
+
+      const hue = ((Math.atan2(combined.y, combined.x) / (Math.PI * 2)) + 1) % 1;
+      const saturation = combined.saturation / combined.score;
+      const lightness = combined.brightScore > 0
+        ? combined.brightLightness / combined.brightScore
+        : combined.lightness / combined.score;
+      const tuned = this.hslToRgb(
+        hue,
+        Math.min(0.86, Math.max(0.38, saturation)),
+        Math.min(0.68, Math.max(0.44, lightness))
+      );
+
+      return this.rgbToHex(tuned.r, tuned.g, tuned.b);
+    }
+
+    let bestNeutral = null;
+    neutralBuckets.forEach((bucket) => {
+      if (!bestNeutral || bucket.count > bestNeutral.count) {
+        bestNeutral = bucket;
+      }
+    });
+
+    if (!bestNeutral || bestNeutral.count <= 0) {
+      return this.primaryColor;
+    }
+
+    const r = Math.round(bestNeutral.r / bestNeutral.count);
+    const g = Math.round(bestNeutral.g / bestNeutral.count);
+    const b = Math.round(bestNeutral.b / bestNeutral.count);
+    const hsl = this.rgbToHsl(r, g, b);
+    const tuned = this.hslToRgb(hsl.h, hsl.s, Math.min(0.7, Math.max(0.44, hsl.l)));
+
+    return this.rgbToHex(tuned.r, tuned.g, tuned.b);
+  }
+
+  renderSkinLibrary() {
+    const container = document.getElementById('skins-list');
+    if (!container) {
+      return;
+    }
+
+    const skins = this.skinConfig?.skins || [];
+    if (!skins.length) {
+      container.innerHTML = '<p class="skins-empty">Noch keine Skins gespeichert.</p>';
+      this.prepareMotionGroup(container, ':scope > *', 34);
+      return;
+    }
+
+    container.innerHTML = skins.map((skin) => {
+      const variantLabel = skin.variant === 'slim' ? 'Slim' : 'Wide';
+      const canToggleVariant = skin.height === 64;
+      const activateDisabled = skin.active ? 'disabled' : '';
+      const toggleDisabled = canToggleVariant ? '' : 'disabled';
+
+      return `
+        <article class="saved-skin-chip${skin.active ? ' active' : ''}">
+          <img class="saved-skin-thumb" src="${skin.previewDataUrl}" alt="${this.escapeHtml(skin.name)}">
+          <div class="saved-skin-chip-content">
+            <div class="saved-skin-head">
+              <h5>${this.escapeHtml(skin.name)}</h5>
+              ${skin.active ? '<span class="saved-skin-badge">Aktiv</span>' : ''}
+            </div>
+            <p>${variantLabel}${skin.height === 64 ? '' : ' · 64x32'}</p>
+          </div>
+          <div class="saved-skin-actions">
+            <button class="btn btn-primary" data-skin-action="activate" data-skin-id="${skin.id}" ${activateDisabled}>Aktivieren</button>
+            <button class="btn btn-secondary" data-skin-action="toggle-variant" data-skin-id="${skin.id}" ${toggleDisabled}>${canToggleVariant ? variantLabel : 'Wide'}</button>
+            <button class="btn btn-secondary" data-skin-action="remove" data-skin-id="${skin.id}">Löschen</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+    this.prepareMotionGroup(container, ':scope > *', 34);
+  }
+
+  setSkinHeadTexture(elementId, activeSkin) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    if (!activeSkin?.previewDataUrl) {
+      element.style.removeProperty('--skin-image');
+      element.style.removeProperty('--skin-sheet-height-units');
+      element.classList.add('hidden');
+      return;
+    }
+
+    element.style.setProperty('--skin-image', `url("${activeSkin.previewDataUrl}")`);
+    element.style.setProperty('--skin-sheet-height-units', activeSkin.height === 32 ? '4' : '8');
+    element.classList.remove('hidden');
+  }
+
+  async setDashboardSkinPreview(activeSkin) {
+    const canvas = document.getElementById('dashboard-skin-canvas');
+    const emptyEl = document.getElementById('dashboard-skin-empty');
+
+    if (!canvas || !emptyEl) {
+      return;
+    }
+
+    // Use the same canvas renderer as the preview in the Skins tab. The
+    // skinview3d viewer used here previously had a different framing and could
+    // cut off the lower legs in shorter launcher windows.
+    this.disposeDashboardSkinViewer();
+
+    if (this.dashboardSkinAnimationFrame) {
+      cancelAnimationFrame(this.dashboardSkinAnimationFrame);
+      this.dashboardSkinAnimationFrame = null;
+    }
+
+    const dashboardPreviewScale = 24;
+    const rendered = await this.renderSkin3DPreviewCanvas(canvas, activeSkin, dashboardPreviewScale, 0);
+    canvas.setAttribute('aria-hidden', rendered ? 'false' : 'true');
+    emptyEl.classList.toggle('hidden', rendered);
+    emptyEl.setAttribute('aria-hidden', rendered ? 'true' : 'false');
+    this.updateUsernameDisplays();
+
+    if (!rendered) {
+      return;
+    }
+
+    this.dashboardSkinAnimationStartedAt = performance.now();
+    this.dashboardSkinLastFrameAt = 0;
+    this.dashboardSkinSpecialAnimation = null;
+    this.dashboardSkinNextSpecialAt = this.dashboardSkinAnimationStartedAt + 10000 + (Math.random() * 8000);
+    const animate = (timestamp) => {
+      this.dashboardSkinAnimationFrame = requestAnimationFrame(animate);
+      if (!document.getElementById('dashboard')?.classList.contains('active')) return;
+      if (this.dashboardSkinRenderInFlight || timestamp - this.dashboardSkinLastFrameAt < 33) return;
+      this.dashboardSkinLastFrameAt = timestamp;
+      this.dashboardSkinRenderInFlight = true;
+      this.renderSkin3DPreviewCanvas(
+        canvas,
+        activeSkin,
+        dashboardPreviewScale,
+        timestamp - this.dashboardSkinAnimationStartedAt,
+        { dashboardAnimations: true, absoluteTime: timestamp }
+      ).catch((error) => {
+        console.error('Dashboard skin animation frame failed:', error);
+      }).finally(() => {
+        this.dashboardSkinRenderInFlight = false;
+      });
+    };
+    this.dashboardSkinAnimationFrame = requestAnimationFrame(animate);
+  }
+
+  async setDashboardSkinViewerPreview(canvas, activeSkin) {
+    if (!canvas || !activeSkin?.previewDataUrl) {
+      this.disposeDashboardSkinViewer();
+      canvas?.classList.add('hidden');
+      return false;
+    }
+
+    if (this.dashboardSkinAnimationFrame) {
+      cancelAnimationFrame(this.dashboardSkinAnimationFrame);
+      this.dashboardSkinAnimationFrame = null;
+    }
+
+    if (!this.dashboardSkinLaunchExitActive) {
+      this.resetDashboardSkinLaunchExitAnimation();
+    }
+    const skinview = window.skinview3d;
+    if (!this.dashboardSkinViewer) {
+      const dashboardSkinPixelRatio = Math.min(2, Math.max(1.5, Number(window.devicePixelRatio) || 1));
+      this.dashboardSkinIdleAnimation = new skinview.IdleAnimation();
+      this.dashboardSkinIdleAnimation.speed = 0.16;
+      this.dashboardSkinIdleAnimation.addAnimation((player) => {
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.12);
+      });
+      this.dashboardSkinViewer = new skinview.SkinViewer({
+        canvas,
+        width: 460,
+        height: 720,
+        enableControls: false,
+        background: null,
+        fov: 34,
+        zoom: 0.74,
+        pixelRatio: dashboardSkinPixelRatio,
+        animation: this.dashboardSkinIdleAnimation
+      });
+      this.dashboardSkinViewer.renderer.setClearColor(0x000000, 0);
+      this.dashboardSkinViewer.globalLight.intensity = 2.6;
+      this.dashboardSkinViewer.cameraLight.intensity = 0.7;
+      this.configureDashboardSkinViewerCamera();
+    }
+
+    const nextSource = `${activeSkin.id || ''}:${activeSkin.previewDataUrl}`;
+    if (this.dashboardSkinViewerSource !== nextSource) {
+      this.dashboardSkinViewerSource = nextSource;
+      await this.dashboardSkinViewer.loadSkin(activeSkin.previewDataUrl, {
+        model: activeSkin.variant === 'slim' ? 'slim' : 'default'
+      });
+    }
+    if (!this.dashboardSkinLaunchExitActive) {
+      this.dashboardSkinViewer.animation = this.dashboardSkinIdleAnimation;
+      this.configureDashboardSkinViewerCamera();
+    }
+    this.dashboardSkinViewer.renderPaused = false;
+    canvas.classList.remove('hidden');
+    return true;
+  }
+
+  configureDashboardSkinViewerCamera() {
+    if (!this.dashboardSkinViewer) {
+      return;
+    }
+
+    const viewer = this.dashboardSkinViewer;
+    viewer.playerObject.rotation.y = -0.2;
+    viewer.playerObject.position.set(0, -3.5, 0);
+    viewer.playerObject.skin.head.rotation.x = 0;
+    viewer.playerObject.skin.head.rotation.y = 0;
+    viewer.playerObject.skin.head.rotation.z = 0;
+    viewer.camera.position.set(0, 7, 58);
+    viewer.camera.lookAt(0, 8, 0);
+    viewer.camera.updateProjectionMatrix();
+  }
+
+  disposeDashboardSkinViewer() {
+    if (this.dashboardSkinViewer) {
+      this.dashboardSkinViewer.dispose();
+      this.dashboardSkinViewer = null;
+      this.dashboardSkinIdleAnimation = null;
+      this.dashboardSkinWalkAnimation = null;
+      this.dashboardSkinViewerSource = '';
+    }
+  }
+
+  loadImageSource(source) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Skin-Vorschau konnte nicht geladen werden.'));
+      image.src = source;
+    });
+  }
+
+  async loadSkinTexture(source) {
+    if (this.skinTextureCache.has(source)) {
+      return this.skinTextureCache.get(source);
+    }
+
+    const image = await this.loadImageSource(source);
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = image.naturalWidth || image.width;
+    sourceCanvas.height = image.naturalHeight || image.height;
+    const sourceContext = sourceCanvas.getContext('2d');
+    if (!sourceContext) {
+      return null;
+    }
+
+    sourceContext.imageSmoothingEnabled = false;
+    sourceContext.drawImage(image, 0, 0);
+
+    const texture = {
+      sourceCanvas,
+      sourceContext
+    };
+    this.skinTextureCache.set(source, texture);
+    return texture;
+  }
+
+  async renderSkinFrontPreviewCanvas(canvas, activeSkin, scale = 8) {
+    if (!canvas) {
+      return false;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return false;
+    }
+
+    if (!activeSkin?.previewDataUrl) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.classList.add('hidden');
+      return false;
+    }
+
+    const image = await this.loadImageSource(activeSkin.previewDataUrl);
+    const isLegacy = activeSkin.height === 32;
+    const isSlim = activeSkin.variant === 'slim' && !isLegacy;
+    const armWidth = isSlim ? 3 : 4;
+    const previewWidth = armWidth * 2 + 8;
+    const legDrop = 0.5;
+    const previewHeight = 32 + Math.max(legDrop, 0);
+    const bodyLeft = armWidth;
+    const rightArmLeft = bodyLeft + 8;
+    const legY = 20 + legDrop;
+
+    canvas.width = previewWidth * scale;
+    canvas.height = previewHeight * scale;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = false;
+
+    const drawPart = (sx, sy, sw, sh, dx, dy) => {
+      context.drawImage(
+        image,
+        sx,
+        sy,
+        sw,
+        sh,
+        dx * scale,
+        dy * scale,
+        sw * scale,
+        sh * scale
+      );
+    };
+
+    drawPart(8, 8, 8, 8, bodyLeft, 0);
+    drawPart(20, 20, 8, 12, bodyLeft, 8);
+    drawPart(44, 20, armWidth, 12, 0, 8);
+    drawPart(isLegacy ? 44 : 36, isLegacy ? 20 : 52, armWidth, 12, rightArmLeft, 8);
+    drawPart(4, 20, 4, 12, bodyLeft, legY);
+    drawPart(isLegacy ? 4 : 20, isLegacy ? 20 : 52, 4, 12, bodyLeft + 4, legY);
+
+    drawPart(40, 8, 8, 8, bodyLeft, 0);
+    if (!isLegacy) {
+      drawPart(20, 36, 8, 12, bodyLeft, 8);
+      drawPart(44, 36, armWidth, 12, 0, 8);
+      drawPart(52, 52, armWidth, 12, rightArmLeft, 8);
+      drawPart(4, 36, 4, 12, bodyLeft, legY);
+      drawPart(4, 52, 4, 12, bodyLeft + 4, legY);
+    }
+
+    canvas.classList.remove('hidden');
+    return true;
+  }
+
+  async renderSkin3DPreviewCanvas(canvas, activeSkin, scale = 10, animationTime = 0, options = {}) {
+    // 1) Canvas und aktiven Skin prüfen.
+    if (!canvas) {
+      return false;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return false;
+    }
+
+    if (!activeSkin?.previewDataUrl) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.classList.add('hidden');
+      return false;
+    }
+
+    // 2) Skin-PNG als Textur laden. Die Textur kommt aus dem aktiven Skin.
+    const texture = await this.loadSkinTexture(activeSkin.previewDataUrl);
+    if (!texture) {
+      return false;
+    }
+    const { sourceContext } = texture;
+
+    // 3) Minecraft-Skin-Modell erkennen: Classic/Slim und alte 64x32-Skins.
+    const isLegacy = activeSkin.height === 32;
+    const isSlim = activeSkin.variant === 'slim' && !isLegacy;
+    const armWidth = isSlim ? 3 : 4;
+
+    // 4) 3D-Tiefe und Canvas-Größe berechnen.
+    const depth = {
+      x: Math.round(scale * 0.62),
+      y: -Math.round(scale * 0.42)
+    };
+    const modelLeft = 3.55;
+    const modelRight = 12.45 + (armWidth * 2);
+    const modelWidth = modelRight - modelLeft;
+    const legDrop = 0.5;
+    const modelHeight = 32 + Math.max(legDrop, 0);
+    const padding = scale * 5;
+    const animationPadding = scale * 1.7;
+    const stageWidth = Math.ceil((modelWidth * scale) + depth.x + (padding * 2) + (animationPadding * 2));
+    const stageHeight = Math.ceil((modelHeight * scale) - depth.y + (padding * 2) + (animationPadding * 2));
+
+    // 5) Canvas für den aktuellen Frame vorbereiten.
+    canvas.width = stageWidth;
+    canvas.height = stageHeight;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = false;
+
+    // 6) Modell mittig platzieren und leichte Idle-Bewegung berechnen.
+    const originX = ((stageWidth - (modelWidth * scale) - depth.x) / 2) - (modelLeft * scale);
+    const originY = ((stageHeight - (modelHeight * scale) + depth.y) / 2) - depth.y;
+    const sway = Math.sin(animationTime / 720) * 0.26;
+    const smallSway = Math.sin((animationTime / 720) + Math.PI) * 0.18;
+
+    // 7) Ruhige Standpose: alles bleibt am Körper, aber nicht komplett steif.
+    const pose = {
+      bodyRotation: 0,
+      headRotation: -2,
+      leftArmRotation: -5,
+      rightArmRotation: 6,
+      leftLegRotation: 2,
+      rightLegRotation: -2,
+      leftArmX: 3.85,
+      leftArmY: 8.15,
+      rightArmX: 12.15 + armWidth,
+      rightArmY: 8.2,
+      leftLegX: 4 + armWidth,
+      leftLegY: 20 + legDrop,
+      rightLegX: 8 + armWidth,
+      rightLegY: 20 + legDrop
+    };
+
+    // 8) Pixel-Farben aus der Skin-Textur lesen und cachen.
+    const rgbaCache = new Map();
+    const getPixel = (sx, sy) => {
+      const key = `${sx},${sy}`;
+      if (rgbaCache.has(key)) {
+        return rgbaCache.get(key);
+      }
+
+      const pixel = sourceContext.getImageData(sx, sy, 1, 1).data;
+      const value = {
+        r: pixel[0],
+        g: pixel[1],
+        b: pixel[2],
+        a: pixel[3] / 255
+      };
+      rgbaCache.set(key, value);
+      return value;
+    };
+    const getColor = (sx, sy, shade) => {
+      const pixel = getPixel(sx, sy);
+      if (pixel.a <= 0) {
+        return null;
+      }
+
+      const clampColor = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
+      return `rgba(${clampColor(pixel.r)}, ${clampColor(pixel.g)}, ${clampColor(pixel.b)}, ${pixel.a})`;
+    };
+
+    // 9) Einen Punkt innerhalb einer 3D-Fläche auf Canvas-Koordinaten abbilden.
+    const project = (point, xRatio, yRatio) => ({
+      x: point.topLeft.x + ((point.topRight.x - point.topLeft.x) * xRatio) + ((point.bottomLeft.x - point.topLeft.x) * yRatio),
+      y: point.topLeft.y + ((point.topRight.y - point.topLeft.y) * xRatio) + ((point.bottomLeft.y - point.topLeft.y) * yRatio)
+    });
+
+    // 10) Ein einzelnes Skin-Pixel als leicht überlappendes Viereck zeichnen.
+    const drawQuad = (points, color) => {
+      const center = points.reduce((sum, point) => ({
+        x: sum.x + point.x,
+        y: sum.y + point.y
+      }), { x: 0, y: 0 });
+      center.x /= points.length;
+      center.y /= points.length;
+      const expandedPoints = points.map((point) => {
+        const dx = point.x - center.x;
+        const dy = point.y - center.y;
+        const length = Math.hypot(dx, dy) || 1;
+
+        return {
+          x: point.x + ((dx / length) * 0.45),
+          y: point.y + ((dy / length) * 0.45)
+        };
+      });
+
+      context.beginPath();
+      context.moveTo(expandedPoints[0].x, expandedPoints[0].y);
+      context.lineTo(expandedPoints[1].x, expandedPoints[1].y);
+      context.lineTo(expandedPoints[2].x, expandedPoints[2].y);
+      context.lineTo(expandedPoints[3].x, expandedPoints[3].y);
+      context.closePath();
+      context.fillStyle = color;
+      context.fill();
+    };
+
+    // 11) Eine ganze Texturfläche Pixel für Pixel auf eine 3D-Fläche zeichnen.
+    const drawTexturedFace = (src, quad, shade) => {
+      for (let y = 0; y < src.h; y += 1) {
+        for (let x = 0; x < src.w; x += 1) {
+          const color = getColor(src.x + x, src.y + y, shade);
+          if (!color) {
+            continue;
+          }
+
+          const topLeft = project(quad, x / src.w, y / src.h);
+          const topRight = project(quad, (x + 1) / src.w, y / src.h);
+          const bottomRight = project(quad, (x + 1) / src.w, (y + 1) / src.h);
+          const bottomLeft = project(quad, x / src.w, (y + 1) / src.h);
+          drawQuad([topLeft, topRight, bottomRight, bottomLeft], color);
+        }
+      }
+    };
+
+    // 12) Aus Position/Größe/Rotation die sichtbaren 3D-Flächen bauen.
+    const makeFace = (x, y, w, h, inflate = 0, rotation = 0, pivot = null) => {
+      const radians = (rotation * Math.PI) / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const inflatedX = x - inflate;
+      const inflatedY = y - inflate;
+      const inflatedWidth = w + (inflate * 2);
+      const inflatedHeight = h + (inflate * 2);
+      const pivotX = pivot?.x ?? (inflatedX + (inflatedWidth / 2));
+      const pivotY = pivot?.y ?? (inflatedY + (inflatedHeight / 2));
+      const makePoint = (pointX, pointY) => {
+        const localX = pointX - pivotX;
+        const localY = pointY - pivotY;
+        const rotatedX = pivotX + ((localX * cos) - (localY * sin));
+        const rotatedY = pivotY + ((localX * sin) + (localY * cos));
+
+        return {
+          x: originX + (rotatedX * scale),
+          y: originY + (rotatedY * scale)
+        };
+      };
+      const topLeft = makePoint(inflatedX, inflatedY);
+      const topRight = makePoint(inflatedX + inflatedWidth, inflatedY);
+      const bottomRight = makePoint(inflatedX + inflatedWidth, inflatedY + inflatedHeight);
+      const bottomLeft = makePoint(inflatedX, inflatedY + inflatedHeight);
+
+      return {
+        front: {
+          topLeft,
+          topRight,
+          bottomLeft
+        },
+        right: {
+          topLeft: topRight,
+          topRight: { x: topRight.x + depth.x, y: topRight.y + depth.y },
+          bottomLeft: bottomRight
+        },
+        top: {
+          topLeft,
+          topRight,
+          bottomLeft: { x: topLeft.x + depth.x, y: topLeft.y + depth.y }
+        }
+      };
+    };
+
+    // 13) Einen Körperteil-Block zeichnen, inklusive zweiter Overlay-Layer.
+    const drawBox = ({ x, y, w, h, rotation = 0, pivot = null, front, right, top, overlayFront, overlayRight, overlayTop }) => {
+      const faces = makeFace(x, y, w, h, 0, rotation, pivot);
+      drawTexturedFace(top, faces.top, 1.08);
+      drawTexturedFace(right, faces.right, 0.72);
+      drawTexturedFace(front, faces.front, 1);
+
+      const overlayFaces = makeFace(x, y, w, h, 0.34, rotation, pivot);
+      if (overlayTop) {
+        drawTexturedFace(overlayTop, overlayFaces.top, 1.08);
+      }
+      if (overlayRight) {
+        drawTexturedFace(overlayRight, overlayFaces.right, 0.72);
+      }
+      if (overlayFront) {
+        drawTexturedFace(overlayFront, overlayFaces.front, 1);
+      }
+    };
+
+    const drawNameplate = ({ x, y, w, h, rotation = 0, pivot = null }) => {
+      if (!options.showNameplate) {
+        return;
+      }
+
+      const username = String(this.user?.username || 'Player').trim() || 'Player';
+      const headFaces = makeFace(x, y, w, h, 0.34, rotation, pivot);
+      const topRightBack = {
+        x: headFaces.top.topRight.x + depth.x,
+        y: headFaces.top.topRight.y + depth.y
+      };
+      const points = [
+        headFaces.top.topLeft,
+        headFaces.top.topRight,
+        headFaces.top.bottomLeft,
+        topRightBack
+      ];
+      const nameplateScale = Number(options.nameplateScale) || 0.58;
+      const anchorX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+      const pixelSize = Math.max(3, Math.round(scale * nameplateScale * 0.12));
+      const bob = Math.sin(animationTime / 900) * scale * 0.08;
+      const anchorY = Math.min(...points.map((point) => point.y)) - (scale * 1.75) + bob;
+      const glyphGap = pixelSize;
+      const glyphs = {
+        A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+        B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+        C: ['01111', '10000', '10000', '10000', '10000', '10000', '01111'],
+        D: ['11110', '10001', '10001', '10001', '10001', '10001', '11110'],
+        E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+        F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+        G: ['01111', '10000', '10000', '10111', '10001', '10001', '01111'],
+        H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+        I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
+        J: ['00111', '00010', '00010', '00010', '10010', '10010', '01100'],
+        K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+        L: ['10000', '10000', '10000', '10000', '10000', '10000', '11111'],
+        M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+        N: ['10001', '11001', '10101', '10011', '10001', '10001', '10001'],
+        O: ['01110', '10001', '10001', '10001', '10001', '10001', '01110'],
+        P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+        Q: ['01110', '10001', '10001', '10001', '10101', '10010', '01101'],
+        R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+        S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+        T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+        U: ['10001', '10001', '10001', '10001', '10001', '10001', '01110'],
+        V: ['10001', '10001', '10001', '10001', '01010', '01010', '00100'],
+        W: ['10001', '10001', '10001', '10101', '10101', '11011', '10001'],
+        X: ['10001', '01010', '01010', '00100', '01010', '01010', '10001'],
+        Y: ['10001', '01010', '01010', '00100', '00100', '00100', '00100'],
+        Z: ['11111', '00001', '00010', '00100', '01000', '10000', '11111'],
+        0: ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+        1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+        2: ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+        3: ['11110', '00001', '00001', '01110', '00001', '00001', '11110'],
+        4: ['10010', '10010', '10010', '11111', '00010', '00010', '00010'],
+        5: ['11111', '10000', '10000', '11110', '00001', '00001', '11110'],
+        6: ['01110', '10000', '10000', '11110', '10001', '10001', '01110'],
+        7: ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+        8: ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
+        9: ['01110', '10001', '10001', '01111', '00001', '00001', '01110'],
+        _: ['00000', '00000', '00000', '00000', '00000', '00000', '11111'],
+        '-': ['00000', '00000', '00000', '11111', '00000', '00000', '00000'],
+        '.': ['00000', '00000', '00000', '00000', '00000', '01100', '01100']
+      };
+      const getGlyph = (char) => {
+        if (char === ' ') {
+          return ['000', '000', '000', '000', '000', '000', '000'];
+        }
+        return glyphs[char.toUpperCase()] || glyphs._;
+      };
+      const measurePixelText = (text) => Array.from(text).reduce((width, char, index) => {
+        const glyph = getGlyph(char);
+        return width + (glyph[0].length * pixelSize) + (index > 0 ? glyphGap : 0);
+      }, 0);
+      const drawPixelText = (targetContext, text, x, y, color) => {
+        let cursorX = Math.round(x);
+        const baseY = Math.round(y);
+        targetContext.fillStyle = color;
+        Array.from(text).forEach((char, charIndex) => {
+          const glyph = getGlyph(char);
+          if (charIndex > 0) {
+            cursorX += glyphGap;
+          }
+          glyph.forEach((row, rowIndex) => {
+            Array.from(row).forEach((cell, colIndex) => {
+              if (cell === '1') {
+                targetContext.fillRect(cursorX + (colIndex * pixelSize), baseY + (rowIndex * pixelSize), pixelSize, pixelSize);
+              }
+            });
+          });
+          cursorX += glyph[0].length * pixelSize;
+        });
+      };
+
+      let label = username;
+      const maxTextWidth = Math.max(40, stageWidth - (scale * 5));
+      if (measurePixelText(label) > maxTextWidth) {
+        while (label.length > 3 && measurePixelText(`${label}...`) > maxTextWidth) {
+          label = label.slice(0, -1);
+        }
+        label = `${label}...`;
+      }
+
+      const textWidth = Math.ceil(measurePixelText(label));
+      const textHeight = pixelSize * 7;
+      const paddingX = Math.max(5, Math.round(pixelSize * 1.8));
+      const paddingY = Math.max(3, Math.round(pixelSize * 0.9));
+      const shadowOffset = Math.max(2, Math.round(pixelSize * 0.42));
+      const depthX = Math.max(2, Math.round(pixelSize * 0.42));
+      const depthY = Math.max(2, Math.round(pixelSize * 0.32));
+      const rectWidth = textWidth + (paddingX * 2) + depthX;
+      const rectHeight = textHeight + (paddingY * 2) + depthY;
+      const rectX = Math.round(anchorX - (rectWidth / 2));
+      const rectY = anchorY - (rectHeight / 2);
+      const textX = Math.round((rectWidth - textWidth) / 2);
+      const textY = Math.round((rectHeight - textHeight) / 2);
+      const nameplateCanvas = document.createElement('canvas');
+      nameplateCanvas.width = rectWidth;
+      nameplateCanvas.height = rectHeight;
+      const nameplateContext = nameplateCanvas.getContext('2d');
+      if (!nameplateContext) {
+        return;
+      }
+      nameplateContext.imageSmoothingEnabled = false;
+
+      context.save();
+      nameplateContext.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      nameplateContext.fillRect(0, 0, rectWidth, rectHeight);
+      nameplateContext.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      nameplateContext.fillRect(0, 0, rectWidth - depthX, Math.max(1, Math.round(pixelSize * 0.28)));
+      for (let layer = 3; layer >= 1; layer -= 1) {
+        const layerShade = 38 + (layer * 12);
+        const layerOffsetX = Math.round(depthX * layer * 0.55);
+        const layerOffsetY = Math.round(depthY * layer * 0.55);
+        drawPixelText(
+          nameplateContext,
+          label,
+          textX + layerOffsetX,
+          textY + layerOffsetY,
+          `rgba(${layerShade}, ${layerShade}, ${layerShade}, 0.98)`
+        );
+      }
+      drawPixelText(nameplateContext, label, textX + shadowOffset, textY + shadowOffset, 'rgba(18, 18, 18, 0.95)');
+      drawPixelText(nameplateContext, label, textX, textY, '#ffffff');
+      context.imageSmoothingEnabled = true;
+      context.drawImage(nameplateCanvas, rectX, rectY);
+      context.imageSmoothingEnabled = false;
+      context.restore();
+    };
+
+    // 14) UV-Positionen für rechte Arm-/Bein-Texturen, je nach Skin-Format.
+    const rightArmSourceY = isLegacy ? 20 : 52;
+    const rightArmTopY = isLegacy ? 16 : 48;
+    const rightLegSourceX = isLegacy ? 4 : 20;
+    const rightLegTopX = isLegacy ? 4 : 20;
+    const rightLegSourceY = isLegacy ? 20 : 52;
+    const rightLegTopY = isLegacy ? 16 : 48;
+
+    // 15) Linker Arm.
+    drawBox({
+      x: pose.leftArmX,
+      y: pose.leftArmY + sway,
+      w: armWidth,
+      h: 12,
+      rotation: pose.leftArmRotation,
+      pivot: { x: pose.leftArmX + armWidth, y: 8.9 },
+      front: { x: 44, y: 20, w: armWidth, h: 12 },
+      right: { x: 40, y: 20, w: 4, h: 12 },
+      top: { x: 44, y: 16, w: armWidth, h: 4 },
+      overlayFront: isLegacy ? null : { x: 44, y: 36, w: armWidth, h: 12 },
+      overlayRight: isLegacy ? null : { x: 40, y: 36, w: 4, h: 12 },
+      overlayTop: isLegacy ? null : { x: 44, y: 32, w: armWidth, h: 4 }
+    });
+
+    // 16) Körper.
+    drawBox({
+      x: 4 + armWidth,
+      y: 8,
+      w: 8,
+      h: 12,
+      rotation: pose.bodyRotation,
+      front: { x: 20, y: 20, w: 8, h: 12 },
+      right: { x: 16, y: 20, w: 4, h: 12 },
+      top: { x: 20, y: 16, w: 8, h: 4 },
+      overlayFront: isLegacy ? null : { x: 20, y: 36, w: 8, h: 12 },
+      overlayRight: isLegacy ? null : { x: 16, y: 36, w: 4, h: 12 },
+      overlayTop: isLegacy ? null : { x: 20, y: 32, w: 8, h: 4 }
+    });
+
+    // 17) Rechter Arm.
+    drawBox({
+      x: pose.rightArmX,
+      y: pose.rightArmY - sway,
+      w: armWidth,
+      h: 12,
+      rotation: pose.rightArmRotation,
+      pivot: { x: pose.rightArmX, y: 8.9 },
+      front: { x: 36, y: rightArmSourceY, w: armWidth, h: 12 },
+      right: { x: 32, y: rightArmSourceY, w: 4, h: 12 },
+      top: { x: 36, y: rightArmTopY, w: armWidth, h: 4 },
+      overlayFront: isLegacy ? null : { x: 52, y: 52, w: armWidth, h: 12 },
+      overlayRight: isLegacy ? null : { x: 48, y: 52, w: 4, h: 12 },
+      overlayTop: isLegacy ? null : { x: 52, y: 48, w: armWidth, h: 4 }
+    });
+
+    // 18) Linkes Bein.
+    drawBox({
+      x: pose.leftLegX,
+      y: pose.leftLegY + smallSway,
+      w: 4,
+      h: 12,
+      rotation: pose.leftLegRotation,
+      pivot: { x: pose.leftLegX + 2, y: pose.leftLegY },
+      front: { x: 4, y: 20, w: 4, h: 12 },
+      right: { x: 0, y: 20, w: 4, h: 12 },
+      top: { x: 4, y: 16, w: 4, h: 4 },
+      overlayFront: isLegacy ? null : { x: 4, y: 36, w: 4, h: 12 },
+      overlayRight: isLegacy ? null : { x: 0, y: 36, w: 4, h: 12 },
+      overlayTop: isLegacy ? null : { x: 4, y: 32, w: 4, h: 4 }
+    });
+
+    // 19) Rechtes Bein.
+    drawBox({
+      x: pose.rightLegX,
+      y: pose.rightLegY - smallSway,
+      w: 4,
+      h: 12,
+      rotation: pose.rightLegRotation,
+      pivot: { x: pose.rightLegX + 2, y: pose.rightLegY },
+      front: { x: rightLegSourceX, y: rightLegSourceY, w: 4, h: 12 },
+      right: { x: rightLegSourceX - 4, y: rightLegSourceY, w: 4, h: 12 },
+      top: { x: rightLegTopX, y: rightLegTopY, w: 4, h: 4 },
+      overlayFront: isLegacy ? null : { x: 4, y: 52, w: 4, h: 12 },
+      overlayRight: isLegacy ? null : { x: 0, y: 52, w: 4, h: 12 },
+      overlayTop: isLegacy ? null : { x: 4, y: 48, w: 4, h: 4 }
+    });
+
+    // 20) Kopf inklusive Hut-/Helm-Overlay.
+    const headBox = {
+      x: 4 + armWidth,
+      y: 0,
+      w: 8,
+      h: 8,
+      rotation: pose.headRotation,
+      pivot: { x: 8 + armWidth, y: 8 },
+      front: { x: 8, y: 8, w: 8, h: 8 },
+      right: { x: 16, y: 8, w: 8, h: 8 },
+      top: { x: 8, y: 0, w: 8, h: 8 },
+      overlayFront: { x: 40, y: 8, w: 8, h: 8 },
+      overlayRight: { x: 48, y: 8, w: 8, h: 8 },
+      overlayTop: { x: 40, y: 0, w: 8, h: 8 }
+    };
+    drawBox(headBox);
+    drawNameplate(headBox);
+
+    // 21) Fertigen Frame anzeigen.
+    canvas.classList.remove('hidden');
+    return true;
+  }
+
+  async renderSkinPreview(activeSkin) {
+    const canvas = document.getElementById('skin-preview-canvas');
+    const emptyEl = document.getElementById('skin-preview-empty');
+
+    if (!canvas || !emptyEl) {
+      return;
+    }
+
+    if (this.skinPreviewAnimationFrame) {
+      cancelAnimationFrame(this.skinPreviewAnimationFrame);
+      this.skinPreviewAnimationFrame = null;
+    }
+
+    const rendered = await this.renderSkin3DPreviewCanvas(canvas, activeSkin, 14, 0);
+    canvas.setAttribute('aria-hidden', rendered ? 'false' : 'true');
+    emptyEl.classList.toggle('hidden', rendered);
+    emptyEl.setAttribute('aria-hidden', rendered ? 'true' : 'false');
+
+    if (!rendered) {
+      return;
+    }
+
+    // A single frame is enough for the settings preview as well.
+  }
+
+  async updateSkinHeads(activeSkin) {
+    const emptyEl = document.getElementById('skin-preview-empty');
+    const canvas = document.getElementById('skin-preview-canvas');
+    const configured = Boolean(activeSkin?.previewDataUrl);
+
+    this.setSkinHeadTexture('header-skin-head', activeSkin);
+    const [dashboardResult, previewResult] = await Promise.allSettled([
+      this.setDashboardSkinPreview(activeSkin),
+      this.renderSkinPreview(activeSkin)
+    ]);
+    if (dashboardResult.status === 'rejected') {
+      console.error('Dashboard skin preview error:', dashboardResult.reason);
+      const dashboardCanvas = document.getElementById('dashboard-skin-canvas');
+      const dashboardEmpty = document.getElementById('dashboard-skin-empty');
+      dashboardCanvas?.classList.add('hidden');
+      dashboardCanvas?.setAttribute('aria-hidden', 'true');
+      dashboardEmpty?.classList.remove('hidden');
+      dashboardEmpty?.setAttribute('aria-hidden', 'false');
+    }
+    if (previewResult.status === 'rejected') {
+      console.error('Skin preview error:', previewResult.reason);
+      canvas?.classList.add('hidden');
+      emptyEl?.classList.remove('hidden');
+    }
+
+    if (emptyEl) {
+      emptyEl.classList.toggle('hidden', configured);
+    }
+  }
+
+  async handleSkinListClick(event) {
+    const button = event.target.closest('[data-skin-action]');
+    if (!button) {
+      return;
+    }
+
+    const skinId = button.getAttribute('data-skin-id') || '';
+    const action = button.getAttribute('data-skin-action') || '';
+    if (!skinId || !action) {
+      return;
+    }
+
+    if (action === 'activate') {
+      await this.activateSkin(skinId);
+      return;
+    }
+
+    if (action === 'toggle-variant') {
+      await this.toggleSkinVariant(skinId);
+      return;
+    }
+
+    if (action === 'remove') {
+      await this.removeSkin(skinId);
+    }
+  }
+
+  updateSkinLibraryStatus(message, tone = '') {
+    const statusEl = document.getElementById('skin-library-status');
+    if (!statusEl) {
+      return;
+    }
+
+    statusEl.textContent = this.localizeText(message);
+    statusEl.classList.remove('is-error', 'is-ok', 'is-warning');
+    if (tone) {
+      statusEl.classList.add(`is-${tone}`);
+    }
+  }
+
+  ensureSkinLibrarySuggestions() {
+    if (this.skinLibraryInitialSearchDone || this.skinLibraryIsLoading) {
+      return;
+    }
+
+    this.skinLibraryInitialSearchDone = true;
+    const inputEl = document.getElementById('skin-library-search-input');
+    if (inputEl && !inputEl.value.trim() && this.user?.username) {
+      inputEl.value = this.user.username;
+    }
+
+    this.searchOnlineSkins({ showLoading: false });
+  }
+
+  getOnlineSkinById(onlineSkinId) {
+    return this.onlineSkinResults.find((skin) => skin.id === onlineSkinId) || null;
+  }
+
+  handleOnlineSkinResultsClick(event) {
+    const button = event.target.closest('[data-online-skin-action]');
+    if (!button) {
+      return;
+    }
+
+    const action = button.getAttribute('data-online-skin-action') || '';
+    const onlineSkinId = button.getAttribute('data-online-skin-id') || '';
+    if (action === 'download' && onlineSkinId) {
+      this.downloadOnlineSkin(onlineSkinId);
+    }
+  }
+
+  async searchOnlineSkins(options = {}) {
+    if (typeof window.electronAPI?.searchOnlineSkins !== 'function') {
+      this.updateSkinLibraryStatus('Online-Skin-Bibliothek ist in diesem Build nicht verfügbar.', 'error');
+      return;
+    }
+
+    const inputEl = document.getElementById('skin-library-search-input');
+    const button = document.getElementById('skin-library-search-btn');
+    const query = inputEl?.value.trim() || '';
+    const previousButtonText = button?.textContent || '';
+
+    this.onlineSkinQuery = query;
+    this.onlineSkinResults = [];
+    this.skinLibraryIsLoading = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Sucht...';
+    }
+    this.updateSkinLibraryStatus(query ? `Suche passende Skins für "${query}"...` : 'Lade beliebte Skin-Vorschläge...');
+    this.renderOnlineSkinResults();
+
+    try {
+      const result = await window.electronAPI.searchOnlineSkins(query);
+      if (!result.success) {
+        this.onlineSkinResults = [];
+        this.updateSkinLibraryStatus('Fehler: ' + result.error, 'error');
+        this.renderOnlineSkinResults();
+        return;
+      }
+
+      this.onlineSkinResults = result.results || [];
+      const resultQuery = result.query || query;
+      if (this.onlineSkinResults.length) {
+        this.updateSkinLibraryStatus(
+          resultQuery
+            ? `${this.onlineSkinResults.length} Vorschläge passend zu "${resultQuery}".`
+            : `${this.onlineSkinResults.length} beliebte Skin-Vorschläge.`,
+          'ok'
+        );
+      } else {
+        this.updateSkinLibraryStatus(
+          resultQuery
+            ? `Keine passenden Online-Skins für "${resultQuery}" gefunden.`
+            : 'Keine Online-Skins gefunden.',
+          'warning'
+        );
+      }
+      this.renderOnlineSkinResults();
+    } catch (error) {
+      this.onlineSkinResults = [];
+      this.updateSkinLibraryStatus('Fehler: ' + error.message, 'error');
+      this.renderOnlineSkinResults();
+    } finally {
+      this.skinLibraryIsLoading = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = previousButtonText || 'Suchen';
+      }
+      this.renderOnlineSkinResults();
+    }
+  }
+
+  renderOnlineSkinResults() {
+    const container = document.getElementById('skin-library-results');
+    if (!container) {
+      return;
+    }
+
+    if (this.skinLibraryIsLoading && !this.onlineSkinResults.length) {
+      container.innerHTML = '<p class="skins-empty">Online-Skins werden geladen...</p>';
+      this.prepareMotionGroup(container, ':scope > *', 34);
+      return;
+    }
+
+    if (!this.onlineSkinResults.length) {
+      container.innerHTML = '<p class="skins-empty">Noch keine Online-Skins geladen.</p>';
+      this.prepareMotionGroup(container, ':scope > *', 34);
+      return;
+    }
+
+    container.innerHTML = this.onlineSkinResults.map((skin) => {
+      const variantLabel = skin.variant === 'slim' ? 'Slim' : 'Wide';
+      const sheetHeightUnits = skin.height === 32 ? '4' : '8';
+      const previewDataUrl = this.escapeHtml(skin.previewDataUrl || '');
+
+      return `
+        <article class="online-skin-card">
+          <div class="skin-head skin-library-head" style="--skin-image: url(${previewDataUrl}); --skin-sheet-height-units: ${sheetHeightUnits};" aria-hidden="true">
+            <div class="skin-head-layer base"></div>
+            <div class="skin-head-layer hat"></div>
+          </div>
+          <div class="online-skin-content">
+            <div class="saved-skin-head">
+              <h4>${this.escapeHtml(skin.name)}</h4>
+            </div>
+            <p>${this.escapeHtml(skin.sourceLabel || 'Skin-Bibliothek')} · ${variantLabel}</p>
+          </div>
+          <div class="online-skin-actions">
+            <button class="btn btn-primary" type="button" data-online-skin-action="download" data-online-skin-id="${this.escapeHtml(skin.id)}">Download</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+    this.prepareMotionGroup(container, ':scope > *', 34);
+  }
+
+  async downloadOnlineSkin(onlineSkinId) {
+    const onlineSkin = this.getOnlineSkinById(onlineSkinId);
+    if (!onlineSkin || typeof window.electronAPI?.downloadOnlineSkin !== 'function') {
+      return;
+    }
+
+    this.showLoading(`Lade ${onlineSkin.name} herunter...`);
+
+    try {
+      const result = await window.electronAPI.downloadOnlineSkin({
+        name: onlineSkin.name,
+        skinId: onlineSkin.skinId,
+        sourceUrl: onlineSkin.sourceUrl,
+        variant: onlineSkin.variant
+      });
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || `Skin ${onlineSkin.name} heruntergeladen.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async chooseSkin() {
+    this.showLoading('Importiere Skin...');
+
+    try {
+      const result = await window.electronAPI.chooseSkinFile();
+      if (result?.canceled) {
+        return;
+      }
+
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || 'Skin gespeichert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async activateSkin(skinId) {
+    const skin = this.getSkinById(skinId);
+    if (!skin) {
+      return;
+    }
+
+    this.showLoading(`Aktiviere ${skin.name}...`);
+
+    try {
+      const result = await window.electronAPI.setActiveSkin(skinId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || `Skin ${skin.name} aktiviert.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async toggleSkinVariant(skinId) {
+    const skin = this.getSkinById(skinId);
+    if (!skin || skin.height !== 64) {
+      return;
+    }
+
+    const nextVariant = skin.variant === 'slim' ? 'classic' : 'slim';
+    this.showLoading(`Setze Modell für ${skin.name}...`);
+
+    try {
+      const result = await window.electronAPI.setSkinVariant(skinId, nextVariant);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || `Modell für ${skin.name} aktualisiert.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async removeSkin(skinId) {
+    const skin = this.getSkinById(skinId);
+    if (!skin) {
+      return;
+    }
+
+    const confirmed = await this.showConfirm({
+      title: 'Skin löschen',
+      message: `Skin "${skin.name}" wirklich löschen?`,
+      confirmText: 'Skin löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.showLoading(`Entferne ${skin.name}...`);
+
+    try {
+      const result = await window.electronAPI.removeSkinFile(skinId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || `Skin ${skin.name} entfernt.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async clearSkin() {
+    if (!this.skinConfig?.activeSkin) {
+      this.showNotification('Es ist kein Skin gespeichert.');
+      return;
+    }
+
+    const confirmed = await this.showConfirm({
+      title: 'Aktiven Skin entfernen',
+      message: `Aktiven Skin "${this.skinConfig.activeSkin.name}" wirklich entfernen?`,
+      confirmText: 'Skin entfernen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.showLoading('Entferne aktiven Skin...');
+
+    try {
+      const result = await window.electronAPI.clearSkinFile();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.skinConfig = result;
+      this.updateSkinUI();
+      this.showNotification(result.message || 'Skin entfernt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async loadAvailableVersions(showNotification = false) {
+    try {
+      const result = await window.electronAPI.getAvailableVersions();
+      if (!result.success) {
+        this.showNotification(`Versionen konnten nicht geladen werden: ${result.error}`);
+        return;
+      }
+
+      this.availableVersions = result.versions || [];
+      this.selectedVersionId = result.selectedVersionId || '';
+      this.supportedMinecraftVersions = Array.isArray(result.supportedMinecraftVersions) && result.supportedMinecraftVersions.length
+        ? result.supportedMinecraftVersions
+        : this.supportedMinecraftVersions;
+      this.renderVersionOptions();
+      this.renderModrinthVersionFilter();
+      this.updateVersionStatus();
+      this.renderPacks();
+      this.updatePackContextUI();
+      this.updateModrinthSearchStatus();
+
+      if (showNotification) {
+        this.showNotification('Versionsliste aktualisiert.');
+      }
+    } catch (error) {
+      console.error('Version load error:', error);
+      this.showNotification('Fehler beim Laden der Versionen: ' + error.message);
+    }
+  }
+
+  renderVersionOptions() {
+    const selectEl = document.getElementById('version-select');
+    if (!selectEl) {
+      return;
+    }
+
+    selectEl.innerHTML = '';
+    const versions = this.getContextAvailableVersions();
+
+    if (versions.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = this.getActivePack()
+        ? 'Keine Versionen gefunden'
+        : `Keine unterstützte Version gefunden (${this.getSupportedMinecraftVersionsLabel()})`;
+      selectEl.appendChild(option);
+      return;
+    }
+
+    versions.forEach((version) => {
+      const option = document.createElement('option');
+      option.value = version.id;
+      option.textContent = this.getVersionDisplayName(version);
+      option.selected = version.id === this.selectedVersionId;
+      selectEl.appendChild(option);
+    });
+  }
+
+  renderModrinthVersionFilter() {
+    const selectEl = document.getElementById('modrinth-version-filter');
+    const searchRowEl = document.querySelector('.modrinth-search-row');
+    if (!selectEl) {
+      return;
+    }
+
+    const isModpackSearch = this.modrinthProjectType === 'modpack';
+    selectEl.classList.toggle('is-hidden', !isModpackSearch);
+    searchRowEl?.classList.toggle('has-version-filter', isModpackSearch);
+
+    if (!isModpackSearch) {
+      selectEl.disabled = true;
+      return;
+    }
+
+    const versions = this.getProfileAvailableVersions();
+    selectEl.innerHTML = '';
+    const selectedVersionId = this.getActiveModrinthPackTargetVersionId();
+
+    const anyVersionOption = document.createElement('option');
+    anyVersionOption.value = '';
+    anyVersionOption.textContent = 'Jede Version';
+    anyVersionOption.selected = !selectedVersionId;
+    selectEl.appendChild(anyVersionOption);
+
+    if (!versions.length) {
+      selectEl.disabled = false;
+      this.modrinthVersionFilterId = '';
+      return;
+    }
+
+    versions.forEach((version) => {
+      const option = document.createElement('option');
+      option.value = version.id;
+      option.textContent = this.getVersionDisplayName(version);
+      option.selected = version.id === selectedVersionId;
+      selectEl.appendChild(option);
+    });
+
+    selectEl.disabled = false;
+    this.modrinthVersionFilterId = selectedVersionId;
+  }
+
+  findSelectedVersion() {
+    const contextVersionId = this.getActiveContextVersionId();
+    return this.getContextAvailableVersions().find((version) => version.id === contextVersionId) || null;
+  }
+
+  extractMinecraftVersion(versionId) {
+    const normalizedVersionId = String(versionId || '').trim();
+    const match = normalizedVersionId.match(/^fabric-loader-[^-]+-(.+)$/u);
+    return match ? match[1] : normalizedVersionId;
+  }
+
+  getVersionDisplayName(version) {
+    if (!version) {
+      return '';
+    }
+
+    if (typeof version === 'string') {
+      return this.extractMinecraftVersion(version);
+    }
+
+    return version.name || version.minecraftVersion || this.extractMinecraftVersion(version.id);
+  }
+
+  findVersionById(versionId) {
+    const normalizedVersionId = String(versionId || '').trim();
+    return this.availableVersions.find((version) => version.id === normalizedVersionId) || null;
+  }
+
+  getVersionDisplayNameById(versionId) {
+    const normalizedVersionId = String(versionId || '').trim();
+    return this.getVersionDisplayName(this.findVersionById(normalizedVersionId) || normalizedVersionId);
+  }
+
+  getStandardVersionDisplayName() {
+    const standardVersionId = this.packsConfig?.standardVersionId || (!this.getActivePack() ? this.selectedVersionId : '');
+    return this.getVersionDisplayNameById(standardVersionId);
+  }
+
+  getSelectedVersionDisplayName() {
+    const contextVersionId = this.getActiveContextVersionId();
+    const selectedVersion = this.findSelectedVersion();
+    return this.getVersionDisplayName(selectedVersion || contextVersionId || this.launcherStatus?.selectedVersionName || this.launcherStatus?.selectedMinecraftVersion);
+  }
+
+  updateVersionStatus() {
+    const versionStatusEl = document.getElementById('version-status');
+    if (!versionStatusEl) {
+      return;
+    }
+
+    const selectedVersion = this.findSelectedVersion();
+    if (!selectedVersion) {
+      versionStatusEl.textContent = 'Keine Version ausgewählt';
+      return;
+    }
+
+    const stateLabel = selectedVersion.installed ? 'bereits installiert' : 'wird beim Download geladen';
+    versionStatusEl.textContent = `Fabric ${this.getVersionDisplayName(selectedVersion)} ist ${stateLabel}`;
+  }
+
+  async refreshVersions() {
+    this.showLoading('Lade Fabric-Versionen...');
+    try {
+      await this.refreshPackContext({ reloadSearch: false });
+      this.showNotification('Versionsliste aktualisiert.');
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async handleVersionChange() {
+    const selectEl = document.getElementById('version-select');
+    const versionId = selectEl?.value || '';
+    if (!versionId) {
+      return;
+    }
+
+    this.showLoading(`Speichere Fabric ${this.getVersionDisplayName(versionId)}...`);
+
+    try {
+      const result = await window.electronAPI.setSelectedVersion(versionId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.selectedVersionId = result.selectedVersionId;
+      await this.refreshPackContext({ reloadMods: false, reloadSearch: false });
+      this.loadMods().catch((error) => console.error('Background mod reload failed:', error));
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      const syncText = result.syncPending ? ' Mods werden im Hintergrund geprüft.' : '';
+      this.showNotification(`Fabric ${this.getVersionDisplayName(versionId)} ausgewählt.${syncText}${warningText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async downloadSelectedVersion() {
+    const selectEl = document.getElementById('version-select');
+    const versionId = selectEl?.value || this.selectedVersionId;
+    if (!versionId) {
+      this.showNotification('Bitte zuerst eine Version auswählen.');
+      return;
+    }
+
+    this.showLoading(`Lade Fabric ${this.getVersionDisplayName(versionId)} herunter...`);
+
+    try {
+      const result = await window.electronAPI.downloadVersion(versionId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.selectedVersionId = result.selectedVersionId;
+      await this.refreshPackContext();
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      this.showNotification(`${result.message}${warningText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  updateModrinthSearchStatus(customText = '') {
+    const statusEl = document.getElementById('modrinth-search-status');
+    if (!statusEl) {
+      return;
+    }
+
+    if (customText) {
+      statusEl.textContent = customText;
+      return;
+    }
+
+    const versionLabel = this.getSelectedVersionDisplayName();
+    const contextLabel = this.getCurrentContextLabel();
+    const typeConfig = this.getModrinthTypeConfig();
+    if (typeConfig.value === 'modpack') {
+      const modpackVersionLabel = this.getModrinthVersionFilterDisplayName();
+      statusEl.textContent = modpackVersionLabel
+        ? `Suche Modpacks auf Modrinth für Minecraft ${modpackVersionLabel}.`
+        : 'Suche Modpacks auf Modrinth für jede Version.';
+      return;
+    }
+
+    statusEl.textContent = versionLabel
+      ? `Suche ${typeConfig.pluralLabel.toLowerCase()} für ${contextLabel} auf Fabric ${versionLabel}.`
+      : 'Wähle zuerst eine Fabric-Version aus.';
+  }
+
+  formatDownloads(downloads) {
+    return new Intl.NumberFormat(this.language === 'de' ? 'de-DE' : 'en-US').format(Number(downloads || 0));
+  }
+
+  getModrinthTypeConfig(projectType = this.modrinthProjectType) {
+    if (projectType === 'modpack') {
+      return {
+        value: 'modpack',
+        pluralLabel: 'Modpacks',
+        singularLabel: 'Modpack',
+        placeholder: 'Auf Modrinth nach Modpacks suchen...',
+        installLabel: 'In Profil installieren'
+      };
+    }
+
+    if (projectType === 'shader') {
+      return {
+        value: 'shader',
+        pluralLabel: 'Shader',
+        singularLabel: 'Shader',
+        placeholder: 'Auf Modrinth nach Shadern suchen...',
+        installLabel: 'Herunterladen'
+      };
+    }
+
+    if (projectType === 'resourcepack') {
+      return {
+        value: 'resourcepack',
+        pluralLabel: 'Ressourcenpakete',
+        singularLabel: 'Ressourcenpaket',
+        placeholder: 'Auf Modrinth nach Ressourcenpaketen suchen...',
+        installLabel: 'Herunterladen'
+      };
+    }
+
+    if (projectType === 'datapack') {
+      return { value: 'datapack', pluralLabel: 'Datapacks', singularLabel: 'Datapack', placeholder: 'Auf Modrinth nach Datapacks suchen...', installLabel: 'Installieren' };
+    }
+
+    return {
+      value: 'mod',
+      pluralLabel: 'Mods',
+      singularLabel: 'Mod',
+      placeholder: 'Auf Modrinth nach Fabric-Mods suchen...',
+      installLabel: 'Installieren'
+    };
+  }
+
+  updateModrinthTypeUI() {
+    const typeConfig = this.getModrinthTypeConfig();
+    const inputEl = document.getElementById('modrinth-search-input');
+    const tabButtons = document.querySelectorAll('[data-modrinth-type]');
+
+    tabButtons.forEach((button) => {
+      const isActive = button.getAttribute('data-modrinth-type') === typeConfig.value;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    if (inputEl) {
+      inputEl.placeholder = typeConfig.placeholder;
+    }
+
+    this.renderModrinthVersionFilter();
+  }
+
+  handleModrinthTypeChange(event) {
+    const button = event.target?.closest('[data-modrinth-type]');
+    if (!button) {
+      return;
+    }
+
+    this.modrinthProjectType = button.getAttribute('data-modrinth-type') || 'mod';
+    this.resetModrinthSearchInput();
+    this.updateModrinthTypeUI();
+    this.updatePackContextUI();
+    this.searchModrinthMods({ showLoading: false, forceRefresh: true });
+  }
+
+  resetModrinthSearchInput() {
+    if (this.modrinthSearchDebounceTimer) {
+      window.clearTimeout(this.modrinthSearchDebounceTimer);
+      this.modrinthSearchDebounceTimer = null;
+    }
+
+    const inputEl = document.getElementById('modrinth-search-input');
+    if (inputEl) {
+      inputEl.value = '';
+    }
+    this.modrinthQuery = '';
+  }
+
+  handleModrinthVersionFilterChange() {
+    const selectEl = document.getElementById('modrinth-version-filter');
+    this.modrinthVersionFilterId = String(selectEl?.value || '').trim();
+
+    if (this.modrinthProjectType === 'modpack') {
+      this.searchModrinthMods({ showLoading: false });
+    }
+  }
+
+  scheduleModrinthInstantSearch() {
+    if (this.modrinthSearchDebounceTimer) {
+      window.clearTimeout(this.modrinthSearchDebounceTimer);
+    }
+
+    const inputEl = document.getElementById('modrinth-search-input');
+    this.modrinthQuery = inputEl?.value.trim() || '';
+    if (this.modrinthQuery && this.modrinthQuery.length < 2) {
+      this.applyModrinthLocalSearch();
+      const typeConfig = this.getModrinthTypeConfig();
+      this.updateModrinthSearchStatus(`Tippe noch ein Zeichen, um ${typeConfig.pluralLabel.toLowerCase()} auf Modrinth zu suchen.`);
+      return;
+    }
+
+    const cachedTarget = this.modrinthProjectType === 'modpack'
+      ? this.getActiveModrinthPackSearchTarget()
+      : this.getActiveModrinthTarget();
+    const cachedResult = this.getCachedModrinthSearch(this.modrinthQuery, 0, cachedTarget);
+    if (cachedResult) {
+      this.applyModrinthSearchResult(cachedResult, { append: false, fromCache: true });
+      this.modrinthSearchDebounceTimer = window.setTimeout(() => {
+        this.modrinthSearchDebounceTimer = null;
+        this.searchModrinthMods({ showLoading: false });
+      }, 1000);
+      return;
+    }
+
+    this.modrinthSearchDebounceTimer = window.setTimeout(() => {
+      this.modrinthSearchDebounceTimer = null;
+      this.searchModrinthMods({ showLoading: false });
+    }, 1000);
+  }
+
+  hideModrinthSuggestions() {
+    const container = document.getElementById('modrinth-suggestions');
+    if (!container) return;
+    container.classList.add('hidden');
+    container.innerHTML = '';
+  }
+
+  updateModrinthSuggestions() {
+    // Autocomplete intentionally disabled. Search matches are rendered only in
+    // the virtualized result list after the debounce interval.
+    this.hideModrinthSuggestions();
+  }
+
+  submitModrinthSearch() {
+    if (this.modrinthSearchDebounceTimer) {
+      window.clearTimeout(this.modrinthSearchDebounceTimer);
+      this.modrinthSearchDebounceTimer = null;
+    }
+
+    const inputEl = document.getElementById('modrinth-search-input');
+    const query = inputEl?.value.trim() || '';
+    if (query && query.length < 2) {
+      this.modrinthQuery = query;
+      this.applyModrinthLocalSearch({ forceRender: true });
+      const typeConfig = this.getModrinthTypeConfig();
+      this.updateModrinthSearchStatus('Bitte gib mindestens 2 Zeichen ein.');
+      return null;
+    }
+
+    return this.searchModrinthMods({
+      forceRefresh: true,
+      showLoading: false
+    });
+  }
+
+  normalizeModrinthSearchText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  buildModrinthSearchIndex() {
+    this.modrinthSearchIndex = this.modrinthLoadedResults.map((project, index) => {
+      const title = this.normalizeModrinthSearchText(project.title);
+      const slug = this.normalizeModrinthSearchText(project.slug);
+      const author = this.normalizeModrinthSearchText(project.author);
+      const categories = Array.isArray(project.categories)
+        ? project.categories.map((category) => this.normalizeModrinthSearchText(category)).join(' ')
+        : '';
+      const description = this.normalizeModrinthSearchText(project.description);
+
+      return {
+        index,
+        title,
+        searchable: `${title} ${slug} ${author} ${categories} ${description}`
+      };
+    });
+  }
+
+  applyModrinthLocalSearch(options = {}) {
+    const inputEl = document.getElementById('modrinth-search-input');
+    const query = inputEl?.value.trim() || '';
+    const normalizedQuery = this.normalizeModrinthSearchText(query);
+    this.modrinthQuery = query;
+
+    if (!normalizedQuery) {
+      this.modrinthResults = this.modrinthLoadedResults;
+    } else {
+      const startsWithMatches = [];
+      const containsMatches = [];
+      this.modrinthSearchIndex.forEach((entry) => {
+        if (!entry.searchable.includes(normalizedQuery)) {
+          return;
+        }
+
+        if (entry.title.startsWith(normalizedQuery)) {
+          startsWithMatches.push(this.modrinthLoadedResults[entry.index]);
+          return;
+        }
+
+        containsMatches.push(this.modrinthLoadedResults[entry.index]);
+      });
+      this.modrinthResults = [...startsWithMatches, ...containsMatches];
+    }
+
+    this.updateModrinthLocalSearchStatus();
+    this.renderModrinthResults({ force: Boolean(options.forceRender) });
+  }
+
+  updateModrinthLocalSearchStatus() {
+    const typeConfig = this.getModrinthTypeConfig();
+    const loadedCount = this.modrinthLoadedResults.length;
+    const visibleCount = this.modrinthResults.length;
+    if (this.modrinthQuery) {
+      this.updateModrinthSearchStatus(`${visibleCount} von ${loadedCount} geladenen ${typeConfig.pluralLabel.toLowerCase()} gefunden.`);
+      return;
+    }
+
+    this.updateModrinthSearchStatus(`${loadedCount} geladene ${typeConfig.pluralLabel.toLowerCase()} angezeigt.`);
+  }
+
+  handleModrinthResultsClick(event) {
+    const button = event.target.closest('[data-modrinth-action]');
+    if (!button) {
+      return;
+    }
+
+    const action = button.getAttribute('data-modrinth-action') || '';
+    if (action === 'load-more') {
+      this.loadMoreModrinthResults();
+      return;
+    }
+
+    const projectId = button.getAttribute('data-project-id') || '';
+    if (!projectId) {
+      return;
+    }
+
+    if (action === 'install') {
+      const project = this.modrinthResults.find((entry) => entry.projectId === projectId);
+      const typeConfig = this.getModrinthTypeConfig(
+        this.modrinthProjectType === 'datapack' ? 'datapack' : (project?.projectType || this.modrinthProjectType)
+      );
+      if (this.isModrinthProjectWrongVersion(project)) {
+        this.showNotification('Diese Mod ist nicht für die ausgewählte Minecraft-Version verfügbar.');
+        return;
+      }
+      if (typeConfig.value === 'modpack') {
+        const card = this.getModrinthProjectCard(projectId);
+        const targetPanel = card?.querySelector('[data-modrinth-pack-target-panel]');
+        if (targetPanel?.classList.contains('is-hidden')) {
+          this.showModrinthPackTarget(card);
+          return;
+        }
+      }
+
+      if (typeConfig.value === 'datapack') {
+        this.openDatapackInstallModal(project);
+        return;
+      }
+
+      this.installModrinthMod(projectId);
+      return;
+    }
+
+    if (action === 'install-hosted-server') {
+      this.showNotification('Vanilla-Server unterstützt keine Mods.');
+    }
+  }
+
+  handleModrinthResultsChange(event) {
+    const selectEl = event.target?.closest?.('[data-modrinth-pack-target]');
+    if (!selectEl) {
+      return;
+    }
+
+    const card = selectEl.closest('[data-modrinth-project-card]');
+    this.updateModrinthPackTargetFields(card);
+  }
+
+  handleModsListClick(event) {
+    const button = event.target.closest('[data-mod-action]');
+    if (!button) {
+      return;
+    }
+
+    const action = button.getAttribute('data-mod-action') || '';
+    if (action === 'menu') {
+      event.stopPropagation();
+      const menuWrap = button.closest('.installed-mod-menu-wrap');
+      const menu = menuWrap?.querySelector('.installed-mod-menu');
+      const willOpen = Boolean(menu?.classList.contains('hidden'));
+      this.closeInstalledModMenus();
+      if (willOpen && menu && menuWrap) {
+        const buttonRect = button.getBoundingClientRect();
+        menu.classList.remove('hidden');
+        menu.classList.add('is-portal');
+        menu.style.position = 'fixed';
+        menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, buttonRect.bottom + 5))}px`;
+        menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, buttonRect.right - menu.offsetWidth))}px`;
+        menu.style.right = 'auto';
+        menu.style.bottom = 'auto';
+        document.body.appendChild(menu);
+        this.openInstalledModMenu = { menu, menuWrap, card: menuWrap.closest('.mod-item') };
+        this.openInstalledModMenu.card?.classList.add('is-menu-open');
+      }
+      button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+      return;
+    }
+
+    const modId = button.getAttribute('data-mod-id') || '';
+    const modName = button.getAttribute('data-mod-name') || '';
+    if (!modId || !action) {
+      return;
+    }
+
+    if (action === 'remove') {
+      this.closeInstalledModMenus();
+      this.removeMod(modId, modName);
+      return;
+    }
+
+    if (action === 'enable') {
+      this.setModEnabled(modId, true, modName);
+      return;
+    }
+
+    if (action === 'disable') {
+      this.setModEnabled(modId, false, modName);
+      return;
+    }
+
+    if (action === 'nickname') {
+      this.setModAlias(modId, modName, button.getAttribute('data-mod-original-name') || modName);
+    }
+  }
+
+  async setModAlias(modId, currentName, originalName) {
+    const alias = window.prompt(`Spitzname für ${originalName}:`, currentName === originalName ? '' : currentName);
+    if (alias === null) return;
+    try {
+      const result = await window.electronAPI.setModAlias(modId, alias);
+      if (!result?.success) throw new Error(result?.error || 'Spitzname konnte nicht gespeichert werden.');
+      await this.loadMods({ force: true });
+      this.showNotification(result.message || 'Spitzname gespeichert.');
+    } catch (error) {
+      this.showNotification(`Fehler: ${error.message}`);
+    }
+  }
+
+  closeInstalledModMenus() {
+    if (this.openInstalledModMenu?.menu && this.openInstalledModMenu?.menuWrap) {
+      const { menu, menuWrap } = this.openInstalledModMenu;
+      menu.classList.add('hidden');
+      menu.classList.remove('is-portal');
+      menu.removeAttribute('style');
+      menuWrap.appendChild(menu);
+      this.openInstalledModMenu = null;
+    }
+    document.querySelectorAll('.installed-mod-menu').forEach((menu) => menu.classList.add('hidden'));
+    document.querySelectorAll('.installed-mod-card.is-menu-open').forEach((card) => card.classList.remove('is-menu-open'));
+    document.querySelectorAll('[data-mod-action="menu"][aria-expanded="true"], [data-datapack-action="menu"][aria-expanded="true"]')
+      .forEach((button) => button.setAttribute('aria-expanded', 'false'));
+  }
+
+  handleModsViewChange(event) {
+    const button = event.target?.closest?.('[data-mods-view]');
+    if (!button) {
+      return;
+    }
+
+    const nextView = String(button.getAttribute('data-mods-view') || 'mod').trim();
+    if (!['mod', 'resourcepack', 'shader', 'datapack', 'hidden'].includes(nextView)) {
+      return;
+    }
+
+    this.modsViewType = nextView;
+    if (nextView === 'datapack' && Date.now() - this.datapacksLoadedAt > this.contentCacheTtlMs) this.loadDatapacks();
+    this.renderMods();
+    this.updateModsCheckStatus();
+  }
+
+  handleGlobalActionClick(event) {
+    const urlButton = event.target?.closest?.('[data-open-url]');
+    if (urlButton) {
+      event.preventDefault();
+      this.openExternalUrl(urlButton.getAttribute('data-open-url') || '');
+      return;
+    }
+
+    const incompatibleButton = event.target?.closest?.('[data-launcher-action="remove-incompatible-mods"], #remove-incompatible-mods-btn');
+    if (incompatibleButton) {
+      event.preventDefault();
+      this.removeIncompatibleMods(incompatibleButton);
+      return;
+    }
+
+    const button = event.target?.closest?.('[data-launcher-action="update-all-mods"], #update-all-btn, #update-mods-btn');
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    this.updateAllMods(button);
+  }
+
+  async openExternalUrl(url) {
+    if (!url || typeof window.electronAPI?.openExternalUrl !== 'function') {
+      this.showNotification('Link konnte nicht geöffnet werden.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.openExternalUrl(url);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+      }
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async searchModrinthMods(options = {}) {
+    const inputEl = document.getElementById('modrinth-search-input');
+    const hasExplicitNetworkQuery = Object.prototype.hasOwnProperty.call(options, 'networkQuery');
+    const query = String(hasExplicitNetworkQuery ? options.networkQuery : (inputEl?.value || '')).trim();
+    this.modrinthQuery = query;
+    const append = Boolean(options.append);
+    const offset = append ? this.modrinthNextOffset : 0;
+    const showLoading = options.showLoading !== false && !append;
+    const typeConfig = this.getModrinthTypeConfig();
+
+    const target = typeConfig.value === 'modpack'
+      ? this.getActiveModrinthPackSearchTarget()
+      : this.getActiveModrinthTarget();
+    if (typeConfig.value === 'modpack') {
+      this.modrinthVersionFilterId = target.versionId;
+    }
+
+    const cached = this.getCachedModrinthSearch(query, offset, target);
+    const refreshingCachedFirstPage = Boolean(cached && !append && (!options.forceRefresh || options.backgroundRefresh));
+    if (cached && !append && !options.forceRefresh) {
+      this.applyModrinthSearchResult(cached, {
+        append: false,
+        fromCache: true
+      });
+    }
+
+    if (append) {
+      if (this.modrinthIsLoadingMore || !this.modrinthHasMore) {
+        return;
+      }
+      this.modrinthIsLoadingMore = true;
+      this.renderModrinthResults();
+    } else if (!refreshingCachedFirstPage) {
+      this.modrinthHasMore = false;
+      this.modrinthTotalHits = 0;
+      this.modrinthLoadedResults = [];
+      this.modrinthLoadedStartOffset = 0;
+      this.modrinthNextOffset = 0;
+      this.modrinthResults = [];
+      this.modrinthSearchIndex = [];
+      this.modrinthLastRenderedSignature = '';
+      this.modrinthDataRevision += 1;
+      const scrollHost = document.getElementById('modrinth');
+      if (scrollHost) {
+        scrollHost.scrollTop = 0;
+      }
+    }
+
+    if (showLoading) {
+      this.showLoading(query ? `Suche ${typeConfig.pluralLabel.toLowerCase()} auf Modrinth...` : `Lade Top ${typeConfig.pluralLabel.toLowerCase()} von Modrinth...`);
+    } else if (!append && !cached) {
+      this.modrinthSearchInFlight = true;
+      this.updateModrinthSearchStatus(query
+        ? `Suche ${typeConfig.pluralLabel.toLowerCase()} nach "${query}"...`
+        : `Lade Top ${typeConfig.pluralLabel.toLowerCase()}...`);
+    }
+
+    const requestId = ++this.modrinthSearchRequestId;
+    try {
+      const result = await window.electronAPI.searchModrinthMods(
+        query,
+        target.versionId,
+        this.modrinthProjectType,
+        offset,
+        this.modrinthPageSize,
+        Boolean(options.forceRefresh)
+      );
+      if (requestId !== this.modrinthSearchRequestId) {
+        return;
+      }
+
+      if (!result.success) {
+        if (!refreshingCachedFirstPage) {
+          this.showNotification('Fehler: ' + result.error);
+        }
+        return;
+      }
+
+      this.cacheModrinthSearch(query, offset, target, result);
+      this.applyModrinthSearchResult(result, { append });
+      this.scheduleModrinthPrefetch();
+      if (result.diskCache && !options.forceRefresh && !append) {
+        window.setTimeout(() => {
+          if (requestId === this.modrinthSearchRequestId) {
+            this.searchModrinthMods({
+              showLoading: false,
+              forceRefresh: true,
+              backgroundRefresh: true
+            }).catch(() => {});
+          }
+        }, 0);
+      }
+    } catch (error) {
+      if (requestId === this.modrinthSearchRequestId && !refreshingCachedFirstPage) {
+        this.showNotification('Fehler: ' + error.message);
+      }
+    } finally {
+      if (!append && requestId === this.modrinthSearchRequestId) {
+        this.modrinthSearchInFlight = false;
+      }
+      if (append) {
+        this.modrinthIsLoadingMore = false;
+        this.renderModrinthResults();
+      }
+      if (showLoading && requestId === this.modrinthSearchRequestId) {
+        this.hideLoading();
+      }
+    }
+  }
+
+  loadMoreModrinthResults() {
+    return this.searchModrinthMods({ append: true, showLoading: false });
+  }
+
+  async loadPreviousModrinthResults() {
+    if (this.modrinthIsLoadingPrevious || this.modrinthLoadedStartOffset <= 0) {
+      return;
+    }
+    const inputEl = document.getElementById('modrinth-search-input');
+    const query = String(inputEl?.value || this.modrinthQuery || '').trim();
+    const target = this.modrinthProjectType === 'modpack'
+      ? this.getActiveModrinthPackSearchTarget()
+      : this.getActiveModrinthTarget();
+    const currentStartOffset = this.modrinthLoadedStartOffset;
+    const offset = Math.max(0, currentStartOffset - this.modrinthPageSize);
+    const limit = Math.max(1, currentStartOffset - offset);
+    const requestContext = this.getModrinthSearchCacheKey(query, 0, target);
+    this.modrinthIsLoadingPrevious = true;
+    try {
+      let result = this.getCachedModrinthSearch(query, offset, target);
+      if (!result) {
+        result = await window.electronAPI.searchModrinthMods(
+          query,
+          target.versionId,
+          this.modrinthProjectType,
+          offset,
+          limit,
+          false
+        );
+        if (result?.success) {
+          this.cacheModrinthSearch(query, offset, target, result);
+        }
+      }
+      const activeContext = this.getModrinthSearchCacheKey(this.modrinthQuery, 0, target);
+      if (!result?.success
+        || requestContext !== activeContext
+        || currentStartOffset !== this.modrinthLoadedStartOffset) {
+        return;
+      }
+      this.applyModrinthSearchResult(result, { prepend: true });
+    } catch (error) {
+      console.error('Background Modrinth previous-page load failed:', error);
+    } finally {
+      this.modrinthIsLoadingPrevious = false;
+    }
+  }
+
+  scheduleModrinthPrefetch() {
+    if (this.modrinthPrefetchTimer) {
+      window.clearTimeout(this.modrinthPrefetchTimer);
+    }
+    this.modrinthPrefetchTimer = window.setTimeout(() => {
+      this.modrinthPrefetchTimer = null;
+      this.ensureModrinthPrefetch();
+    }, 40);
+  }
+
+  ensureModrinthPrefetch() {
+    if (!this.modrinthResults.length) {
+      return;
+    }
+    const scrollHost = document.getElementById('modrinth');
+    const container = document.getElementById('modrinth-results');
+    if (!scrollHost || !container || !document.getElementById('modrinth')?.classList.contains('active')) {
+      return;
+    }
+    const rowHeight = this.modrinthProjectType === 'modpack'
+      ? (container.clientWidth >= 700 ? 250 : 390)
+      : (container.clientWidth >= 700 ? 108 : 168);
+    const columnCount = 1;
+    const listTop = container.getBoundingClientRect().top;
+    const viewportTop = scrollHost.getBoundingClientRect().top;
+    const firstVisibleRow = Math.max(0, Math.floor(Math.max(0, viewportTop - listTop) / rowHeight));
+    const firstVisibleIndex = firstVisibleRow * columnCount;
+    const visibleCount = Math.max(1, Math.ceil(scrollHost.clientHeight / rowHeight) * columnCount);
+    const preparedAhead = this.modrinthResults.length - firstVisibleIndex - visibleCount;
+    if (firstVisibleIndex <= 15 && this.modrinthLoadedStartOffset > 0 && !this.modrinthIsLoadingPrevious) {
+      this.loadPreviousModrinthResults();
+    }
+    // Network pagination is deliberately user-driven through "Mehr anzeigen".
+    // Automatic fetching here caused request/render storms when opening the tab.
+    void preparedAhead;
+  }
+
+  getModrinthSearchCacheKey(query, offset = 0, target = null) {
+    const activeTarget = target || (
+      this.modrinthProjectType === 'modpack'
+        ? this.getActiveModrinthPackSearchTarget()
+        : this.getActiveModrinthTarget()
+    );
+    return [
+      this.modrinthProjectType,
+      String(activeTarget?.versionId || ''),
+      String(query || '').trim().toLowerCase(),
+      Number(offset) || 0,
+      this.modrinthPageSize
+    ].join('|');
+  }
+
+  getCachedModrinthSearch(query, offset = 0, target = null) {
+    const key = this.getModrinthSearchCacheKey(query, offset, target);
+    const cached = this.modrinthSearchCache.get(key);
+    if (cached && Date.now() - Number(cached.createdAt || 0) <= this.modrinthSearchCacheTtlMs) {
+      this.modrinthSearchCache.delete(key);
+      this.modrinthSearchCache.set(key, cached);
+      return cached.result;
+    }
+    if (cached) {
+      this.modrinthSearchCache.delete(key);
+    }
+    if (Number(offset) !== 0) return null;
+    try {
+      const persistentCache = JSON.parse(localStorage.getItem(this.modrinthPersistentCacheStorageKey) || '{}');
+      const persistentEntry = persistentCache[key];
+      if (!persistentEntry
+        || Date.now() - Number(persistentEntry.createdAt || 0) > this.modrinthPersistentCacheTtlMs
+        || !persistentEntry.result?.success) {
+        return null;
+      }
+      this.modrinthSearchCache.set(key, persistentEntry);
+      return persistentEntry.result;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  cacheModrinthSearch(query, offset = 0, target = null, result = null) {
+    if (!result?.success) {
+      return;
+    }
+
+    const key = this.getModrinthSearchCacheKey(query, offset, target);
+    this.modrinthSearchCache.delete(key);
+    const entry = { createdAt: Date.now(), result };
+    this.modrinthSearchCache.set(key, entry);
+    if (this.modrinthSearchCache.size > 80) {
+      const oldestKey = this.modrinthSearchCache.keys().next().value;
+      this.modrinthSearchCache.delete(oldestKey);
+    }
+    if (Number(offset) === 0) {
+      try {
+        const persistentCache = JSON.parse(localStorage.getItem(this.modrinthPersistentCacheStorageKey) || '{}');
+        persistentCache[key] = entry;
+        const newestEntries = Object.entries(persistentCache)
+          .sort((left, right) => Number(right[1]?.createdAt || 0) - Number(left[1]?.createdAt || 0))
+          .slice(0, 16);
+        localStorage.setItem(this.modrinthPersistentCacheStorageKey, JSON.stringify(Object.fromEntries(newestEntries)));
+      } catch (_error) {
+        // In-memory caching remains available when persistent storage is full.
+      }
+    }
+  }
+
+  applyModrinthSearchResult(result, options = {}) {
+    const append = Boolean(options.append);
+    const prepend = Boolean(options.prepend);
+    const receivedResultCount = Array.isArray(result.results) ? result.results.length : 0;
+    const strictProjectType = this.getModrinthTypeConfig(result.projectType || this.modrinthProjectType).value;
+    const activeMinecraftVersion = this.getVersionDisplayName(this.getActiveContextVersionId());
+    const nextResults = (result.results || [])
+      .filter((project) => {
+        if (!['mod', 'shader'].includes(strictProjectType)) return true;
+        const supportedVersions = this.getModrinthProjectSupportedMinecraftVersions(project);
+        return Boolean(activeMinecraftVersion && supportedVersions.includes(activeMinecraftVersion));
+      })
+      .map((project) => ({
+        ...project,
+        targetMinecraftVersion: ['mod', 'shader'].includes(strictProjectType)
+          ? activeMinecraftVersion
+          : project.targetMinecraftVersion
+      }));
+    if (Array.isArray(result.installedProjectIds)) {
+      this.setInstalledModProjectIds([...this.getVisibleInstalledModProjectIds(), ...result.installedProjectIds]);
+    }
+    if (prepend) {
+      const seenProjectIds = new Set(this.modrinthLoadedResults.map((entry) => entry.projectId).filter(Boolean));
+      const uniquePreviousResults = nextResults.filter((entry) => !entry.projectId || !seenProjectIds.has(entry.projectId));
+      const addedCount = uniquePreviousResults.length;
+      this.modrinthLoadedResults = [
+        ...uniquePreviousResults,
+        ...this.modrinthLoadedResults
+      ];
+      this.modrinthLoadedStartOffset = Number(result.offset || 0);
+      const overflow = Math.max(0, this.modrinthLoadedResults.length - this.modrinthMaxLoadedResults);
+      if (overflow > 0) {
+        this.modrinthLoadedResults = this.modrinthLoadedResults.slice(0, this.modrinthMaxLoadedResults);
+      }
+      this.adjustModrinthScrollAfterHeadPrepend(addedCount);
+    } else if (append) {
+      const seenProjectIds = new Set(this.modrinthLoadedResults.map((entry) => entry.projectId).filter(Boolean));
+      const uniqueNextResults = nextResults.filter((entry) => {
+        if (!entry.projectId || seenProjectIds.has(entry.projectId)) {
+          return false;
+        }
+        seenProjectIds.add(entry.projectId);
+        return true;
+      });
+      this.modrinthLoadedResults = [
+        ...this.modrinthLoadedResults,
+        ...uniqueNextResults
+      ];
+      this.modrinthNextOffset = Math.max(
+        this.modrinthNextOffset,
+        Number(result.offset || 0) + receivedResultCount
+      );
+      const overflow = Math.max(0, this.modrinthLoadedResults.length - this.modrinthMaxLoadedResults);
+      if (overflow > 0) {
+        this.modrinthLoadedResults = this.modrinthLoadedResults.slice(overflow);
+        this.modrinthLoadedStartOffset += overflow;
+        this.adjustModrinthScrollAfterHeadTrim(overflow);
+      }
+    } else {
+      this.modrinthLoadedResults = nextResults;
+      this.modrinthLoadedStartOffset = Number(result.offset || 0);
+      this.modrinthNextOffset = Number(result.offset || 0) + receivedResultCount;
+    }
+    this.modrinthHasMore = Boolean(result.hasMore);
+    this.modrinthTotalHits = Number(result.totalHits || this.modrinthLoadedResults.length);
+    this.modrinthDataRevision += 1;
+    this.buildModrinthSearchIndex();
+    this.applyModrinthLocalSearch({ forceRender: true });
+  }
+
+  adjustModrinthScrollAfterHeadPrepend(addedCount) {
+    const scrollHost = document.getElementById('modrinth');
+    const container = document.getElementById('modrinth-results');
+    if (!scrollHost || !container || addedCount <= 0) {
+      return;
+    }
+    const columnCount = 1;
+    const rowHeight = this.modrinthProjectType === 'modpack'
+      ? (container.clientWidth >= 700 ? 250 : 390)
+      : (container.clientWidth >= 700 ? 108 : 168);
+    const addedRows = Math.ceil(addedCount / columnCount);
+    scrollHost.scrollTop += addedRows * rowHeight;
+    this.modrinthLastScrollTop = scrollHost.scrollTop;
+    this.modrinthVirtualRangeKey = '';
+    this.modrinthLastRenderedSignature = '';
+  }
+
+  adjustModrinthScrollAfterHeadTrim(removedCount) {
+    const scrollHost = document.getElementById('modrinth');
+    const container = document.getElementById('modrinth-results');
+    if (!scrollHost || !container || removedCount <= 0) {
+      return;
+    }
+    const columnCount = 1;
+    const rowHeight = this.modrinthProjectType === 'modpack'
+      ? (container.clientWidth >= 700 ? 250 : 390)
+      : (container.clientWidth >= 700 ? 108 : 168);
+    const removedRows = Math.ceil(removedCount / columnCount);
+    scrollHost.scrollTop = Math.max(0, scrollHost.scrollTop - (removedRows * rowHeight));
+    this.modrinthLastScrollTop = scrollHost.scrollTop;
+    this.modrinthVirtualRangeKey = '';
+    this.modrinthLastRenderedSignature = '';
+  }
+
+  updateModrinthResultStatus(result) {
+    const contextLabel = this.getCurrentContextLabel();
+    const versionLabel = result.minecraftVersion || this.getSelectedVersionDisplayName() || 'deine Version';
+    const resultTypeConfig = this.getModrinthTypeConfig(result.projectType || this.modrinthProjectType);
+    if (resultTypeConfig.value === 'modpack') {
+      const modpackVersionLabel = result.minecraftVersion || this.getModrinthVersionFilterDisplayName();
+      this.updateModrinthSearchStatus(
+        result.mode === 'top-downloads'
+          ? (
+            this.modrinthResults.length
+              ? (modpackVersionLabel ? `Top Modpacks auf Modrinth für Minecraft ${modpackVersionLabel}.` : 'Top Modpacks auf Modrinth.')
+              : (modpackVersionLabel ? `Keine beliebten Modpacks für Minecraft ${modpackVersionLabel} gefunden.` : 'Keine beliebten Modpacks gefunden.')
+          )
+          : (
+            this.modrinthResults.length
+              ? (modpackVersionLabel ? `${this.modrinthResults.length} Treffer für Modpacks auf Modrinth für Minecraft ${modpackVersionLabel}.` : `${this.modrinthResults.length} Treffer für Modpacks auf Modrinth.`)
+              : (modpackVersionLabel ? `Keine Modpack-Treffer auf Modrinth für Minecraft ${modpackVersionLabel}.` : 'Keine Modpack-Treffer auf Modrinth.')
+          )
+      );
+      return;
+    }
+
+    this.updateModrinthSearchStatus(
+      result.mode === 'top-downloads'
+        ? (
+          this.modrinthResults.length
+            ? `Top ${resultTypeConfig.pluralLabel.toLowerCase()} für ${contextLabel} auf Fabric ${versionLabel}.`
+            : `Keine beliebten ${resultTypeConfig.pluralLabel.toLowerCase()} für ${contextLabel} auf Fabric ${versionLabel} gefunden.`
+        )
+        : (
+          this.modrinthResults.length
+            ? `${this.modrinthResults.length} Treffer für ${resultTypeConfig.pluralLabel.toLowerCase()} in ${contextLabel} auf Fabric ${versionLabel}.`
+            : `Keine Modrinth-Treffer für ${resultTypeConfig.pluralLabel.toLowerCase()} in ${contextLabel} auf Fabric ${versionLabel}.`
+        )
+    );
+  }
+
+  renderModrinthPackTargetControls(project) {
+    const minecraftVersion = this.getModrinthProjectMinecraftVersion(project);
+    const packs = this.getCompatibleModrinthPackTargets(project);
+    const packOptions = packs.map((pack) => {
+      const versionName = this.getVersionDisplayName(pack.versionId);
+      const label = versionName ? `${pack.name} (${versionName})` : pack.name;
+      return `<option value="${this.escapeHtml(pack.id)}">${this.escapeHtml(label)}</option>`;
+    }).join('');
+    const noMatchingPacksOption = packs.length
+      ? ''
+      : `<option value="__no-matching-profile" disabled>Keine passenden Profile${minecraftVersion ? ` (${this.escapeHtml(minecraftVersion)})` : ''}</option>`;
+    const suggestedName = this.escapeHtml(project.title || project.slug || 'Modpack');
+    const newProfileLabel = minecraftVersion ? `Neues Profil (${minecraftVersion})` : 'Neues Profil';
+
+    return `
+      <div class="modrinth-pack-target is-hidden" data-modrinth-pack-target-panel>
+        <label class="modrinth-pack-field">
+          <span>Zielprofil</span>
+          <select class="input-field modrinth-pack-profile-select" data-modrinth-pack-target>
+            <option value="">${this.escapeHtml(newProfileLabel)}</option>
+            ${packOptions}
+            ${noMatchingPacksOption}
+          </select>
+        </label>
+        <label class="modrinth-pack-field modrinth-pack-name-field">
+          <span>Neuer Profilname</span>
+          <input class="input-field" type="text" maxlength="48" spellcheck="false" value="${suggestedName}" data-modrinth-pack-name>
+        </label>
+      </div>
+    `;
+  }
+
+  getModrinthProjectMinecraftVersion(project) {
+    return String(project?.targetMinecraftVersion || this.getVersionDisplayName(project?.targetVersionId) || this.getModrinthVersionFilterDisplayName() || '').trim();
+  }
+
+  getModrinthProjectSupportedMinecraftVersions(project) {
+    return [...new Set((Array.isArray(project?.versions) ? project.versions : [])
+      .map((version) => String(version || '').trim())
+      .filter(Boolean))];
+  }
+
+  isModrinthProjectWrongVersion(project) {
+    const typeConfig = this.getModrinthTypeConfig(project?.projectType || this.modrinthProjectType);
+    if (typeConfig.value === 'modpack') {
+      return false;
+    }
+
+    const targetMinecraftVersion = this.getModrinthProjectMinecraftVersion(project);
+    const supportedVersions = this.getModrinthProjectSupportedMinecraftVersions(project);
+    return Boolean(targetMinecraftVersion && supportedVersions.length && !supportedVersions.includes(targetMinecraftVersion));
+  }
+
+  getCompatibleModrinthPackTargets(project) {
+    const minecraftVersion = this.getModrinthProjectMinecraftVersion(project);
+    const packs = this.packsConfig?.packs || [];
+    if (!minecraftVersion) {
+      const supportedVersions = this.getModrinthProjectSupportedMinecraftVersions(project);
+      if (!supportedVersions.length) {
+        return [];
+      }
+
+      return packs.filter((pack) => supportedVersions.includes(this.getVersionDisplayName(pack.versionId)));
+    }
+
+    return packs.filter((pack) => this.getVersionDisplayName(pack.versionId) === minecraftVersion);
+  }
+
+  showModrinthPackTarget(card) {
+    if (!card) {
+      return;
+    }
+
+    this.closeOtherModrinthPackTargets(card);
+
+    const panel = card.querySelector('[data-modrinth-pack-target-panel]');
+    const button = card.querySelector('[data-modrinth-action="install"]');
+    card.classList.add('is-pack-target-open');
+    if (panel) {
+      panel.classList.remove('is-hidden');
+    }
+    if (button) {
+      button.textContent = 'Jetzt installieren';
+    }
+
+    this.updateModrinthPackTargetFields(card);
+    const nameInput = card.querySelector('[data-modrinth-pack-name]');
+    const targetSelect = card.querySelector('[data-modrinth-pack-target]');
+    (targetSelect || (nameInput && !nameInput.disabled ? nameInput : null))?.focus?.();
+  }
+
+  closeOtherModrinthPackTargets(activeCard = null) {
+    document.querySelectorAll('[data-modrinth-project-card]').forEach((card) => {
+      if (activeCard && card === activeCard) {
+        return;
+      }
+
+      const panel = card.querySelector('[data-modrinth-pack-target-panel]');
+      if (!panel) {
+        return;
+      }
+
+      panel.classList.add('is-hidden');
+      card.classList.remove('is-pack-target-open');
+
+      const projectId = card.getAttribute('data-project-id') || '';
+      const project = this.modrinthResults.find((entry) => entry.projectId === projectId);
+      const typeConfig = this.getModrinthTypeConfig(project?.projectType || this.modrinthProjectType);
+      const button = card.querySelector('[data-modrinth-action="install"]');
+      if (button && typeConfig.value === 'modpack') {
+        button.textContent = typeConfig.installLabel;
+      }
+    });
+  }
+
+  updateModrinthPackTargetFields(card) {
+    if (!card) {
+      return;
+    }
+
+    const selectEl = card.querySelector('[data-modrinth-pack-target]');
+    const nameInput = card.querySelector('[data-modrinth-pack-name]');
+    const nameField = card.querySelector('.modrinth-pack-name-field');
+    const isNewProfile = !selectEl?.value;
+
+    if (nameInput) {
+      nameInput.disabled = !isNewProfile;
+    }
+    if (nameField) {
+      nameField.classList.toggle('is-disabled', !isNewProfile);
+    }
+  }
+
+  getModrinthProjectCard(projectId) {
+    return Array.from(document.querySelectorAll('[data-modrinth-project-card]'))
+      .find((card) => card.getAttribute('data-project-id') === projectId) || null;
+  }
+
+  getModrinthModpackInstallTarget(project) {
+    const card = this.getModrinthProjectCard(project.projectId);
+    const selectedPackId = card?.querySelector('[data-modrinth-pack-target]')?.value || '';
+    const filteredVersionId = String(project.targetVersionId || this.getModrinthVersionFilterId() || '').trim();
+    const filteredMinecraftVersion = this.getModrinthProjectMinecraftVersion(project);
+
+    if (selectedPackId) {
+      const selectedPack = (this.packsConfig?.packs || []).find((pack) => pack.id === selectedPackId);
+      if (!selectedPack) {
+        throw new Error('Das ausgewählte Profil wurde nicht gefunden.');
+      }
+      const selectedPackMinecraftVersion = this.getVersionDisplayName(selectedPack.versionId);
+      const supportedVersions = this.getModrinthProjectSupportedMinecraftVersions(project);
+      const profileMatchesFilter = filteredMinecraftVersion
+        ? selectedPackMinecraftVersion === filteredMinecraftVersion
+        : supportedVersions.includes(selectedPackMinecraftVersion);
+      if (!profileMatchesFilter) {
+        const expectedText = filteredMinecraftVersion || (supportedVersions.length ? supportedVersions.join(', ') : 'eine passende Version');
+        throw new Error(`Das ausgewählte Profil nutzt Minecraft ${selectedPackMinecraftVersion || 'eine andere Version'}, das Modpack ist für Minecraft ${expectedText}.`);
+      }
+
+      return {
+        installMode: 'existing-profile',
+        packId: selectedPackId,
+        versionId: selectedPack.versionId,
+        minecraftVersion: selectedPackMinecraftVersion
+      };
+    }
+
+    return {
+      installMode: 'new-profile',
+      packName: card?.querySelector('[data-modrinth-pack-name]')?.value.trim() || project.title || project.slug || 'Modpack',
+      versionId: filteredVersionId,
+      minecraftVersion: filteredMinecraftVersion
+    };
+  }
+
+  renderModrinthResults(options = {}) {
+    const container = document.getElementById('modrinth-results');
+    if (!container) {
+      return;
+    }
+
+    const scrollHost = document.getElementById('modrinth');
+    const gap = 12;
+    const gridWidth = Math.max(280, container.clientWidth || scrollHost?.clientWidth || 900);
+    const columnCount = 1;
+    const compactLayout = gridWidth >= 700;
+    const rowHeight = this.modrinthProjectType === 'modpack'
+      ? (compactLayout ? 250 : 390)
+      : (this.modrinthProjectType === 'resourcepack'
+        ? (compactLayout ? 168 : 230)
+        : (compactLayout ? 108 : 168));
+    const totalRows = Math.ceil(this.modrinthResults.length / columnCount);
+    const containerTop = container.getBoundingClientRect().top;
+    const viewportTop = scrollHost?.getBoundingClientRect().top || 0;
+    const offsetIntoList = Math.max(0, viewportTop - containerTop);
+    const visibleRows = Math.max(1, Math.ceil(Number(scrollHost?.clientHeight || 800) / rowHeight));
+    const firstVisibleRow = Math.floor(offsetIntoList / rowHeight);
+    const firstRow = Math.max(0, firstVisibleRow - this.modrinthVirtualOverscanBefore);
+    const lastRow = Math.min(totalRows, firstVisibleRow + visibleRows + this.modrinthVirtualOverscanAfter);
+    const startIndex = firstRow * columnCount;
+    const endIndex = Math.min(this.modrinthResults.length, lastRow * columnCount);
+    const rangeKey = `${columnCount}:${rowHeight}:${firstRow}:${lastRow}:${this.modrinthResults.length}:${this.modrinthHasMore ? 1 : 0}:${this.modrinthIsLoadingMore ? 1 : 0}`;
+    const renderSignature = [
+      this.modrinthQuery,
+      this.modrinthDataRevision,
+      this.modrinthHasMore ? 'more' : 'done',
+      this.modrinthIsLoadingMore ? 'loading-more' : 'idle',
+      this.modrinthSearchInFlight ? 'searching' : 'ready'
+    ].join('|');
+    if (!options.force
+      && renderSignature === this.modrinthLastRenderedSignature
+      && rangeKey === this.modrinthVirtualRangeKey) {
+      return;
+    }
+    this.modrinthLastRenderedSignature = renderSignature;
+    this.modrinthVirtualRangeKey = rangeKey;
+
+    const reusableCards = new Map(Array.from(container.querySelectorAll('[data-modrinth-project-card]'))
+      .map((card) => [card.getAttribute('data-project-id') || '', card]));
+    container.replaceChildren();
+    container.style.height = '';
+
+    if (!this.modrinthResults.length) {
+      const typeConfig = this.getModrinthTypeConfig();
+      if (this.modrinthSearchInFlight) {
+        container.innerHTML = '<p class="mods-empty">Suche läuft...</p>';
+        this.prepareMotionGroup(container, ':scope > *', 34);
+        return;
+      }
+
+      container.innerHTML = `<p class="mods-empty">${this.modrinthQuery ? `Keine ${typeConfig.pluralLabel.toLowerCase()} gefunden.` : `Keine Top ${typeConfig.pluralLabel.toLowerCase()} gefunden.`}</p>`;
+      this.prepareMotionGroup(container, ':scope > *', 34);
+      return;
+    }
+    const footerHeight = this.modrinthHasMore ? 72 : 0;
+    container.style.height = `${Math.max(1, totalRows * rowHeight + footerHeight)}px`;
+
+    const installedProjectIds = new Set([
+      ...this.getVisibleInstalledModProjectIds(),
+      ...this.installedModProjectIds
+    ]);
+    const installedSlugs = new Set(this.getInstalledModSlugsFromLoadedMods());
+
+    // Fixed coordinates make the total height independent from mounted cards.
+    // Only viewport rows plus overscan are present in the DOM.
+    this.modrinthResults.slice(startIndex, endIndex).forEach((project, visibleIndex) => {
+      const absoluteIndex = startIndex + visibleIndex;
+      const row = Math.floor(absoluteIndex / columnCount);
+      const column = absoluteIndex % columnCount;
+      const cardWidth = (gridWidth - gap * (columnCount - 1)) / columnCount;
+      const typeConfig = this.getModrinthTypeConfig(
+        this.modrinthProjectType === 'datapack' ? 'datapack' : (project.projectType || this.modrinthProjectType)
+      );
+      const projectSlug = String(project.slug || '').trim().toLowerCase();
+      const isInstalled = typeConfig.value !== 'modpack' && typeConfig.value !== 'datapack'
+        && (installedProjectIds.has(project.projectId) || (projectSlug && installedSlugs.has(projectSlug)) || project.installed === true);
+      const isWrongVersion = !isInstalled && this.isModrinthProjectWrongVersion(project);
+      const installButtonText = isInstalled
+        ? 'Schon installiert'
+        : (isWrongVersion ? 'Falsche Version' : typeConfig.installLabel);
+      const installButtonClass = isInstalled || isWrongVersion
+        ? 'btn-secondary modrinth-state-button'
+        : 'btn-primary';
+      const cardState = `compact-v2:${isInstalled ? 1 : 0}:${isWrongVersion ? 1 : 0}:${typeConfig.value}`;
+      let card = reusableCards.get(project.projectId);
+      if (!card || card.dataset.modrinthCardState !== cardState || options.force) {
+        card = document.createElement('article');
+        card.className = 'mod-item';
+        card.setAttribute('data-modrinth-project-card', 'true');
+        card.setAttribute('data-project-id', project.projectId);
+        card.dataset.modrinthCardState = cardState;
+        card.innerHTML = `
+          <div class="mod-head">
+            <div class="mod-title-wrap">
+              ${project.iconUrl ? `<img class="mod-icon" src="${this.escapeHtml(project.iconUrl)}" alt="${this.escapeHtml(project.title)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="mod-icon mod-icon-placeholder">M</div>'}
+              <div>
+                <h4>${this.escapeHtml(project.title)}</h4>
+              </div>
+            </div>
+          </div>
+          ${project.description ? `<p>${this.escapeHtml(project.description)}</p>` : ''}
+          ${typeConfig.value === 'modpack' ? this.renderModrinthPackTargetControls(project) : ''}
+          <div class="mod-actions">
+            <button class="btn ${installButtonClass}" data-modrinth-action="install" data-project-id="${this.escapeHtml(project.projectId)}" ${isInstalled || isWrongVersion ? 'disabled' : ''}>
+              <span>${this.escapeHtml(installButtonText)}</span>
+            </button>
+          </div>
+        `;
+      }
+      card.style.left = `${column * (cardWidth + gap)}px`;
+      card.style.top = `${row * rowHeight}px`;
+      card.style.width = `${cardWidth}px`;
+      card.style.height = `${rowHeight - gap}px`;
+      container.appendChild(card);
+      this.updateModrinthPackTargetFields(card);
+    });
+
+    if (this.modrinthHasMore) {
+      const loadMoreWrap = document.createElement('div');
+      loadMoreWrap.className = 'modrinth-load-more';
+      loadMoreWrap.style.top = `${totalRows * rowHeight}px`;
+      loadMoreWrap.setAttribute('data-modrinth-load-sentinel', 'true');
+      loadMoreWrap.innerHTML = `
+        <button class="btn btn-secondary" data-modrinth-action="load-more" ${this.modrinthIsLoadingMore ? 'disabled' : ''}>
+          ${this.modrinthIsLoadingMore ? 'Lade...' : 'Mehr anzeigen'}
+        </button>
+      `;
+      container.appendChild(loadMoreWrap);
+    }
+
+    this.observeModrinthImages(container);
+    this.observeModrinthLoadSentinel(container);
+  }
+
+  observeModrinthImages(container) {
+    // Images are assigned eagerly while results are rendered and decoded by
+    // the central startup preloader before the loading screen is dismissed.
+    void container;
+  }
+
+  observeModrinthLoadSentinel(container) {
+    this.modrinthLoadObserver?.disconnect();
+    // The button remains available, but opening the tab no longer auto-loads
+    // every following result page because its sentinel happens to be visible.
+  }
+
+  async installModrinthMod(projectId) {
+    const project = this.modrinthResults.find((entry) => entry.projectId === projectId);
+    if (!project || this.pendingModrinthInstalls.has(projectId)) {
+      return;
+    }
+
+    const typeConfig = this.getModrinthTypeConfig(project.projectType || this.modrinthProjectType);
+    const card = this.getModrinthProjectCard(projectId);
+    const button = card?.querySelector('[data-modrinth-action="install"]');
+    const previousLabel = button?.textContent || typeConfig.installLabel;
+    const wasInstalled = Boolean(project.installed);
+    this.pendingModrinthInstalls.add(projectId);
+    this.suppressOwnModFolderRefreshUntil = Date.now() + 2500;
+    this.installedModProjectIds.add(projectId);
+    this.modrinthLoadedResults = this.modrinthLoadedResults.map((entry) => (
+      entry.projectId === projectId ? { ...entry, installed: true } : entry
+    ));
+    this.modrinthResults = this.modrinthResults.map((entry) => (
+      entry.projectId === projectId ? { ...entry, installed: true } : entry
+    ));
+    if (button) {
+      button.disabled = true;
+      button.classList.add('modrinth-state-button');
+      button.textContent = typeConfig.value === 'modpack' ? 'Importiere…' : 'Installiere…';
+    }
+
+    this.showLoading(`${project.title} wird installiert...`);
+
+    try {
+      const target = typeConfig.value === 'modpack'
+        ? this.getModrinthModpackInstallTarget(project)
+        : this.getActiveModrinthTarget();
+      const result = await window.electronAPI.installModrinthMod(project, target);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        if (!wasInstalled) this.rollbackOptimisticModrinthInstall(projectId);
+        if (button) {
+          button.disabled = false;
+          button.textContent = previousLabel;
+        }
+        return;
+      }
+
+      if (typeConfig.value === 'modpack') {
+        window.setTimeout(() => {
+          this.refreshPackContext({ reloadSearch: false }).catch((error) => {
+            console.error('Background pack refresh failed:', error);
+          });
+        }, 0);
+      } else {
+        this.markModrinthProjectInstalled(project.projectId, { render: false });
+        if (button) {
+          button.textContent = 'Installiert';
+        }
+        if (this.activeSectionId === 'mods') {
+          window.setTimeout(() => {
+            this.loadMods({ skipManagedSync: true }).catch((error) => {
+              console.error('Background mod refresh failed:', error);
+            });
+          }, 250);
+        }
+      }
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      this.showNotification(`${result.message || `${project.title} installiert.`}${warningText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+      if (!wasInstalled) this.rollbackOptimisticModrinthInstall(projectId);
+      if (button) {
+        button.disabled = false;
+        button.textContent = previousLabel;
+      }
+    } finally {
+      this.pendingModrinthInstalls.delete(projectId);
+      if (button) button.classList.remove('modrinth-state-button');
+      this.hideLoading();
+    }
+  }
+
+  rollbackOptimisticModrinthInstall(projectId) {
+    this.installedModProjectIds.delete(projectId);
+    this.modrinthLoadedResults = this.modrinthLoadedResults.map((entry) => (
+      entry.projectId === projectId ? { ...entry, installed: false } : entry
+    ));
+    this.modrinthResults = this.modrinthResults.map((entry) => (
+      entry.projectId === projectId ? { ...entry, installed: false } : entry
+    ));
+  }
+
+  async installHostedServerModrinthMod(projectId) {
+    const project = this.modrinthResults.find((entry) => entry.projectId === projectId);
+    if (!project) {
+      return;
+    }
+    if (!this.activeHostedServerId) {
+      this.showNotification('Bitte erstelle oder wähle zuerst einen Hosting-Server aus.');
+      return;
+    }
+
+    this.showLoading(`Füge ${project.title} zum Server hinzu...`);
+    try {
+      const result = await window.electronAPI.installHostedServerModrinthMod(project);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || `${project.title} wurde zum Server hinzugefügt.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async loadModsFolder() {
+    try {
+      const result = typeof window.electronAPI.openContentFolder === 'function'
+        ? await window.electronAPI.openContentFolder(this.modsViewType, this.selectedDatapackWorldId)
+        : await window.electronAPI.loadModsFolder();
+      if (result.success) {
+        this.showNotification(`Ordner geöffnet: ${result.path || result.modsPath}`);
+        await this.loadMods();
+      } else {
+        this.showNotification(`Fehler: ${result.error || 'Mods-Ordner konnte nicht geöffnet werden.'}`);
+      }
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async updateAllMods(triggerButton = null) {
+    if (this.isUpdatingAllMods) {
+      this.showNotification('Alle Mods werden bereits geprüft.');
+      return;
+    }
+
+    if (typeof window.electronAPI?.updateAllMods !== 'function') {
+      this.showNotification('Fehler: Mod-Prüfung ist im Launcher nicht verfügbar.');
+      return;
+    }
+
+    this.isUpdatingAllMods = true;
+    const button = triggerButton || document.getElementById('update-all-btn') || document.getElementById('update-mods-btn');
+    const previousText = button?.textContent || '';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Prüft...';
+    }
+
+    this.showLoading('Prüfe und korrigiere alle Mods...');
+
+    try {
+      const result = await window.electronAPI.updateAllMods();
+      if (result.success) {
+        this.lastModsCheckResult = {
+          ...result,
+          versionId: this.getActiveContextVersionId()
+        };
+        const warningText = result.warning ? ` Hinweis: ${result.warning}` : (result.warnings?.length ? ` Hinweis: ${result.warnings.slice(0, 2).join(' | ')}` : '');
+        this.showNotification(`${result.message || `${result.updated}/${result.total} Mods wurden aktualisiert!`}${warningText}`);
+        await this.loadMods();
+      } else {
+        this.lastModsCheckResult = null;
+        this.showNotification('Fehler: ' + result.error);
+      }
+    } catch (error) {
+      this.lastModsCheckResult = null;
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = previousText || 'Check all';
+      }
+      this.isUpdatingAllMods = false;
+      this.hideLoading();
+    }
+  }
+
+  getRemovableIncompatibleMods() {
+    return this.mods.filter((mod) => (
+      mod.autoDisabled === true
+      && !mod.isProtected
+      && !mod.hiddenInModsTab
+    ));
+  }
+
+  getIncompatibleMods() {
+    return this.mods.filter((mod) => mod.autoDisabled === true && mod.enabled !== false);
+  }
+
+  updateModCompatibilityUI() {
+    const launchButton = document.getElementById('launch-btn');
+    if (!launchButton) {
+      return;
+    }
+
+    const incompatibleCount = this.getIncompatibleMods().length;
+    const isBlocked = incompatibleCount > 0;
+    launchButton.classList.toggle('is-mod-blocked', isBlocked);
+    if (!this.minecraftLaunchInProgress) {
+      launchButton.disabled = isBlocked;
+    }
+    const label = isBlocked
+      ? `Start blockiert: ${incompatibleCount} unpassende Mod${incompatibleCount === 1 ? '' : 's'}`
+      : 'Minecraft starten';
+    launchButton.title = label;
+    launchButton.setAttribute('aria-label', label);
+  }
+
+  updateRemoveIncompatibleModsButton() {
+    const button = document.getElementById('remove-incompatible-mods-btn');
+    if (!button) {
+      return;
+    }
+
+    const count = this.getRemovableIncompatibleMods().length;
+    button.disabled = count === 0;
+    const label = count > 0
+      ? `${count} unpassende Mod${count === 1 ? '' : 's'} löschen`
+      : 'Keine unpassenden Mods vorhanden';
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  }
+
+  async removeIncompatibleMods(triggerButton = null) {
+    const incompatibleMods = this.getRemovableIncompatibleMods();
+    if (!incompatibleMods.length) {
+      this.showNotification('Keine entfernbaren unpassenden Mods gefunden.');
+      return;
+    }
+    if (typeof window.electronAPI?.removeIncompatibleMods !== 'function') {
+      this.showNotification('Fehler: Sammellöschen ist im Launcher nicht verfügbar.');
+      return;
+    }
+
+    const confirmed = await this.showConfirm({
+      title: 'Unpassende Mods löschen',
+      message: `${incompatibleMods.length} unpassende Mod${incompatibleMods.length === 1 ? '' : 's'} wirklich dauerhaft entfernen? Versteckte und geschützte Mods bleiben erhalten.`,
+      confirmText: 'Alle löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const button = triggerButton || document.getElementById('remove-incompatible-mods-btn');
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-label', 'Unpassende Mods werden gelöscht');
+      button.title = 'Unpassende Mods werden gelöscht';
+    }
+    this.showLoading('Entferne unpassende Mods...');
+
+    try {
+      const result = await window.electronAPI.removeIncompatibleMods();
+      await this.loadMods();
+      const errorText = result.errors?.length ? ` Fehler: ${result.errors.slice(0, 2).join(' | ')}` : '';
+      this.showNotification(`${result.message || `${result.removed || 0} unpassende Mods wurden entfernt.`}${errorText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.updateRemoveIncompatibleModsButton();
+      this.hideLoading();
+    }
+  }
+
+  getModsViewConfig(viewType = this.modsViewType) {
+    if (viewType === 'datapack') {
+      return { value: 'datapack', title: 'Datapacks', emptyText: 'Keine Datapacks installiert.', dropTitle: 'Datapack installieren', dropHint: 'ZIP auswählen und einer Welt zuordnen' };
+    }
+    if (viewType === 'resourcepack') {
+      return {
+        value: 'resourcepack',
+        title: 'Ressourcenpakete',
+        emptyText: 'Keine Ressourcenpakete installiert.',
+        dropTitle: 'Ressourcenpakete über Modrinth installieren',
+        dropHint: 'ZIP-Dateien werden im resourcepacks-Ordner verwaltet.'
+      };
+    }
+
+    if (viewType === 'shader') {
+      return {
+        value: 'shader',
+        title: 'Shader',
+        emptyText: 'Keine Shader installiert.',
+        dropTitle: 'Shader über Modrinth installieren',
+        dropHint: 'ZIP-Dateien werden im shaderpacks-Ordner verwaltet.'
+      };
+    }
+
+    if (viewType === 'hidden') {
+      return {
+        value: 'hidden',
+        title: 'Ausgeblendete Pflichtmods',
+        emptyText: 'Keine ausgeblendeten Mods installiert.',
+        dropTitle: 'Ausgeblendete Mods',
+        dropHint: 'Pflicht- und Performance-Mods'
+      };
+    }
+
+    return {
+      value: 'mod',
+      title: 'Mods für diese Version',
+      emptyText: '',
+      dropTitle: 'Mods hier ablegen',
+      dropHint: 'JAR-Dateien'
+    };
+  }
+
+  updateModsViewUI() {
+    const config = this.getModsViewConfig();
+    document.querySelectorAll('[data-mods-view]').forEach((button) => {
+      const isActive = button.getAttribute('data-mods-view') === config.value;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    const titleEl = document.getElementById('mods-section-title');
+    if (titleEl) {
+      titleEl.textContent = config.title;
+    }
+
+    const dropZone = document.getElementById('mods-drop-zone');
+    const dropTitleEl = dropZone?.querySelector('strong');
+    const dropHintEl = dropZone?.querySelector('span');
+    if (dropTitleEl) {
+      dropTitleEl.textContent = config.dropTitle;
+    }
+    if (dropHintEl) {
+      dropHintEl.textContent = config.dropHint;
+    }
+    dropZone?.classList.toggle('is-download-only', config.value !== 'mod');
+    dropZone?.classList.toggle('hidden', config.value === 'datapack');
+    const folderButton = document.getElementById('load-mods-folder-btn');
+    if (folderButton) {
+      const labels = { mod: 'Mods-Ordner öffnen', resourcepack: 'Ressourcenpaket-Ordner öffnen', shader: 'Shader-Ordner öffnen', datapack: 'Datapack-Ordner der gewählten Welt öffnen', hidden: 'Mods-Ordner öffnen' };
+      folderButton.title = labels[config.value] || labels.mod;
+      folderButton.setAttribute('aria-label', folderButton.title);
+      folderButton.classList.toggle('hidden', config.value === 'datapack');
+    }
+  }
+
+  renderMods() {
+    const container = document.getElementById('mods-list');
+    if (!container) {
+      return;
+    }
+
+    this.updateModsViewUI();
+    const viewConfig = this.getModsViewConfig();
+    if (viewConfig.value === 'datapack') {
+      this.modsRenderSignature = '';
+      container.replaceChildren();
+      this.renderDatapacks(container);
+      return;
+    }
+    const visibleMods = this.mods.filter((mod) => {
+      return viewConfig.value === 'hidden'
+        ? Boolean(mod.hiddenInModsTab)
+        : !mod.hiddenInModsTab && String(mod.itemType || 'mod') === viewConfig.value;
+    });
+    const renderSignature = `${viewConfig.value}|${visibleMods.map((mod) => [
+      mod.id,
+      mod.name,
+      mod.enabled !== false,
+      Boolean(mod.pendingDisable || mod.pendingDelete || this.pendingModOperationIds.has(mod.id)),
+      Boolean(mod.autoDisabled),
+      mod.canDelete !== false,
+      mod.deleteBlockedReason || '',
+      mod.iconUrl || ''
+    ].join(':')).join('|')}`;
+    if (renderSignature === this.modsRenderSignature && container.childElementCount) return;
+    this.modsRenderSignature = renderSignature;
+    container.replaceChildren();
+
+    if (visibleMods.length === 0) {
+      const activePack = this.getActivePack();
+      const emptyText = viewConfig.emptyText || (activePack ? `Keine Mods in ${this.escapeHtml(activePack.name)} aktiv.` : 'Keine Mods für diese Version aktiv.');
+      container.innerHTML = `<p class="mods-empty">${emptyText}</p>`;
+      this.prepareMotionGroup(container, ':scope > *', 34);
+      return;
+    }
+
+    const renderGeneration = ++this.modsRenderGeneration;
+    const appendMod = (mod, index = 0) => {
+      const modEl = document.createElement('div');
+      const isPending = Boolean(mod.pendingDisable || mod.pendingDelete || this.pendingModOperationIds.has(mod.id));
+      modEl.className = `mod-item installed-mod-card${mod.enabled === false || mod.pendingDisable ? ' is-disabled' : ''}${mod.autoDisabled === true ? ' is-incompatible' : ''}${isPending ? ' is-pending' : ''}`;
+      const sourceLabel = mod.sourceLabel || (mod.managed ? 'Verwaltet' : 'Manuell');
+      const itemType = String(mod.itemType || 'mod');
+      const placeholderLabel = mod.hiddenInModsTab ? 'H' : (itemType === 'resourcepack' ? 'R' : (itemType === 'shader' ? 'S' : 'M'));
+      const isProtected = Boolean(mod.isProtected || mod.hiddenInModsTab);
+      const deleteBlocked = isProtected || mod.canDelete === false || this.minecraftLaunchState !== 'idle';
+      const isEnabled = mod.enabled !== false;
+      const canDisable = itemType === 'mod' && !mod.hiddenInModsTab && mod.canDisable !== false;
+      const toggleDisabled = isEnabled && !canDisable;
+      const disabledText = mod.disabledReason
+        || (mod.autoDisabled ? 'Ausgeschaltet: keine passende Version gefunden.' : 'Ausgeschaltet.');
+      const protectedText = isProtected
+        ? (canDisable ? 'Pflichtmod: Kann ausgeschaltet, aber nicht entfernt werden.' : 'Pflichtmod: Bleibt immer eingeschaltet.')
+        : '';
+      modEl.innerHTML = `
+        <div class="mod-head">
+          <div class="mod-title-wrap">
+            ${mod.iconUrl ? `<img class="mod-icon" src="${this.escapeHtml(mod.iconUrl)}" alt="${this.escapeHtml(mod.name)}" loading="${index < 48 ? 'eager' : 'lazy'}" decoding="async" fetchpriority="${index < 24 ? 'high' : 'auto'}">` : `<div class="mod-icon mod-icon-placeholder">${this.escapeHtml(placeholderLabel)}</div>`}
+            <div class="installed-mod-copy">
+              <div class="installed-mod-name-row">
+                <div class="installed-mod-name-text">
+                  <h4 title="${this.escapeHtml(mod.name)}">${this.escapeHtml(mod.name)}</h4>
+                  ${mod.originalName && mod.originalName !== mod.name ? `<span class="installed-mod-original-name">${this.escapeHtml(mod.originalName)}</span>` : ''}
+                </div>
+                <div class="installed-mod-controls">
+                  ${itemType === 'mod' && !mod.hiddenInModsTab ? `
+                    <button class="installed-mod-switch${isEnabled ? ' is-on' : ''}" type="button" role="switch"
+                      aria-checked="${isEnabled ? 'true' : 'false'}"
+                      aria-label="${this.escapeHtml(mod.name)} ${isEnabled ? 'ausschalten' : 'einschalten'}"
+                      data-mod-action="${isEnabled ? 'disable' : 'enable'}"
+                      data-mod-id="${this.escapeHtml(mod.id)}"
+                      data-mod-name="${this.escapeHtml(mod.name)}" ${toggleDisabled ? 'disabled' : ''}>
+                      <span></span>
+                    </button>
+                  ` : ''}
+                  <div class="installed-mod-menu-wrap">
+                    <button class="installed-mod-more" type="button" aria-label="Menü für ${this.escapeHtml(mod.name)}"
+                      aria-haspopup="menu" aria-expanded="false" data-mod-action="menu">•••</button>
+                    <div class="installed-mod-menu hidden" role="menu">
+                      <button type="button" role="menuitem" data-mod-action="nickname"
+                        data-mod-id="${this.escapeHtml(mod.id)}" data-mod-name="${this.escapeHtml(mod.name)}"
+                        data-mod-original-name="${this.escapeHtml(mod.originalName || mod.name)}">
+                        Hide
+                      </button>
+                      <button type="button" role="menuitem" data-mod-action="remove"
+                        data-mod-id="${this.escapeHtml(mod.id)}" data-mod-name="${this.escapeHtml(mod.name)}"
+                        ${deleteBlocked ? 'disabled' : ''} title="${this.escapeHtml(mod.deleteBlockedReason || '')}">
+                        ${deleteBlocked ? (itemType === 'mod' ? "Mod can't be deleted" : "Can't be deleted") : 'Löschen'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span class="mod-source-badge">${this.escapeHtml(sourceLabel)}</span>
+            </div>
+          </div>
+        </div>
+        ${isEnabled ? '' : `<p class="mod-disabled-text">${this.escapeHtml(disabledText)}</p>`}
+        ${protectedText ? `<p>${this.escapeHtml(protectedText)}</p>` : ''}
+      `;
+      container.appendChild(modEl);
+    };
+    const initialCount = Math.min(80, visibleMods.length);
+    for (let index = 0; index < initialCount; index += 1) appendMod(visibleMods[index], index);
+    this.prepareMotionGroup(container, ':scope > *', 34);
+    let cursor = initialCount;
+    const appendNextBatch = (deadline) => {
+      if (renderGeneration !== this.modsRenderGeneration || this.modsViewType !== viewConfig.value) return;
+      const batchEnd = Math.min(cursor + 60, visibleMods.length);
+      while (cursor < batchEnd && (!deadline || deadline.timeRemaining() > 1)) appendMod(visibleMods[cursor], cursor++);
+      if (cursor < visibleMods.length) {
+        if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(appendNextBatch, { timeout: 50 });
+        else window.setTimeout(() => appendNextBatch(null), 16);
+      }
+    };
+    if (cursor < visibleMods.length) {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(appendNextBatch, { timeout: 50 });
+      else window.setTimeout(() => appendNextBatch(null), 16);
+    }
+  }
+
+  async loadDatapacks() {
+    try {
+      const result = await this.loadingManager.run('content:datapacks', () => window.electronAPI.getDatapacks(), {
+        scope: 'mods', priority: 95, ttl: this.contentCacheTtlMs, label: 'Datapacks werden geladen'
+      });
+      if (!result.success) throw new Error(result.error || 'Datapacks konnten nicht geladen werden.');
+      this.datapackWorlds = result.worlds || [];
+      this.datapacksLoadedAt = Date.now();
+      if (!this.datapackWorlds.some((world) => world.id === this.selectedDatapackWorldId)) {
+        this.selectedDatapackWorldId = this.datapackWorlds[0]?.id || '';
+      }
+      if (this.modsViewType === 'datapack') this.renderMods();
+    } catch (error) {
+      this.showNotification(`Fehler: ${error.message}`);
+    }
+  }
+
+  renderDatapacks(container) {
+    const worlds = this.datapackWorlds.filter((world) => Array.isArray(world.datapacks) && world.datapacks.length > 0);
+    if (!worlds.length) {
+      container.innerHTML = '<p class="mods-empty">In deinen Minecraft-Welten sind keine Datapacks installiert.</p>';
+      return;
+    }
+    container.innerHTML = worlds.map((world) => {
+      const cards = world.datapacks.map((pack) => `
+      <div class="mod-item installed-mod-card" data-world-id="${this.escapeHtml(world.id)}">
+        <div class="mod-head">
+          <div class="mod-title-wrap">
+            ${pack.iconDataUrl ? `<img class="mod-icon" src="${this.escapeHtml(pack.iconDataUrl)}" alt="">` : '<div class="mod-icon mod-icon-placeholder">D</div>'}
+            <div class="installed-mod-copy">
+              <div class="installed-mod-name-row">
+                <h4 title="${this.escapeHtml(pack.displayName || pack.name)}">${this.escapeHtml(pack.displayName || pack.name)}</h4>
+                <div class="installed-mod-controls">
+                  <div class="installed-mod-menu-wrap">
+                    <button class="installed-mod-more" type="button" aria-label="Menü für ${this.escapeHtml(pack.displayName || pack.name)}" aria-haspopup="menu" aria-expanded="false" data-datapack-action="menu">•••</button>
+                    <div class="installed-mod-menu hidden" role="menu">
+                      <button type="button" role="menuitem" data-datapack-action="delete" data-datapack-name="${this.escapeHtml(pack.name)}" ${this.minecraftLaunchState !== 'idle' ? 'disabled' : ''}>${this.minecraftLaunchState !== 'idle' ? "Can't be deleted" : 'Löschen'}</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span class="mod-source-badge">${pack.type === 'zip' ? 'Datapack' : 'Ordner-Datapack'}</span>
+            </div>
+          </div>
+        </div>
+      </div>`).join('');
+      return `<div class="datapack-world-heading"><h4>${this.escapeHtml(world.name)}</h4><span class="mod-source-badge">${this.escapeHtml(world.folder)}</span></div>${cards}`;
+    }).join('');
+    this.prepareMotionGroup(container, ':scope > *', 34);
+  }
+
+  async handleDatapackClick(event) {
+    const button = event.target?.closest?.('[data-datapack-action]');
+    if (!button) return;
+    const action = button.dataset.datapackAction;
+    try {
+      if (action === 'menu') {
+        event.stopPropagation();
+        const menuWrap = button.closest('.installed-mod-menu-wrap');
+        const menu = menuWrap?.querySelector('.installed-mod-menu');
+        const shouldOpen = menu?.classList.contains('hidden');
+        this.closeInstalledModMenus();
+        if (shouldOpen && menu && menuWrap) {
+          const buttonRect = button.getBoundingClientRect();
+          menu.classList.remove('hidden');
+          menu.classList.add('is-portal');
+          menu.style.position = 'fixed';
+          menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, buttonRect.bottom + 5))}px`;
+          menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, buttonRect.right - menu.offsetWidth))}px`;
+          menu.style.right = 'auto';
+          menu.style.bottom = 'auto';
+          document.body.appendChild(menu);
+          this.openInstalledModMenu = { menu, menuWrap, card: menuWrap.closest('.installed-mod-card') };
+          this.openInstalledModMenu.card?.classList.add('is-menu-open');
+        }
+        button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+        return;
+      }
+      if (action === 'folder') {
+        const result = await window.electronAPI.openContentFolder('datapack', this.selectedDatapackWorldId);
+        if (!result.success) throw new Error(result.error);
+        return;
+      }
+      if (action === 'install') {
+        const result = await window.electronAPI.installDatapack(this.selectedDatapackWorldId);
+        if (!result.canceled) this.showNotification(result.message || 'Datapack installiert.');
+        if (result.success) {
+          this.loadingManager.invalidate('content:datapacks');
+          await this.loadDatapacks();
+        }
+        return;
+      }
+      if (action === 'delete') {
+        if (this.minecraftLaunchState !== 'idle') {
+          this.showNotification("Can't be deleted while Minecraft is running.");
+          return;
+        }
+        this.closeInstalledModMenus();
+        const name = button.dataset.datapackName || '';
+        const worldId = button.closest('[data-world-id]')?.dataset.worldId || '';
+        const confirmed = await this.showConfirm({ title: 'Datapack löschen', message: `„${name}“ wirklich aus dieser Welt löschen?`, confirmText: 'Löschen' });
+        if (!confirmed) return;
+        const result = await window.electronAPI.removeDatapack(worldId, name);
+        this.showNotification(result.message || 'Datapack gelöscht.');
+        this.loadingManager.invalidate('content:datapacks');
+        await this.loadDatapacks();
+      }
+    } catch (error) { this.showNotification(`Fehler: ${error.message}`); }
+  }
+
+  async openDatapackInstallModal(project) {
+    const modal = document.getElementById('datapack-install-modal');
+    const select = document.getElementById('datapack-install-world-select');
+    if (!modal || !select) return;
+    let result;
+    try {
+      result = await window.electronAPI.getModrinthDatapackWorlds(project);
+    } catch (error) {
+      this.showNotification(`Fehler: ${error.message}`);
+      return;
+    }
+    if (!result.success) {
+      this.showNotification(`Fehler: ${result.error}`);
+      return;
+    }
+    const eligibleWorlds = result.worlds || [];
+    this.pendingDatapackProject = project;
+    select.innerHTML = eligibleWorlds.length
+      ? eligibleWorlds.map((world) => `<option value="${this.escapeHtml(world.id)}">${this.escapeHtml(world.name)} (${this.escapeHtml(world.folder)})</option>`).join('')
+      : '<option value="">No eligible worlds found</option>';
+    select.disabled = !eligibleWorlds.length;
+    const installButton = document.getElementById('datapack-install-confirm-btn');
+    if (installButton) installButton.disabled = !eligibleWorlds.length;
+    document.getElementById('datapack-install-message').textContent = eligibleWorlds.length
+      ? `Choose a world for “${project.title || project.name || 'Datapack'}”.`
+      : 'No eligible world was found. You can create a new one.';
+    this.showDatapackInstallExistingView();
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    select.focus();
+  }
+
+  closeDatapackInstallModal() {
+    const modal = document.getElementById('datapack-install-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
+    this.pendingDatapackProject = null;
+  }
+
+  showDatapackInstallExistingView() {
+    document.getElementById('datapack-install-existing-view')?.classList.remove('hidden');
+    document.getElementById('datapack-install-existing-actions')?.classList.remove('hidden');
+    document.getElementById('datapack-create-world-view')?.classList.add('hidden');
+    document.getElementById('datapack-create-world-actions')?.classList.add('hidden');
+  }
+
+  showDatapackCreateWorldView() {
+    document.getElementById('datapack-install-existing-view')?.classList.add('hidden');
+    document.getElementById('datapack-install-existing-actions')?.classList.add('hidden');
+    document.getElementById('datapack-create-world-view')?.classList.remove('hidden');
+    document.getElementById('datapack-create-world-actions')?.classList.remove('hidden');
+    const nameInput = document.getElementById('datapack-world-name-input');
+    if (nameInput) {
+      nameInput.value = 'New World';
+      nameInput.focus();
+      nameInput.select();
+    }
+  }
+
+  async createWorldWithDatapack() {
+    const project = this.pendingDatapackProject;
+    const button = document.getElementById('datapack-create-world-confirm-btn');
+    const options = {
+      name: document.getElementById('datapack-world-name-input')?.value.trim() || '',
+      gamemode: document.getElementById('datapack-world-gamemode-select')?.value || 'survival',
+      difficulty: document.getElementById('datapack-world-difficulty-select')?.value || 'normal',
+      worldType: document.getElementById('datapack-world-type-select')?.value || 'default'
+    };
+    if (!project || button?.disabled) return;
+    if (!options.name) {
+      this.showNotification('Please enter a world name.');
+      document.getElementById('datapack-world-name-input')?.focus();
+      return;
+    }
+    button.disabled = true;
+    this.showLoading(`${project.title} wird installiert...`);
+    try {
+      const result = await window.electronAPI.createWorldWithDatapack(project, options);
+      if (!result.success) throw new Error(result.error || 'The world could not be created.');
+      this.closeDatapackInstallModal();
+      this.showNotification(result.message);
+      this.loadingManager.invalidate('content:datapacks');
+      await this.loadDatapacks();
+    } catch (error) { this.showNotification(`Error: ${error.message}`); }
+    finally {
+      if (button) button.disabled = false;
+      this.hideLoading();
+    }
+  }
+
+  async confirmModrinthDatapackInstall() {
+    const project = this.pendingDatapackProject;
+    const worldId = document.getElementById('datapack-install-world-select')?.value || '';
+    const button = document.getElementById('datapack-install-confirm-btn');
+    if (!project || !worldId || button?.disabled) return;
+    button.disabled = true;
+    this.showLoading(`${project.title} wird installiert...`);
+    try {
+      const result = await window.electronAPI.installModrinthDatapack(project, worldId);
+      if (!result.success) throw new Error(result.error || 'Installation fehlgeschlagen.');
+      this.closeDatapackInstallModal();
+      this.showNotification(result.message);
+      this.loadingManager.invalidate('content:datapacks');
+      await this.loadDatapacks();
+    } catch (error) { this.showNotification(`Fehler: ${error.message}`); }
+    finally {
+      if (button) button.disabled = false;
+      this.hideLoading();
+    }
+  }
+
+  canStartMinecraft() {
+    const reasons = [];
+    if (this.pendingModOperations > 0 || this.modOperationState !== 'idle') {
+      reasons.push('Mod-Änderungen laufen noch');
+    }
+    if (this.minecraftLaunchState !== 'idle') {
+      reasons.push(this.minecraftLaunchState === 'launching' ? 'Minecraft wird gestartet' : 'Minecraft läuft bereits');
+    }
+    if (this.pendingModOperationIds.size > 0) {
+      reasons.push('Mod-Operationen sind ausstehend');
+    }
+    return { allowed: reasons.length === 0, reason: reasons[0] || '' };
+  }
+
+  updateLaunchButtonAvailability() {
+    const launchButton = document.getElementById('launch-btn');
+    if (!launchButton) {
+      return;
+    }
+    const launchGate = this.canStartMinecraft();
+    const busy = this.minecraftLaunchState !== 'idle' || this.pendingModOperations > 0 || this.modOperationState !== 'idle';
+    const blockedReason = !launchGate.allowed ? launchGate.reason : '';
+    launchButton.disabled = busy || !launchGate.allowed;
+    launchButton.classList.toggle('is-mod-blocked', !launchGate.allowed);
+    const label = blockedReason
+      ? `Start blockiert: ${blockedReason}`
+      : (this.minecraftLaunchState === 'launching' ? 'Minecraft wird gestartet' : 'Minecraft starten');
+    launchButton.title = label;
+    launchButton.setAttribute('aria-label', label);
+  }
+
+  beginModOperation(modId, kind = 'toggle', { render = true } = {}) {
+    const key = String(modId || '').trim();
+    if (!key) {
+      return;
+    }
+    this.pendingModOperationIds.add(key);
+    this.pendingModOperations += 1;
+    this.modOperationState = 'processing';
+    this.modOperationError = '';
+    this.mods = this.mods.map((mod) => {
+      if (mod.id !== key) {
+        return mod;
+      }
+      const nextMod = { ...mod };
+      if (kind === 'delete') {
+        nextMod.pendingDelete = true;
+        nextMod.pendingDisable = false;
+      } else if (kind === 'disable') {
+        nextMod.pendingDisable = true;
+        nextMod.pendingDelete = false;
+      } else if (kind === 'enable') {
+        nextMod.pendingDisable = false;
+        nextMod.pendingDelete = false;
+      }
+      return nextMod;
+    });
+    if (render) {
+      this.renderMods();
+    }
+    this.updateLaunchButtonAvailability();
+  }
+
+  finishModOperation(modId, { success = false, error = '', reload = false, render = true } = {}) {
+    const key = String(modId || '').trim();
+    if (key) {
+      this.pendingModOperationIds.delete(key);
+      this.pendingModOperations = Math.max(0, this.pendingModOperations - 1);
+    }
+    if (this.pendingModOperations <= 0) {
+      this.modOperationState = 'idle';
+    }
+    this.modOperationError = success ? '' : (error || this.modOperationError);
+    this.mods = this.mods.map((mod) => {
+      if (mod.id !== key) {
+        return mod;
+      }
+      const nextMod = { ...mod, pendingDelete: false, pendingDisable: false, pendingEnable: false };
+      if (!success && typeof mod.enabled === 'boolean') {
+        nextMod.enabled = mod.enabled;
+      }
+      return nextMod;
+    });
+    if (render) {
+      this.renderMods();
+    }
+    this.updateLaunchButtonAvailability();
+    if (reload) {
+      this.loadMods({ skipManagedSync: true }).catch((loadError) => {
+        console.error('Mod state reload after operation failed:', loadError);
+      });
+    }
+  }
+
+  async setModEnabled(modId, enabled, modName) {
+    const mod = this.mods.find((entry) => entry.id === modId);
+    const lockKey = String(modId || '').trim();
+    if (!lockKey) {
+      return;
+    }
+    if (this.pendingModToggles.has(modId)) {
+      this.queuedModToggleStates.set(modId, { enabled, modName });
+      return;
+    }
+
+    this.mods = this.mods.map((entry) => entry.id === modId ? { ...entry, enabled, pendingDisable: !enabled, pendingDelete: false } : entry);
+    const switchButton = Array.from(document.querySelectorAll('#mods-list .installed-mod-switch'))
+      .find((entry) => entry.getAttribute('data-mod-id') === modId);
+    const card = switchButton?.closest('.installed-mod-card');
+    switchButton?.classList.toggle('is-on', enabled);
+    switchButton?.setAttribute('aria-checked', enabled ? 'true' : 'false');
+    switchButton?.setAttribute('data-mod-action', enabled ? 'disable' : 'enable');
+    switchButton?.setAttribute('aria-label', `${modName} ${enabled ? 'ausschalten' : 'einschalten'}`);
+    card?.classList.toggle('is-disabled', !enabled);
+
+    this.queuedModToggleStates.set(modId, { enabled, modName });
+    this.pendingModToggles.add(modId);
+    this.beginModOperation(modId, enabled ? 'enable' : 'disable');
+    this.suppressOwnModFolderRefreshUntil = Date.now() + 4000;
+    let operationSucceeded = true;
+    let operationError = '';
+    try {
+      while (this.queuedModToggleStates.has(modId)) {
+        const requested = this.queuedModToggleStates.get(modId);
+        this.queuedModToggleStates.delete(modId);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        const result = await window.electronAPI.setModEnabled(modId, requested.enabled);
+        if (!result.success) {
+          operationSucceeded = false;
+          operationError = result.error || 'Mod konnte nicht geändert werden.';
+          if (!this.queuedModToggleStates.has(modId)) {
+            this.showNotification('Fehler: ' + operationError);
+            this.mods = this.mods.map((entry) => entry.id === modId ? { ...entry, enabled: !!mod?.enabled, pendingDisable: false, pendingDelete: false } : entry);
+            this.renderMods();
+          }
+          continue;
+        }
+        this.mods = this.mods.map((entry) => entry.id === modId ? { ...entry, enabled: requested.enabled, pendingDisable: false, pendingDelete: false } : entry);
+        this.renderMods();
+      }
+    } catch (error) {
+      operationSucceeded = false;
+      operationError = error.message;
+      this.mods = this.mods.map((entry) => entry.id === modId ? { ...entry, enabled: !!mod?.enabled, pendingDisable: false, pendingDelete: false } : entry);
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.pendingModToggles.delete(modId);
+      this.finishModOperation(modId, { success: operationSucceeded, error: operationError, reload: true });
+      if (this.queuedModToggleStates.has(modId)) {
+        const latest = this.queuedModToggleStates.get(modId);
+        this.setModEnabled(modId, latest.enabled, latest.modName);
+      }
+    }
+  }
+
+  async removeMod(modId, modName) {
+    const currentMod = this.mods.find((entry) => entry.id === modId);
+    if (this.pendingModRemovals.has(modId)) {
+      return;
+    }
+    if (currentMod?.isProtected || currentMod?.hiddenInModsTab) {
+      this.showNotification('Diese Pflichtmod ist erforderlich und kann nicht entfernt werden.');
+      return;
+    }
+    if (this.minecraftLaunchState !== 'idle' || currentMod?.canDelete === false) {
+      this.showNotification(currentMod?.deleteBlockedReason || "Mod can't be deleted");
+      return;
+    }
+
+    const itemType = String(currentMod?.itemType || 'mod');
+    const itemLabel = itemType === 'resourcepack'
+      ? 'Ressourcenpaket'
+      : (itemType === 'shader' ? 'Shader' : 'Mod');
+    const confirmed = await this.showConfirm({
+      title: `${itemLabel} löschen`,
+      message: `${itemLabel} "${modName}" wirklich löschen?`,
+      confirmText: 'Löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.showLoading(`${itemLabel} ${modName} wird gelöscht...`);
+
+    // Optimistic removal keeps the list responsive; restore the exact entry if
+    // the filesystem operation fails instead of reloading every installed mod.
+    const previousMods = this.mods;
+    this.pendingModRemovals.add(modId);
+    this.beginModOperation(modId, 'delete', { render: false });
+    this.suppressOwnModFolderRefreshUntil = Date.now() + 2500;
+    this.mods = this.mods.filter((entry) => entry.id !== modId);
+    const modCard = Array.from(document.querySelectorAll('#mods-list [data-mod-id]'))
+      .find((entry) => entry.getAttribute('data-mod-id') === modId)
+      ?.closest('.mod-item');
+    if (modCard) {
+      modCard.remove();
+    } else {
+      this.renderMods();
+    }
+    this.updateModsCount();
+
+    let operationSucceeded = false;
+    let operationError = '';
+    try {
+      const result = await window.electronAPI.removeMod(modId);
+      if (!result.success) {
+        operationError = result.error || `${itemLabel} konnte nicht gelöscht werden.`;
+        this.mods = previousMods;
+        this.renderMods();
+        this.showNotification('Fehler: ' + operationError);
+        return;
+      }
+
+      operationSucceeded = true;
+
+      const projectId = String(currentMod?.projectId || currentMod?.modrinthProjectId || '').trim();
+      if (projectId) {
+        this.installedModProjectIds.delete(projectId);
+        this.modrinthLoadedResults = this.modrinthLoadedResults.map((project) => (
+          project.projectId === projectId ? { ...project, installed: false } : project
+        ));
+        this.modrinthResults = this.modrinthResults.map((project) => (
+          project.projectId === projectId ? { ...project, installed: false } : project
+        ));
+        if (this.activeSectionId === 'modrinth') {
+          this.renderModrinthResults({ force: true });
+        }
+      }
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      this.updateRemoveIncompatibleModsButton();
+      this.updateModCompatibilityUI();
+      this.updatePackContextUI();
+      this.updateModsCheckStatus();
+      this.showNotification(`${result.message || `Mod "${modName}" wurde entfernt.`}${warningText}`);
+    } catch (error) {
+      operationError = error.message;
+      this.mods = previousMods;
+      this.renderMods();
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.pendingModRemovals.delete(modId);
+      this.finishModOperation(modId, { success: operationSucceeded, error: operationError, reload: false, render: false });
+      this.hideLoading();
+    }
+  }
+
+  async updateMod(modId, modName) {
+    try {
+      const result = await window.electronAPI.refreshMod(modId);
+      if (!result.success) {
+        return;
+      }
+
+      this.loadMods({ skipManagedSync: true }).catch((error) => {
+        console.error('Background adapted-mod reload failed:', error);
+      });
+    } catch (error) {
+      console.error(`Mod adaptation failed for ${modName}:`, error);
+    }
+  }
+
+  updateMinecraftStatus() {
+    const statusEl = document.getElementById('minecraft-status');
+    if (!statusEl) {
+      return;
+    }
+
+    if (this.minecraftPath) {
+      statusEl.textContent = '';
+      statusEl.style.color = '';

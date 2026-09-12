@@ -1,0 +1,3030 @@
+          ? 'Shaderpack im shaderpacks-Ordner des aktiven Profils.'
+          : 'Ressourcenpaket im resourcepacks-Ordner des aktiven Profils.'),
+        iconUrl: String(entry.iconUrl || '').trim(),
+        isProtected: false,
+        canDisable: false,
+        path: existingPath,
+        size: stats.size,
+        enabled: true,
+        autoDisabled: false,
+        disabledReason: '',
+        managed: true,
+        source: 'modrinth',
+        itemType: projectType,
+        sourceLabel: projectType === 'shader' ? 'Shader' : 'Ressourcenpaket',
+        contextKey: getDownloadableModrinthContextKey(modContext),
+        fileName: path.basename(existingPath),
+        minecraftVersion: String(entry.minecraftVersion || '').trim(),
+        versionName: String(entry.versionName || '').trim(),
+        versionNumber: String(entry.versionNumber || '').trim(),
+        lastUpdated: stats.mtime.toISOString()
+      });
+    }
+  }
+
+  if (changed) {
+    writeDownloadableModrinthState(state);
+  }
+
+  for (const projectType of ['shader', 'resourcepack']) {
+    const downloadTarget = getModrinthDownloadTarget(projectType, modContext);
+    const trackedPaths = new Set(
+      installedEntries
+        .filter((entry) => entry.itemType === projectType)
+        .map((entry) => getComparablePath(entry.path))
+    );
+    for (const filePath of listDownloadablePackFilesRecursive(downloadTarget.directory)) {
+      logger.info('Found resource or shader pack ZIP', { projectType, path: filePath });
+      if (!trackedPaths.has(getComparablePath(filePath))) {
+        installedEntries.push(createLocalDownloadablePackEntry(projectType, filePath));
+      }
+    }
+  }
+
+  const uniqueEntries = [];
+  const entriesByIdentity = new Map();
+  for (const entry of installedEntries) {
+    const identity = `${entry.itemType}:${getDownloadablePackIdentity(entry.path)}`;
+    const previous = entriesByIdentity.get(identity);
+    if (!previous) {
+      entriesByIdentity.set(identity, entry);
+      uniqueEntries.push(entry);
+      continue;
+    }
+
+    const previousMtime = Date.parse(previous.lastUpdated || '') || 0;
+    const entryMtime = Date.parse(entry.lastUpdated || '') || 0;
+    const preferred = previous.managed !== entry.managed
+      ? (previous.managed ? previous : entry)
+      : (entryMtime > previousMtime ? entry : previous);
+    const duplicate = preferred === previous ? entry : previous;
+    logger.info('Duplicate resource or shader pack detected', {
+      projectType: entry.itemType,
+      identity,
+      kept: preferred.path,
+      duplicate: duplicate.path
+    });
+
+    if (!contentMutationLocked && getComparablePath(duplicate.path) !== getComparablePath(preferred.path) && fs.existsSync(duplicate.path)) {
+      try {
+        fs.unlinkSync(duplicate.path);
+      } catch (error) {
+        logger.warn('Could not remove duplicate resource or shader pack', {
+          path: duplicate.path,
+          error: serializeError(error)
+        });
+      }
+    }
+    if (preferred !== previous) {
+      const index = uniqueEntries.indexOf(previous);
+      if (index !== -1) {
+        uniqueEntries[index] = preferred;
+      }
+      entriesByIdentity.set(identity, preferred);
+    }
+  }
+
+  logger.info('Completed resource and shader pack scan', {
+    foundEntries: installedEntries.length,
+    displayedEntries: uniqueEntries.length
+  });
+  const minecraftRunning = contentMutationLocked;
+  return uniqueEntries.map((entry) => {
+    return {
+      ...entry,
+      canDelete: !minecraftRunning,
+      deleteBlockedReason: minecraftRunning
+        ? "Minecraft is running"
+        : ''
+    };
+  });
+}
+
+async function cleanReinstallAllModrinthContent() {
+  const modContext = getActiveModContext();
+  const installedEntries = await getInstalledMods(modContext.versionId, { skipManagedSync: true });
+  const reinstallProjects = new Map();
+  const warnings = [];
+  const removedNames = [];
+
+  for (const entry of installedEntries) {
+    if (entry.isProtected || entry.hiddenInModsTab) {
+      logger.info('Keeping required content during clean reinstall', {
+        name: entry.name,
+        projectId: entry.projectId,
+        path: entry.path
+      });
+      continue;
+    }
+
+    const itemType = String(entry.itemType || 'mod').trim();
+    let projectId = String(entry.projectId || '').trim();
+    if (entry.path && fs.existsSync(entry.path)) {
+      try {
+        const sha1 = getFileSha1(entry.path);
+        const versionData = await fetchModrinthVersionByFileHash(sha1);
+        const verifiedProjectId = String(versionData?.project_id || '').trim();
+        if (verifiedProjectId) {
+          projectId = verifiedProjectId;
+        }
+        logger.info('Identified local content on Modrinth for clean reinstall', {
+          name: entry.name,
+          itemType,
+          projectId,
+          sha1
+        });
+      } catch (error) {
+        logger.info('Content hash was not identified on Modrinth during clean reinstall', {
+          name: entry.name,
+          itemType,
+          path: entry.path,
+          error: serializeError(error)
+        });
+        if (!projectId) {
+          warnings.push(`${entry.name}: nicht auf Modrinth erkannt und entfernt.`);
+        } else {
+          warnings.push(`${entry.name}: Datei-Hash nicht erkannt; bekanntes Modrinth-Projekt wird trotzdem frisch installiert.`);
+        }
+      }
+    }
+
+    if (projectId) {
+      reinstallProjects.set(`${itemType}:${projectId}`, {
+        projectId,
+        projectType: itemType,
+        title: entry.name || projectId
+      });
+    }
+
+    const removeResult = await removeInstalledMod(entry.id);
+    if (removeResult?.success) {
+      removedNames.push(entry.name || entry.fileName || projectId);
+    } else {
+      warnings.push(`${entry.name}: konnte nicht vollständig entfernt werden (${removeResult?.error || 'unbekannter Fehler'}).`);
+    }
+  }
+
+  const installedProjects = [];
+  const installTarget = {
+    versionId: modContext.versionId,
+    packId: modContext.packId || ''
+  };
+  for (const project of reinstallProjects.values()) {
+    try {
+      const result = await installModrinthMod(project, installTarget);
+      if (result?.success) {
+        installedProjects.push(project);
+      } else {
+        warnings.push(`${project.title}: Neuinstallation fehlgeschlagen (${result?.error || 'unbekannter Fehler'}).`);
+      }
+      if (result?.warning) {
+        warnings.push(result.warning);
+      }
+    } catch (error) {
+      warnings.push(`${project.title}: Neuinstallation fehlgeschlagen (${error.message}).`);
+      logger.warn('Clean Modrinth reinstall failed', {
+        project,
+        error: serializeError(error)
+      });
+    }
+  }
+
+  const requiredResult = await MODS_ENGINE.syncManagedModsForVersion(modContext.versionId, {
+    modContext,
+    refreshAll: true,
+    refreshDisabledProjects: true
+  });
+  warnings.push(...(requiredResult.warnings || []));
+  const mods = await getInstalledMods(modContext.versionId);
+
+  logger.info('Completed clean Modrinth content reinstall', {
+    removed: removedNames.length,
+    recognizedProjects: reinstallProjects.size,
+    reinstalled: installedProjects.length,
+    finalEntries: mods.length,
+    warnings: uniqueStrings(warnings)
+  });
+
+  return {
+    updated: installedProjects.length,
+    total: reinstallProjects.size,
+    removed: removedNames.length,
+    warnings: uniqueStrings(warnings),
+    message: `${removedNames.length} Einträge bereinigt, ${installedProjects.length}/${reinstallProjects.size} Modrinth-Projekte ohne Duplikate neu installiert.`,
+    mods
+  };
+}
+
+async function updateDownloadableModrinthProjects(projectTypes = ['resourcepack'], modContext = getActiveModContext()) {
+  const state = readDownloadableModrinthState();
+  const updated = [];
+  const warnings = [];
+  let total = 0;
+
+  for (const projectType of projectTypes) {
+    const normalizedProjectType = normalizeModrinthProjectType(projectType);
+    if (normalizedProjectType !== 'shader' && normalizedProjectType !== 'resourcepack') {
+      continue;
+    }
+
+    const downloadTarget = getModrinthDownloadTarget(normalizedProjectType, modContext);
+    const bucket = getDownloadableModrinthBucket(state, normalizedProjectType);
+    const entries = Object.entries(bucket || {})
+      .filter(([stateKey, entry]) => downloadableModrinthEntryMatchesContext(stateKey, entry, modContext));
+    total += entries.length;
+
+    for (const [stateKey, entry] of entries) {
+      const projectId = getDownloadableModrinthEntryProjectId(stateKey, entry);
+      const existingPath = getDownloadableModrinthEntryPath(entry, downloadTarget.directory);
+      if (!existingPath) {
+        delete bucket[stateKey];
+        writeDownloadableModrinthState(state);
+        warnings.push(`${entry?.title || projectId}: Datei wurde nicht mehr gefunden und aus der Liste entfernt.`);
+        continue;
+      }
+
+      try {
+        const result = await installDownloadableModrinthProject({
+          projectId,
+          slug: entry.slug,
+          title: entry.title || projectId,
+          projectType: normalizedProjectType
+        }, normalizedProjectType, {
+          versionId: modContext.versionId,
+          packId: modContext.packId || ''
+        });
+        if (result?.success) {
+          updated.push(projectId);
+        } else if (result?.error) {
+          if (/Keine passende Version/iu.test(result.error)) {
+            const removed = removeTrackedDownloadableModrinthFiles(
+              state,
+              normalizedProjectType,
+              projectId,
+              downloadTarget.directory,
+              '',
+              modContext
+            );
+            if (removed) {
+              writeDownloadableModrinthState(state);
+              warnings.push(`${entry?.title || projectId}: Keine passende Version für Minecraft ${modContext.minecraftVersion}; Eintrag wurde entfernt.`);
+            } else {
+              warnings.push(`${entry?.title || projectId}: Keine passende Version; die alte Datei konnte nicht entfernt werden.`);
+            }
+          } else {
+            warnings.push(`${entry?.title || projectId}: ${result.error}`);
+          }
+        }
+      } catch (error) {
+        warnings.push(`${entry?.title || projectId}: ${error.message}`);
+      }
+    }
+  }
+
+  return {
+    updated: uniqueStrings(updated).length,
+    total,
+    warnings: uniqueStrings(warnings)
+  };
+}
+
+function getDownloadableModrinthEntryPath(entry, targetDirectory) {
+  const entryPath = String(entry?.path || '').trim();
+  if (entryPath && isPathInsideDirectory(targetDirectory, entryPath) && fs.existsSync(entryPath)) {
+    return entryPath;
+  }
+
+  const fileName = String(entry?.fileName || '').trim();
+  if (!fileName) {
+    return '';
+  }
+
+  const candidatePath = path.join(targetDirectory, path.basename(fileName));
+  return isPathInsideDirectory(targetDirectory, candidatePath) && fs.existsSync(candidatePath)
+    ? candidatePath
+    : '';
+}
+
+function getExistingDownloadableModrinthEntry(state, projectType, projectId, targetDirectory, modContext = getActiveModContext()) {
+  const bucket = getDownloadableModrinthBucket(state, projectType);
+  const stateKey = createDownloadableModrinthStateKey(projectId, modContext);
+  const entry = bucket?.[stateKey] || (getDownloadableModrinthContextKey(modContext) === 'global' ? bucket?.[projectId] : null);
+  if (!entry) {
+    return null;
+  }
+
+  const existingPath = getDownloadableModrinthEntryPath(entry, targetDirectory);
+  if (!existingPath) {
+    delete bucket[stateKey];
+    delete bucket[projectId];
+    return null;
+  }
+
+  return {
+    ...entry,
+    stateKey,
+    contextKey: getDownloadableModrinthContextKey(modContext),
+    projectId,
+    fileName: path.basename(existingPath),
+    path: existingPath
+  };
+}
+
+function removeTrackedDownloadableModrinthFiles(state, projectType, projectId, targetDirectory, keepPath = '', modContext = getActiveModContext()) {
+  const bucket = getDownloadableModrinthBucket(state, projectType);
+  const stateKey = createDownloadableModrinthStateKey(projectId, modContext);
+  const legacyStateKey = getDownloadableModrinthContextKey(modContext) === 'global' ? projectId : '';
+  const entry = bucket?.[stateKey] || (legacyStateKey ? bucket?.[legacyStateKey] : null);
+  if (!entry) {
+    return true;
+  }
+
+  const normalizedKeepPath = keepPath ? getComparablePath(keepPath) : '';
+  const candidatePaths = uniqueStrings([
+    String(entry.path || '').trim(),
+    entry.fileName ? path.join(targetDirectory, path.basename(entry.fileName)) : ''
+  ]);
+  let cleanupSucceeded = true;
+
+  for (const candidatePath of candidatePaths) {
+    if (!candidatePath
+        || !isPathInsideDirectory(targetDirectory, candidatePath)
+        || (normalizedKeepPath && getComparablePath(candidatePath) === normalizedKeepPath)
+        || !fs.existsSync(candidatePath)) {
+      continue;
+    }
+
+    try {
+      fs.unlinkSync(candidatePath);
+    } catch (_error) {
+      cleanupSucceeded = false;
+    }
+  }
+
+  if (cleanupSucceeded) {
+    delete bucket[stateKey];
+    if (legacyStateKey) {
+      delete bucket[legacyStateKey];
+    }
+  }
+
+  return cleanupSucceeded;
+}
+
+async function removeDownloadableModrinthEntry(modId, modContext = getActiveModContext()) {
+  const match = String(modId || '').trim().match(/^download:(shader|resourcepack):(.+)$/u);
+  if (!match) {
+    return { success: false, error: 'Unbekannter Download-Typ.' };
+  }
+  const projectType = match[1];
+  const projectId = String(match[2] || '').trim();
+  const downloadTarget = getModrinthDownloadTarget(projectType, modContext);
+  const state = readDownloadableModrinthState();
+  const bucket = getDownloadableModrinthBucket(state, projectType);
+  const stateKey = createDownloadableModrinthStateKey(projectId, modContext);
+  const entry = bucket?.[stateKey] || (getDownloadableModrinthContextKey(modContext) === 'global' ? bucket?.[projectId] : null);
+  if (!entry) {
+    return { success: false, error: 'Der Eintrag wurde nicht mehr gefunden.' };
+  }
+  if (isMinecraftMutationLocked()) {
+    return { success: false, error: "Can't be deleted while Minecraft is running." };
+  }
+  if (!removeTrackedDownloadableModrinthFiles(state, projectType, projectId, downloadTarget.directory, '', modContext)) {
+    return {
+      success: false,
+      error: `${entry.title || projectId} konnte nicht vollständig entfernt werden.`
+    };
+  }
+  writeDownloadableModrinthState(state);
+  return {
+    success: true,
+    message: `${entry.title || entry.fileName || projectId} wurde aus ${downloadTarget.folderLabel} entfernt.`
+  };
+}
+
+function findDownloadableModrinthFileBySha1(targetDirectory, expectedSha1) {
+  const normalizedExpectedSha1 = String(expectedSha1 || '').trim().toLowerCase();
+  if (!normalizedExpectedSha1 || !fs.existsSync(targetDirectory)) {
+    return '';
+  }
+
+  for (const fileName of fs.readdirSync(targetDirectory).filter((entry) => entry.toLowerCase().endsWith('.zip'))) {
+    const candidatePath = path.join(targetDirectory, fileName);
+    if (!isPathInsideDirectory(targetDirectory, candidatePath)) {
+      continue;
+    }
+
+    try {
+      if (fs.statSync(candidatePath).isFile() && getFileSha1(candidatePath).toLowerCase() === normalizedExpectedSha1) {
+        return candidatePath;
+      }
+    } catch (_error) {
+      // Ignore unreadable files and keep checking the rest of the folder.
+    }
+  }
+
+  return '';
+}
+
+async function findDownloadableModrinthFileByProjectId(targetDirectory, projectId) {
+  const normalizedProjectId = String(projectId || '').trim();
+  if (!normalizedProjectId || !fs.existsSync(targetDirectory)) {
+    return null;
+  }
+
+  for (const fileName of fs.readdirSync(targetDirectory).filter((entry) => entry.toLowerCase().endsWith('.zip'))) {
+    const candidatePath = path.join(targetDirectory, fileName);
+    if (!isPathInsideDirectory(targetDirectory, candidatePath)) {
+      continue;
+    }
+
+    let sha1 = '';
+    try {
+      if (!fs.statSync(candidatePath).isFile()) {
+        continue;
+      }
+      sha1 = getFileSha1(candidatePath).toLowerCase();
+    } catch (_error) {
+      continue;
+    }
+
+    try {
+      const versionData = await fetchModrinthVersionByFileHash(sha1);
+      if (String(versionData?.project_id || '').trim() !== normalizedProjectId) {
+        continue;
+      }
+
+      return {
+        path: candidatePath,
+        fileName,
+        sha1,
+        versionId: String(versionData?.id || '').trim(),
+        versionNumber: String(versionData?.version_number || '').trim(),
+        versionName: String(versionData?.name || '').trim()
+      };
+    } catch (_error) {
+      // Non-Modrinth or offline-unresolvable ZIPs are ignored.
+    }
+  }
+
+  return null;
+}
+
+function writeDownloadableModrinthEntry(state, projectType, projectId, entry, modContext = getActiveModContext()) {
+  const bucket = getDownloadableModrinthBucket(state, projectType);
+  if (!bucket) {
+    return;
+  }
+
+  const contextKey = getDownloadableModrinthContextKey(modContext);
+  const stateKey = createDownloadableModrinthStateKey(projectId, modContext);
+  if (contextKey === 'global' && bucket[projectId]) {
+    delete bucket[projectId];
+  }
+
+  bucket[stateKey] = {
+    projectId,
+    contextKey,
+    projectType: normalizeModrinthProjectType(projectType),
+    slug: String(entry.slug || '').trim(),
+    title: String(entry.title || '').trim(),
+    description: String(entry.description || '').trim(),
+    iconUrl: String(entry.iconUrl || '').trim(),
+    minecraftVersion: String(entry.minecraftVersion || '').trim(),
+    versionId: String(entry.versionId || '').trim(),
+    versionNumber: String(entry.versionNumber || '').trim(),
+    versionName: String(entry.versionName || '').trim(),
+    fileName: String(entry.fileName || '').trim(),
+    path: String(entry.path || '').trim(),
+    sha1: String(entry.sha1 || '').trim().toLowerCase(),
+    sha512: String(entry.sha512 || '').trim().toLowerCase(),
+    size: Number(entry.size || 0),
+    installedAt: String(entry.installedAt || '').trim() || new Date().toISOString()
+  };
+}
+
+function getModrinthDownloadTarget(projectType, modContext = getActiveModContext()) {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  if (normalizedProjectType === 'shader') {
+    return {
+      typeLabel: 'Shader',
+      folderLabel: 'shaderpacks',
+      directory: modContext?.shaderpacksDir || SHADERPACKS_DIR,
+      extension: '.zip'
+    };
+  }
+
+  return {
+    typeLabel: 'Ressourcenpaket',
+    folderLabel: 'resourcepacks',
+    directory: modContext?.resourcepacksDir || RESOURCEPACKS_DIR,
+    extension: '.zip'
+  };
+}
+
+async function installDownloadableModrinthProject(projectReference, projectType, installTarget = {}) {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) {
+    return {
+      success: false,
+      error: 'Modrinth-Projekt konnte nicht gelesen werden.'
+    };
+  }
+
+  let modContext;
+  try {
+    modContext = getModrinthInstallContext(installTarget);
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+
+  const minecraftVersion = String(modContext.minecraftVersion || '').trim();
+  if (!minecraftVersion) {
+    return {
+      success: false,
+      error: 'Bitte wähle zuerst eine Fabric-Version aus.'
+    };
+  }
+
+  // Packs are never pinned: installation and automatic updates always resolve
+  // the newest release compatible with the selected Minecraft profile.
+  const compatibleVersion = await getCompatibleModrinthProjectVersion(projectId, minecraftVersion, {
+    projectType: normalizedProjectType,
+    strictMinecraftVersion: true,
+    forceRefresh: true
+  });
+  if (!compatibleVersion) {
+    return {
+      success: false,
+      error: `Keine passende Version für Minecraft ${minecraftVersion} gefunden.`
+    };
+  }
+
+  const primaryFile = getPrimaryProjectFile(compatibleVersion, normalizedProjectType);
+  if (!primaryFile) {
+    return {
+      success: false,
+      error: 'Keine herunterladbare Datei gefunden.'
+    };
+  }
+
+  const downloadTarget = getModrinthDownloadTarget(normalizedProjectType, modContext);
+  ensureDir(downloadTarget.directory);
+
+  const fileName = sanitizeDownloadedFileName(primaryFile.filename, downloadTarget.extension);
+  const destinationPath = path.join(downloadTarget.directory, fileName);
+  const expectedSha1 = String(primaryFile.hashes?.sha1 || '').trim().toLowerCase();
+  const expectedSha512 = String(primaryFile.hashes?.sha512 || '').trim().toLowerCase();
+  const expectedSize = Number(primaryFile.size || 0);
+  // Modrinth resource-pack metadata can lag behind the actual CDN file. The
+  // transport is still restricted to trusted HTTPS hosts, checked against the
+  // HTTP Content-Length and validated as a ZIP. Mods and shaders keep strict
+  // metadata hash/size validation.
+  const hasAdvisoryResourcePackMetadata = normalizedProjectType === 'resourcepack';
+  const integrityExpectedSha1 = hasAdvisoryResourcePackMetadata ? '' : expectedSha1;
+  const integrityExpectedSha512 = hasAdvisoryResourcePackMetadata ? '' : expectedSha512;
+  const integrityExpectedSize = hasAdvisoryResourcePackMetadata ? 0 : expectedSize;
+  const title = getModrinthProjectTitle(projectReference) || projectId;
+  const warning = getModrinthTargetChangeWarning(installTarget, modContext);
+  const state = readDownloadableModrinthState();
+  const existingProjectEntry = getExistingDownloadableModrinthEntry(
+    state,
+    normalizedProjectType,
+    projectId,
+    downloadTarget.directory,
+    modContext
+  );
+  let replacedExistingDownload = Boolean(existingProjectEntry);
+
+  if (existingProjectEntry) {
+    let existingFileMatches = false;
+    try {
+      existingFileMatches = verifyFileIntegrity(existingProjectEntry.path, {
+        expectedSha1: integrityExpectedSha1,
+        expectedSha512: integrityExpectedSha512,
+        expectedSize: integrityExpectedSize,
+        requireZipEndRecord: true
+      }).ok;
+    } catch (_error) {
+      existingFileMatches = false;
+    }
+
+    if (existingFileMatches || existingProjectEntry.versionId === String(compatibleVersion.id || '').trim()) {
+      writeDownloadableModrinthEntry(state, normalizedProjectType, projectId, {
+        ...existingProjectEntry,
+        slug: String(projectReference?.slug || existingProjectEntry.slug || '').trim(),
+        title,
+        description: String(projectReference?.description || existingProjectEntry.description || '').trim(),
+        iconUrl: String(projectReference?.iconUrl || projectReference?.icon_url || existingProjectEntry.iconUrl || '').trim(),
+        minecraftVersion,
+        versionId: String(compatibleVersion.id || existingProjectEntry.versionId || '').trim(),
+        versionNumber: String(compatibleVersion.version_number || existingProjectEntry.versionNumber || '').trim(),
+        versionName: String(compatibleVersion.name || existingProjectEntry.versionName || '').trim(),
+        sha1: expectedSha1 || existingProjectEntry.sha1,
+        sha512: expectedSha512 || existingProjectEntry.sha512,
+        size: expectedSize || existingProjectEntry.size,
+        installedAt: existingProjectEntry.installedAt || new Date().toISOString()
+      }, modContext);
+      writeDownloadableModrinthState(state);
+      return {
+        success: true,
+        warning,
+        message: `${title} ist bereits in ${downloadTarget.folderLabel} installiert.`,
+        path: existingProjectEntry.path
+      };
+    }
+  }
+
+  const existingHashPath = findDownloadableModrinthFileBySha1(downloadTarget.directory, expectedSha1);
+  if (existingHashPath) {
+    const cleanupSucceeded = removeTrackedDownloadableModrinthFiles(
+      state,
+      normalizedProjectType,
+      projectId,
+      downloadTarget.directory,
+      existingHashPath,
+      modContext
+    );
+    if (!cleanupSucceeded) {
+      return {
+        success: false,
+        error: `${title} ist bereits vorhanden, aber eine alte Datei konnte nicht entfernt werden.`
+      };
+    }
+
+    writeDownloadableModrinthEntry(state, normalizedProjectType, projectId, {
+      slug: String(projectReference?.slug || '').trim(),
+      title,
+      description: String(projectReference?.description || '').trim(),
+      iconUrl: String(projectReference?.iconUrl || projectReference?.icon_url || '').trim(),
+      minecraftVersion,
+      versionId: String(compatibleVersion.id || '').trim(),
+      versionNumber: String(compatibleVersion.version_number || '').trim(),
+      versionName: String(compatibleVersion.name || '').trim(),
+      fileName: path.basename(existingHashPath),
+      path: existingHashPath,
+      sha1: expectedSha1,
+      sha512: expectedSha512,
+      size: expectedSize,
+      installedAt: new Date().toISOString()
+    }, modContext);
+    writeDownloadableModrinthState(state);
+    return {
+      success: true,
+      warning,
+      message: `${title} ist bereits in ${downloadTarget.folderLabel} installiert.`,
+      path: existingHashPath
+    };
+  }
+
+  const existingProjectFile = await findDownloadableModrinthFileByProjectId(downloadTarget.directory, projectId);
+  if (existingProjectFile) {
+    const existingProjectFileMatches = existingProjectFile.versionId === String(compatibleVersion.id || '').trim()
+      || (expectedSha1 && existingProjectFile.sha1 === expectedSha1);
+
+    if (existingProjectFileMatches) {
+      writeDownloadableModrinthEntry(state, normalizedProjectType, projectId, {
+        slug: String(projectReference?.slug || '').trim(),
+        title,
+        description: String(projectReference?.description || '').trim(),
+        iconUrl: String(projectReference?.iconUrl || projectReference?.icon_url || '').trim(),
+        minecraftVersion,
+        versionId: String(compatibleVersion.id || existingProjectFile.versionId || '').trim(),
+        versionNumber: String(compatibleVersion.version_number || existingProjectFile.versionNumber || '').trim(),
+        versionName: String(compatibleVersion.name || existingProjectFile.versionName || '').trim(),
+        fileName: existingProjectFile.fileName,
+        path: existingProjectFile.path,
+        sha1: expectedSha1 || existingProjectFile.sha1,
+        sha512: expectedSha512,
+        size: expectedSize,
+        installedAt: new Date().toISOString()
+      }, modContext);
+      writeDownloadableModrinthState(state);
+      return {
+        success: true,
+        warning,
+        message: `${title} ist bereits in ${downloadTarget.folderLabel} installiert.`,
+        path: existingProjectFile.path
+      };
+    }
+
+    if (isPathInsideDirectory(downloadTarget.directory, existingProjectFile.path) && fs.existsSync(existingProjectFile.path)) {
+      try {
+        fs.unlinkSync(existingProjectFile.path);
+        replacedExistingDownload = true;
+      } catch (_error) {
+        return {
+          success: false,
+          error: `${path.basename(existingProjectFile.path)} konnte nicht ersetzt werden.`
+        };
+      }
+    }
+  }
+
+  if (!removeTrackedDownloadableModrinthFiles(state, normalizedProjectType, projectId, downloadTarget.directory, '', modContext)) {
+    return {
+      success: false,
+      error: `${title} konnte nicht aktualisiert werden, weil eine alte Datei nicht entfernt werden konnte.`
+    };
+  }
+
+  await downloadFile(primaryFile.url, destinationPath, {
+    expectedSha1: integrityExpectedSha1,
+    expectedSha512: integrityExpectedSha512,
+    expectedSize: integrityExpectedSize,
+    allowedHosts: TRUSTED_MODRINTH_DOWNLOAD_HOSTS,
+    backupExisting: false,
+    requireZipEndRecord: true
+  });
+  writeDownloadableModrinthEntry(state, normalizedProjectType, projectId, {
+    slug: String(projectReference?.slug || '').trim(),
+    title,
+    description: String(projectReference?.description || '').trim(),
+    iconUrl: String(projectReference?.iconUrl || projectReference?.icon_url || '').trim(),
+    minecraftVersion,
+    versionId: String(compatibleVersion.id || '').trim(),
+    versionNumber: String(compatibleVersion.version_number || '').trim(),
+    versionName: String(compatibleVersion.name || '').trim(),
+    fileName,
+    path: destinationPath,
+    sha1: expectedSha1,
+    sha512: expectedSha512,
+    size: expectedSize,
+    installedAt: new Date().toISOString()
+  }, modContext);
+  writeDownloadableModrinthState(state);
+
+  return {
+    success: true,
+    warning,
+    message: replacedExistingDownload
+      ? `${title} wurde in ${downloadTarget.folderLabel} aktualisiert.`
+      : `${title} wurde in ${downloadTarget.folderLabel} gespeichert.`,
+    path: destinationPath
+  };
+}
+
+function getModpackFileHashes(fileEntry) {
+  const rawHashes = fileEntry?.hashes && typeof fileEntry.hashes === 'object' ? fileEntry.hashes : {};
+  return Object.fromEntries(
+    Object.entries(rawHashes)
+      .map(([algorithm, value]) => [
+        String(algorithm || '').trim().toLowerCase(),
+        String(value || '').trim().toLowerCase()
+      ])
+      .filter(([algorithm, value]) => algorithm && value)
+  );
+}
+
+function getModpackDownloadUrl(fileEntry) {
+  const downloads = Array.isArray(fileEntry?.downloads) ? fileEntry.downloads : [];
+  for (const downloadUrl of downloads) {
+    const normalizedUrl = String(downloadUrl || '').trim();
+    if (!normalizedUrl) {
+      continue;
+    }
+
+    assertTrustedHttpsUrl(normalizedUrl);
+    return normalizedUrl;
+  }
+
+  return '';
+}
+
+function shouldInstallModpackFileForClient(fileEntry) {
+  const clientEnv = String(fileEntry?.env?.client || 'required').trim().toLowerCase();
+  return clientEnv !== 'unsupported' && clientEnv !== 'incompatible';
+}
+
+function parseModrinthPackIndex(mrpackPath) {
+  const indexText = readZipTextEntry(mrpackPath, 'modrinth.index.json');
+  if (!indexText) {
+    throw new Error('Modpack-Manifest modrinth.index.json wurde nicht gefunden.');
+  }
+
+  let index;
+  try {
+    index = JSON.parse(indexText);
+  } catch (error) {
+    throw new Error(`Modpack-Manifest konnte nicht gelesen werden: ${error.message}`);
+  }
+
+  if (!index || typeof index !== 'object') {
+    throw new Error('Modpack-Manifest ist ungültig.');
+  }
+  if (String(index.game || '').trim().toLowerCase() !== 'minecraft') {
+    throw new Error('Nur Minecraft-Modpacks werden unterstützt.');
+  }
+
+  const dependencies = index.dependencies && typeof index.dependencies === 'object'
+    ? index.dependencies
+    : {};
+  const minecraftVersion = String(dependencies.minecraft || '').trim();
+  const fabricLoaderVersion = String(dependencies['fabric-loader'] || dependencies.fabricLoader || '').trim();
+  if (!minecraftVersion) {
+    throw new Error('Das Modpack nennt keine Minecraft-Version.');
+  }
+  if (!fabricLoaderVersion) {
+    throw new Error('Nur Fabric-Modpacks können in diesem Launcher installiert werden.');
+  }
+
+  return {
+    name: String(index.name || '').trim(),
+    summary: String(index.summary || '').trim(),
+    versionId: String(index.versionId || '').trim(),
+    files: Array.isArray(index.files) ? index.files : [],
+    dependencies,
+    minecraftVersion,
+    fabricLoaderVersion
+  };
+}
+
+function createFabricVersionId(minecraftVersion, fabricLoaderVersion) {
+  return `fabric-loader-${String(fabricLoaderVersion || '').trim()}-${String(minecraftVersion || '').trim()}`;
+}
+
+function createPackRecordWithoutDefaultInstall(name, versionId) {
+  const normalizedName = normalizePackName(name);
+  const normalizedVersionId = String(versionId || '').trim();
+  const state = readPacksState();
+  const packId = createPackId(normalizedName, state.packs.map((pack) => pack.id));
+  const packDir = path.join(PACKS_DIR, sanitizePathSegment(packId));
+  const modsDir = path.join(packDir, 'mods');
+  const resourcepacksDir = path.join(packDir, 'resourcepacks');
+  const shaderpacksDir = path.join(packDir, 'shaderpacks');
+  const now = new Date().toISOString();
+
+  ensureDir(packDir);
+  ensureDir(modsDir);
+  ensureDir(resourcepacksDir);
+  ensureDir(shaderpacksDir);
+  state.packs.push({
+    id: packId,
+    name: normalizedName,
+    versionId: normalizedVersionId,
+    createdAt: now,
+    updatedAt: now,
+    packDir,
+    modsDir,
+    resourcepacksDir,
+    shaderpacksDir
+  });
+  state.activePackId = packId;
+  writePacksState(state);
+  syncOfficialLauncherProfiles();
+
+  return readPacksState().packs.find((pack) => pack.id === packId);
+}
+
+function updateExistingPackForModpack(packId, versionId) {
+  const normalizedPackId = String(packId || '').trim();
+  const normalizedVersionId = String(versionId || '').trim();
+  const targetMinecraftVersion = getMinecraftVersionName(normalizedVersionId);
+  const state = readPacksState();
+  const existingPack = state.packs.find((pack) => pack.id === normalizedPackId);
+  if (!existingPack) {
+    throw new Error('Das ausgewählte Profil wurde nicht gefunden.');
+  }
+
+  const existingMinecraftVersion = getMinecraftVersionName(existingPack.versionId);
+  if (targetMinecraftVersion && existingMinecraftVersion !== targetMinecraftVersion) {
+    throw new Error(`Das ausgewählte Profil nutzt Minecraft ${existingMinecraftVersion || 'eine andere Version'}, das Modpack ist für Minecraft ${targetMinecraftVersion}.`);
+  }
+
+  state.packs = state.packs.map((pack) => (
+    pack.id === normalizedPackId
+      ? {
+          ...pack,
+          updatedAt: new Date().toISOString()
+        }
+      : pack
+  ));
+  state.activePackId = normalizedPackId;
+  writePacksState(state);
+
+  return readPacksState().packs.find((pack) => pack.id === normalizedPackId);
+}
+
+function getModpackIgnoredDefaultProjects(importedProjectIds = new Set()) {
+  return DEFAULT_PACK_PROJECTS
+    .map((projectReference) => getModrinthProjectId(projectReference))
+    .filter((projectId) => projectId && !isRequiredDefaultManagedProject(projectId) && !importedProjectIds.has(projectId));
+}
+
+function hashBuffer(buffer, algorithm = 'sha1') {
+  return crypto.createHash(algorithm).update(buffer).digest('hex');
+}
+
+function writeBufferIfChanged(targetPath, data) {
+  ensureDir(path.dirname(targetPath));
+  if (fs.existsSync(targetPath)) {
+    const existingHash = hashFile(targetPath, 'sha1');
+    const nextHash = hashBuffer(data, 'sha1');
+    if (existingHash === nextHash) {
+      return false;
+    }
+
+  }
+
+  fs.writeFileSync(targetPath, data);
+  return true;
+}
+
+function addModpackManagedProjectToState(state, projectId, projectInfo, versionEntry, minecraftVersion) {
+  const normalizedProjectId = String(projectId || '').trim();
+  if (!normalizedProjectId || !versionEntry?.libraryPath) {
+    return;
+  }
+
+  const currentProject = state.projects[normalizedProjectId] || {};
+  state.projects[normalizedProjectId] = {
+    projectId: normalizedProjectId,
+    slug: String(projectInfo?.slug || currentProject.slug || '').trim(),
+    title: String(projectInfo?.title || currentProject.title || versionEntry.fileName || normalizedProjectId).trim(),
+    description: String(projectInfo?.description || currentProject.description || '').trim(),
+    iconUrl: String(projectInfo?.iconUrl || projectInfo?.icon_url || currentProject.iconUrl || '').trim(),
+    clientSide: String(projectInfo?.clientSide || projectInfo?.client_side || currentProject.clientSide || 'required').trim(),
+    serverSide: String(projectInfo?.serverSide || projectInfo?.server_side || currentProject.serverSide || 'optional').trim(),
+    versions: {
+      ...(currentProject.versions || {}),
+      [minecraftVersion]: versionEntry
+    }
+  };
+}
+
+function archiveExistingProfileJarsBeforeModpackInstall(modContext) {
+  const archiveRoot = path.join(modContext.libraryDir, '_before-modpack-install', String(Date.now()));
+  const sourceDirs = [
+    { dir: modContext.modsDir, label: 'mods' },
+    { dir: getDisabledModsDir(modContext), label: 'disabled' }
+  ];
+  let archived = 0;
+
+  for (const source of sourceDirs) {
+    if (!fs.existsSync(source.dir)) {
+      continue;
+    }
+
+    for (const fileName of fs.readdirSync(source.dir).filter((entry) => entry.toLowerCase().endsWith('.jar'))) {
+      const sourcePath = path.join(source.dir, fileName);
+      if (!isPathInsideDirectory(source.dir, sourcePath) || !fs.existsSync(sourcePath)) {
+        continue;
+      }
+
+      const targetDir = path.join(archiveRoot, source.label);
+      const targetPath = path.join(targetDir, sanitizeJarFileName(fileName));
+      if (!isPathInsideDirectory(archiveRoot, targetPath)) {
+        continue;
+      }
+
+      ensureDir(targetDir);
+      try {
+        fs.renameSync(sourcePath, targetPath);
+        archived += 1;
+      } catch (_error) {
+        try {
+          fs.copyFileSync(sourcePath, targetPath);
+          fs.unlinkSync(sourcePath);
+          archived += 1;
+        } catch (copyError) {
+          logger.warn('Could not archive existing profile jar before modpack install', {
+            sourcePath,
+            targetPath,
+            error: serializeError(copyError)
+          });
+        }
+      }
+    }
+  }
+
+  return archived;
+}
+
+async function resolveModpackFileProjectInfo(fileEntry, fallbackFileName) {
+  const hashes = getModpackFileHashes(fileEntry);
+  const sha1 = hashes.sha1 || '';
+  if (!sha1) {
+    return {
+      projectId: '',
+      projectInfo: null,
+      versionData: null,
+      rejectedReason: `${fallbackFileName}: Keine Modrinth-Prüfsumme gefunden; nur Modrinth-Fabric-Mods werden installiert.`
+    };
+  }
+
+  try {
+    const versionData = await fetchModrinthVersionByFileHash(sha1);
+    const projectId = String(versionData?.project_id || '').trim();
+    if (!projectId) {
+      return { projectId: '', projectInfo: null, versionData: null };
+    }
+
+    let projectInfo = null;
+    let projectType = 'mod';
+    try {
+      const remoteProject = await fetchModrinthProject(projectId);
+      projectType = normalizeModrinthProjectType(remoteProject?.project_type || 'mod');
+      if (projectType === 'mod') {
+        projectInfo = remoteProject;
+      }
+    } catch (_error) {
+      projectInfo = null;
+    }
+
+    if (projectType !== 'mod') {
+      return {
+        projectId: '',
+        projectInfo: null,
+        versionData: null,
+        rejectedReason: `${fallbackFileName}: Ist kein Modrinth-Mod und wurde übersprungen.`
+      };
+    }
+
+    const loaders = getModrinthVersionLoaders(versionData);
+    if (!loaders.includes('fabric')) {
+      return {
+        projectId: '',
+        projectInfo: null,
+        versionData: null,
+        rejectedReason: `${fallbackFileName}: Ist keine Fabric-Mod und wurde übersprungen.`
+      };
+    }
+
+    return {
+      projectId,
+      projectInfo: projectInfo || {
+        title: String(versionData?.name || fallbackFileName || projectId).trim()
+      },
+      versionData,
+      rejectedReason: ''
+    };
+  } catch (_error) {
+    return {
+      projectId: '',
+      projectInfo: null,
+      versionData: null,
+      rejectedReason: `${fallbackFileName}: Konnte nicht als Modrinth-Fabric-Mod erkannt werden und wurde übersprungen.`
+    };
+  }
+}
+
+async function downloadModpackManagedFile(fileEntry, modContext, minecraftVersion, state) {
+  const relativePath = normalizeZipRelativePath(fileEntry?.path || '');
+  if (!relativePath || !relativePath.toLowerCase().startsWith('mods/')) {
+    return { installed: false, warning: '' };
+  }
+  if (!relativePath.toLowerCase().endsWith('.jar')) {
+    return {
+      installed: false,
+      warning: `${relativePath}: Nur JAR-Dateien im Modpack-Mods-Ordner werden installiert.`
+    };
+  }
+
+  const downloadUrl = getModpackDownloadUrl(fileEntry);
+  if (!downloadUrl) {
+    return {
+      installed: false,
+      warning: `${relativePath}: Keine HTTPS-Download-URL im Modpack gefunden.`
+    };
+  }
+
+  const hashes = getModpackFileHashes(fileEntry);
+  const fallbackFileName = sanitizeJarFileName(path.basename(relativePath));
+  const resolvedInfo = await resolveModpackFileProjectInfo(fileEntry, fallbackFileName);
+  if (resolvedInfo.rejectedReason || !resolvedInfo.projectId || !resolvedInfo.versionData) {
+    return {
+      installed: false,
+      warning: `${relativePath}: ${resolvedInfo.rejectedReason || 'Nur erkannte Modrinth-Fabric-Mods werden installiert.'}`
+    };
+  }
+
+  const hashKey = hashes.sha1 || hashes.sha512 || hashBuffer(Buffer.from(relativePath), 'sha1');
+  const projectId = resolvedInfo.projectId;
+  const versionId = String(resolvedInfo.versionData.id || `mrpack-${hashKey.slice(0, 20)}`).trim();
+  const libraryPath = getManagedLibraryPath(modContext, projectId, versionId, fallbackFileName);
+
+  await downloadFile(downloadUrl, libraryPath, {
+    expectedHashes: hashes,
+    expectedSize: Number(fileEntry?.fileSize || fileEntry?.size || 0),
+    backupExisting: false
+  });
+
+  if (!readFabricModManifest(libraryPath)?.manifest) {
+    try {
+      if (fs.existsSync(libraryPath) && isPathInsideDirectory(modContext.libraryDir, libraryPath)) {
+        fs.unlinkSync(libraryPath);
+      }
+    } catch (_error) {
+      // A later cache cleanup can remove it; the file is not added to state.
+    }
+    return {
+      installed: false,
+      warning: `${relativePath}: Datei hat kein Fabric-Mod-Manifest und wurde übersprungen.`
+    };
+  }
+
+  const stats = fs.statSync(libraryPath);
+  const versionData = resolvedInfo.versionData || {};
+  const projectInfo = resolvedInfo.projectInfo || {
+    title: fallbackFileName,
+    description: 'Aus einem Modrinth-Modpack importierte Datei.',
+    client_side: 'required',
+    server_side: 'optional'
+  };
+  const versionEntry = {
+    minecraftVersion,
+    versionId,
+    versionNumber: String(versionData.version_number || minecraftVersion).trim(),
+    versionName: String(versionData.name || `${fallbackFileName} (${minecraftVersion})`).trim(),
+    versionType: String(versionData.version_type || 'release').trim(),
+    publishedAt: String(versionData.date_published || '').trim(),
+    fileName: fallbackFileName,
+    libraryPath,
+    size: Number(fileEntry?.fileSize || fileEntry?.size || stats.size || 0),
+    sha1: String(hashes.sha1 || getFileSha1(libraryPath)).trim().toLowerCase(),
+    sha512: String(hashes.sha512 || '').trim().toLowerCase(),
+    gameVersions: uniqueStrings([
+      minecraftVersion,
+      ...(Array.isArray(versionData.game_versions) ? versionData.game_versions : [])
+    ]),
+    loaders: uniqueStrings([
+      'fabric',
+      ...(Array.isArray(versionData.loaders) ? versionData.loaders : [])
+    ]).map((entry) => entry.toLowerCase()),
+    matchScore: 5,
+    checkedMinecraftVersion: minecraftVersion,
+    dependencies: [],
+    dependencyDetails: [],
+    syncedAt: new Date().toISOString()
+  };
+
+  addModpackManagedProjectToState(state, projectId, projectInfo, versionEntry, minecraftVersion);
+  return {
+    installed: true,
+    projectId,
+    warning: ''
+  };
+}
+
+async function downloadModpackRootFile(fileEntry, minecraftVersion) {
+  const relativePath = normalizeZipRelativePath(fileEntry?.path || '');
+  if (!relativePath || relativePath.toLowerCase().startsWith('mods/')) {
+    return { installed: false, warning: '' };
+  }
+
+  const downloadUrl = getModpackDownloadUrl(fileEntry);
+  if (!downloadUrl) {
+    return {
+      installed: false,
+      warning: `${relativePath}: Keine HTTPS-Download-URL im Modpack gefunden.`
+    };
+  }
+
+  const destinationPath = path.join(DEFAULT_MINECRAFT_DIR, relativePath);
+  if (!isPathInsideDirectory(DEFAULT_MINECRAFT_DIR, destinationPath)) {
+    return {
+      installed: false,
+      warning: `${relativePath}: Unsicherer Modpack-Pfad wurde übersprungen.`
+    };
+  }
+
+  await downloadFile(downloadUrl, destinationPath, {
+    expectedHashes: getModpackFileHashes(fileEntry),
+    expectedSize: Number(fileEntry?.fileSize || fileEntry?.size || 0),
+    backupExisting: false
+  });
+
+  return {
+    installed: true,
+    warning: '',
+    minecraftVersion
+  };
+}
+
+function installModpackOverrideEntries(mrpackPath, modContext, minecraftVersion, state) {
+  const archive = getZipCentralDirectoryEntries(mrpackPath);
+  const prefixes = ['overrides/', 'client-overrides/'];
+  const warnings = [];
+  const importedProjectIds = [];
+  let installedRootFiles = 0;
+  let installedModFiles = 0;
+
+  for (const entry of archive.entries) {
+    const entryName = String(entry.name || '').replace(/\\/g, '/');
+    const prefix = prefixes.find((candidate) => entryName.startsWith(candidate));
+    if (!prefix || entryName.endsWith('/')) {
+      continue;
+    }
+
+    const relativePath = normalizeZipRelativePath(entryName.slice(prefix.length));
+    if (!relativePath) {
+      warnings.push(`${entryName}: Unsicherer Override-Pfad wurde übersprungen.`);
+      continue;
+    }
+
+    let entryBuffer;
+    try {
+      entryBuffer = readZipEntryBufferFromArchive(archive, entry);
+    } catch (error) {
+      warnings.push(`${relativePath}: Override konnte nicht gelesen werden (${error.message}).`);
+      continue;
+    }
+
+    const isModsPath = relativePath.toLowerCase().startsWith('mods/');
+    const isModJar = isModsPath && relativePath.toLowerCase().endsWith('.jar');
+    if (isModJar) {
+      if (!bufferHasFabricModManifest(entryBuffer)) {
+        warnings.push(`${relativePath}: Override-JAR hat kein Fabric-Mod-Manifest und wurde übersprungen.`);
+        continue;
+      }
+
+      const fileName = sanitizeJarFileName(path.basename(relativePath));
+      const sha1 = hashBuffer(entryBuffer, 'sha1');
+      const sha512 = hashBuffer(entryBuffer, 'sha512');
+      const projectId = `mrpack-override-${sha1.slice(0, 18)}`;
+      const versionId = `mrpack-override-${sha1.slice(0, 18)}`;
+      const libraryPath = getManagedLibraryPath(modContext, projectId, versionId, fileName);
+      writeBufferIfChanged(libraryPath, entryBuffer, {
+        source: 'modpack-override',
+        relativePath,
+        minecraftVersion
+      });
+      addModpackManagedProjectToState(state, projectId, {
+        title: fileName,
+        description: 'Aus einem Modrinth-Modpack-Override importierte Datei.',
+        client_side: 'required',
+        server_side: 'optional'
+      }, {
+        minecraftVersion,
+        versionId,
+        versionNumber: minecraftVersion,
+        versionName: `${fileName} (${minecraftVersion})`,
+        versionType: 'release',
+        publishedAt: '',
+        fileName,
+        libraryPath,
+        size: entryBuffer.length,
+        sha1,
+        sha512,
+        gameVersions: [minecraftVersion],
+        loaders: ['fabric'],
+        matchScore: 5,
+        checkedMinecraftVersion: minecraftVersion,
+        dependencies: [],
+        dependencyDetails: [],
+        syncedAt: new Date().toISOString()
+      }, minecraftVersion);
+      importedProjectIds.push(projectId);
+      installedModFiles += 1;
+      continue;
+    }
+
+    if (isModsPath) {
+      warnings.push(`${relativePath}: Nur JAR-Overrides im Modpack-Mods-Ordner werden installiert.`);
+      continue;
+    }
+
+    const destinationPath = path.join(DEFAULT_MINECRAFT_DIR, relativePath);
+    if (!isPathInsideDirectory(DEFAULT_MINECRAFT_DIR, destinationPath)) {
+      warnings.push(`${relativePath}: Unsicherer Override-Zielpfad wurde übersprungen.`);
+      continue;
+    }
+
+    writeBufferIfChanged(destinationPath, entryBuffer, {
+      source: 'modpack-override',
+      relativePath,
+      minecraftVersion
+    });
+    installedRootFiles += 1;
+  }
+
+  return {
+    warnings,
+    importedProjectIds,
+    installedRootFiles,
+    installedModFiles
+  };
+}
+
+async function prepareModpackProfileTarget(target, defaultName, versionId) {
+  const installMode = String(target?.installMode || target?.modpackInstallMode || '').trim();
+  if (installMode === 'existing-profile') {
+    const pack = updateExistingPackForModpack(target?.packId, versionId);
+    ensureDir(pack.packDir);
+    ensureDir(pack.modsDir);
+    return getPackModContext(pack);
+  }
+
+  const normalizedName = normalizePackName(target?.packName || defaultName || 'Modpack');
+  if (!normalizedName) {
+    throw new Error('Bitte gib einen Profil-Namen ein.');
+  }
+
+  const pack = createPackRecordWithoutDefaultInstall(normalizedName, versionId);
+  return getPackModContext(pack);
+}
+
+async function installModrinthModpack(projectReference, target = {}) {
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) {
+    return {
+      success: false,
+      error: 'Modrinth-Modpack konnte nicht gelesen werden.'
+    };
+  }
+
+  let projectInfo = projectReference;
+  try {
+    projectInfo = await fetchModrinthProject(projectId);
+  } catch (_error) {
+    projectInfo = projectReference;
+  }
+
+  if (normalizeModrinthProjectType(projectInfo?.project_type || projectInfo?.projectType || 'modpack') !== 'modpack') {
+    return {
+      success: false,
+      error: 'Das ausgewählte Modrinth-Projekt ist kein Modpack.'
+    };
+  }
+
+  const requestedVersionId = String(target?.versionId || projectReference?.targetVersionId || '').trim();
+  const requestedMinecraftVersion = String(
+    target?.minecraftVersion
+    || projectReference?.targetMinecraftVersion
+    || getMinecraftVersionName(requestedVersionId)
+    || ''
+  ).trim();
+  const compatibleVersions = await getCompatibleModrinthProjectVersions(projectId, requestedMinecraftVersion, {
+    projectType: 'modpack',
+    strictMinecraftVersion: Boolean(requestedMinecraftVersion)
+  });
+  const compatibleVersion = requestedMinecraftVersion
+    ? compatibleVersions[0]
+    : (compatibleVersions.find((versionEntry) => (Array.isArray(versionEntry?.game_versions) ? versionEntry.game_versions : [])
+        .some((versionName) => isProfileMinecraftVersion(versionName))) || compatibleVersions[0]);
+  if (!compatibleVersion) {
+    return {
+      success: false,
+      error: requestedMinecraftVersion
+        ? `Keine Fabric-kompatible Modpack-Version für Minecraft ${requestedMinecraftVersion} gefunden.`
+        : 'Keine Fabric-kompatible Modpack-Version gefunden.'
+    };
+  }
+
+  const primaryFile = getPrimaryProjectFile(compatibleVersion, 'modpack');
+  if (!primaryFile) {
+    return {
+      success: false,
+      error: 'Keine .mrpack-Datei für dieses Modpack gefunden.'
+    };
+  }
+
+  ensureDir(MODPACK_CACHE_DIR);
+  const cacheDir = path.join(MODPACK_CACHE_DIR, sanitizePathSegment(projectId), sanitizePathSegment(compatibleVersion.id || 'latest'));
+  const mrpackFileName = sanitizeDownloadedFileName(primaryFile.filename || `${projectId}.mrpack`, '.mrpack');
+  const mrpackPath = path.join(cacheDir, mrpackFileName);
+  await downloadFile(primaryFile.url, mrpackPath, {
+    expectedSha1: String(primaryFile.hashes?.sha1 || '').trim(),
+    expectedSha512: String(primaryFile.hashes?.sha512 || '').trim(),
+    expectedSize: Number(primaryFile.size || 0),
+    allowedHosts: TRUSTED_MODRINTH_DOWNLOAD_HOSTS,
+    backupExisting: false
+  });
+
+  const packIndex = parseModrinthPackIndex(mrpackPath);
+  const minecraftVersion = packIndex.minecraftVersion;
+  if (requestedMinecraftVersion && minecraftVersion !== requestedMinecraftVersion) {
+    return {
+      success: false,
+      error: `Das Modpack ist für Minecraft ${minecraftVersion}, gesucht wurde Minecraft ${requestedMinecraftVersion}.`
+    };
+  }
+
+  const fabricVersionId = createFabricVersionId(minecraftVersion, packIndex.fabricLoaderVersion);
+  if (!isProfileFabricVersionAllowed(fabricVersionId)) {
+    return {
+      success: false,
+      error: getProfileMinecraftVersionsError()
+    };
+  }
+
+  await resolveSelectedVersion(fabricVersionId, { allowProfileVersions: true });
+  const title = getModrinthProjectTitle(projectInfo) || packIndex.name || projectId;
+  const modContext = await prepareModpackProfileTarget(target, title, fabricVersionId);
+  const installedVersionId = modContext.versionId || fabricVersionId;
+  const archivedExistingJars = archiveExistingProfileJarsBeforeModpackInstall(modContext);
+  const state = getDefaultModsState();
+  const importedProjectIds = new Set();
+  const warnings = [];
+  let installedManagedFiles = 0;
+  let installedRootFiles = 0;
+
+  for (const fileEntry of packIndex.files) {
+    if (!shouldInstallModpackFileForClient(fileEntry)) {
+      continue;
+    }
+
+    const relativePath = normalizeZipRelativePath(fileEntry?.path || '');
+    if (!relativePath) {
+      warnings.push('Ein Modpack-Dateipfad war ungültig und wurde übersprungen.');
+      continue;
+    }
+
+    try {
+      if (relativePath.toLowerCase().startsWith('mods/')) {
+        const result = await downloadModpackManagedFile(fileEntry, modContext, minecraftVersion, state);
+        if (result.installed) {
+          importedProjectIds.add(result.projectId);
+          installedManagedFiles += 1;
+        }
+        if (result.warning) {
+          warnings.push(result.warning);
+        }
+      } else {
+        const result = await downloadModpackRootFile(fileEntry, minecraftVersion);
+        if (result.installed) {
+          installedRootFiles += 1;
+        }
+        if (result.warning) {
+          warnings.push(result.warning);
+        }
+      }
+    } catch (error) {
+      warnings.push(`${relativePath}: Download fehlgeschlagen (${error.message}).`);
+    }
+  }
+
+  const overrideResult = installModpackOverrideEntries(mrpackPath, modContext, minecraftVersion, state);
+  overrideResult.importedProjectIds.forEach((entry) => importedProjectIds.add(entry));
+  installedManagedFiles += overrideResult.installedModFiles;
+  installedRootFiles += overrideResult.installedRootFiles;
+  warnings.push(...overrideResult.warnings);
+  state.ignoredDefaultProjects = getModpackIgnoredDefaultProjects(importedProjectIds);
+  writeModsState(state, modContext);
+
+  const syncResult = await syncManagedModsForVersion(installedVersionId, {
+    modContext,
+    refreshDisabledProjects: false
+  });
+  const warningText = formatManagedModsWarning([
+    ...warnings,
+    ...(syncResult.warnings || [])
+  ]);
+
+  return {
+    success: true,
+    activePackId: modContext.packId,
+    selectedVersionId: installedVersionId,
+    packs: getPacksConfig().packs,
+    warning: warningText,
+    message: `${title} wurde in Profil ${modContext.name} installiert (${installedManagedFiles} Mod-Dateien${installedRootFiles ? `, ${installedRootFiles} Zusatzdateien` : ''}${archivedExistingJars ? `, ${archivedExistingJars} alte JARs archiviert` : ''}).`,
+    mods: await getInstalledMods(installedVersionId)
+  };
+}
+
+async function installModrinthMod(projectReference, target = {}) {
+  const projectType = getModrinthProjectType(projectReference);
+  if (projectType === 'modpack') {
+    return installModrinthModpack(projectReference, target);
+  }
+
+  if (projectType !== 'mod') {
+    return installDownloadableModrinthProject(projectReference, projectType, target);
+  }
+
+  let modContext;
+  try {
+    modContext = getModrinthInstallContext(target);
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+
+  const selectedVersionId = modContext.versionId;
+  const minecraftVersion = modContext.minecraftVersion;
+  if (!minecraftVersion) {
+    return {
+      success: false,
+      error: 'Bitte wähle zuerst eine Fabric-Version aus.'
+    };
+  }
+
+  let installResult;
+  try {
+    installResult = await installManagedProjectVersion(projectReference, minecraftVersion, {
+      forceRefresh: true,
+      visitedProjects: new Set(),
+      modContext
+    });
+  } catch (error) {
+    if (!isMissingCompatibleModrinthVersionError(error)) {
+      throw error;
+    }
+
+    const syncResult = await syncManagedModsForVersion(selectedVersionId, { modContext });
+    const title = getModrinthProjectTitle(projectReference) || 'Die Mod';
+    return {
+      success: false,
+      warning: formatManagedModsWarning([
+        getModrinthTargetChangeWarning(target, modContext),
+        ...(syncResult.warnings || [])
+      ]),
+      error: `${title}: Keine passende Version für Minecraft ${minecraftVersion} gefunden.`,
+      mods: await getInstalledMods(selectedVersionId)
+    };
+  }
+  const syncResult = await syncManagedModsForVersion(selectedVersionId, { modContext });
+
+  return {
+    success: true,
+    warning: formatManagedModsWarning([
+      getModrinthTargetChangeWarning(target, modContext),
+      ...(installResult.warnings || []),
+      ...(syncResult.warnings || [])
+    ]),
+    message: modContext.type === 'pack'
+      ? `${installResult.title} wurde in ${modContext.name} installiert.`
+      : `${installResult.title} wurde für Fabric ${minecraftVersion} installiert.`,
+    mods: await getInstalledMods(selectedVersionId)
+  };
+}
+
+function normalizeDroppedModFilePaths(filePaths) {
+  return uniqueStrings(Array.isArray(filePaths) ? filePaths : [filePaths])
+    .map((filePath) => path.normalize(String(filePath || '').trim()))
+    .filter((filePath) => filePath && path.isAbsolute(filePath));
+}
+
+async function recognizeDroppedModFile(filePath) {
+  const fileName = path.basename(filePath);
+  if (!fs.existsSync(filePath)) {
+    return { recognized: false, filePath, fileName, error: `${fileName}: Datei wurde nicht gefunden.` };
+  }
+
+  const stats = fs.statSync(filePath);
+  if (!stats.isFile() || !fileName.toLowerCase().endsWith('.jar')) {
+    return { recognized: false, fileName, error: `${fileName}: Nur JAR-Dateien können als Mod hinzugefügt werden.` };
+  }
+
+  if (isJarFileCorrupted(filePath)) {
+    return { recognized: false, fileName, error: `${fileName}: JAR ist beschädigt und wurde nicht übernommen.` };
+  }
+
+  const sha1 = getFileSha1(filePath);
+  const manifestInfo = readFabricModManifest(filePath);
+  let exactVersion = null;
+  let remoteProject = null;
+
+  try {
+    exactVersion = await fetchModrinthVersionByFileHash(sha1);
+    const exactProjectId = String(exactVersion?.project_id || '').trim();
+    if (exactProjectId) {
+      const project = await fetchModrinthProject(exactProjectId);
+      if (normalizeModrinthProjectType(project?.project_type || 'mod') === 'mod') {
+        remoteProject = project;
+      }
+    }
+  } catch (_error) {
+    exactVersion = null;
+  }
+
+  if (!remoteProject && manifestInfo?.manifest) {
+    try {
+      const found = await findModrinthProjectForLocalMod(
+        manifestInfo.manifest,
+        manifestInfo.manifestText,
+        fileName
+      );
+      remoteProject = found.project || null;
+    } catch (_error) {
+      remoteProject = null;
+    }
+  }
+
+  if (!remoteProject) {
+    return {
+      recognized: false,
+      fileName,
+      error: `${fileName}: Mod wurde nicht erkannt und deshalb nicht übernommen.`
+    };
+  }
+
+  return {
+    recognized: true,
+    filePath,
+    fileName,
+    sha1,
+    manifestInfo,
+    exactVersion,
+    project: remoteProject
+  };
+}
+
+function droppedModExactVersionMatchesMinecraft(dropInfo, minecraftVersion) {
+  const exactVersion = dropInfo?.exactVersion;
+  if (!exactVersion) {
+    return true;
+  }
+
+  const gameVersions = Array.isArray(exactVersion.game_versions)
+    ? exactVersion.game_versions
+    : [];
+  if (!gameVersions.length) {
+    return true;
+  }
+
+  return isGameVersionListDeclaredForMinecraft(gameVersions, minecraftVersion)
+    || textContainsExactMinecraftVersion(getModrinthVersionSearchText(exactVersion, 'mod'), minecraftVersion)
+    || textContainsExactMinecraftVersion(dropInfo.fileName, minecraftVersion);
+}
+
+function droppedModMatchesMinecraft(dropInfo, minecraftVersion) {
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedMinecraftVersion) {
+    return false;
+  }
+
+  if (!droppedModExactVersionMatchesMinecraft(dropInfo, normalizedMinecraftVersion)) {
+    return false;
+  }
+
+  const compatibility = getJarMinecraftCompatibility(dropInfo.filePath, normalizedMinecraftVersion);
+  if (compatibility.compatible !== false) {
+    return true;
+  }
+
+  return compatibility.reasonType === 'depends'
+    && droppedModExactVersionMatchesMinecraft(dropInfo, normalizedMinecraftVersion);
+}
+
+async function resolveDroppedModsTargetVersion(recognizedMods) {
+  const currentVersionId = getEffectiveSelectedVersionId();
+  const currentContext = getActiveModContext(currentVersionId);
+  if (currentContext.versionId
+      && currentContext.minecraftVersion
+      && recognizedMods.every((dropInfo) => droppedModMatchesMinecraft(dropInfo, currentContext.minecraftVersion))) {
+    return {
+      versionId: currentContext.versionId,
+      minecraftVersion: currentContext.minecraftVersion,
+      changed: false
+    };
+  }
+
+  const availableVersions = await getAvailableVersions();
+  const candidates = (availableVersions.versions || [])
+    .filter((version) => isFabricVersionId(version.id))
+    .filter((version) => {
+      const minecraftVersion = String(version.minecraftVersion || getMinecraftVersionName(version.id) || '').trim();
+      return minecraftVersion
+        && isSupportedMinecraftVersion(minecraftVersion)
+        && recognizedMods.every((dropInfo) => droppedModMatchesMinecraft(dropInfo, minecraftVersion));
+    });
+
+  const selectedCandidate = candidates[0] || null;
+  if (!selectedCandidate) {
+    return {
+      versionId: '',
+      minecraftVersion: '',
+      changed: false,
+      error: 'Keine unterstützte Fabric-Version passt zu den gedroppten Mods.'
+    };
+  }
+
+  return {
+    versionId: selectedCandidate.id,
+    minecraftVersion: String(selectedCandidate.minecraftVersion || getMinecraftVersionName(selectedCandidate.id) || '').trim(),
+    changed: selectedCandidate.id !== currentVersionId
+  };
+}
+
+async function copyDroppedManualModFiles(filePaths, modContext, options = {}) {
+  const requireManualApproval = options.requireManualApproval !== false;
+  ensureDir(modContext.modsDir);
+  ensureDir(getDisabledModsDir(modContext));
+
+  const imported = [];
+  const failed = [];
+  for (const filePath of filePaths) {
+    const fileName = path.basename(filePath);
+    try {
+      if (!fs.existsSync(filePath)) {
+        failed.push(`${fileName}: Datei wurde nicht gefunden.`);
+        continue;
+      }
+
+      const stats = fs.statSync(filePath);
+      if (!stats.isFile() || !fileName.toLowerCase().endsWith('.jar')) {
+        failed.push(`${fileName}: Nur JAR-Dateien können als Mod hinzugefügt werden.`);
+        continue;
+      }
+
+      if (isJarFileCorrupted(filePath)) {
+        failed.push(`${fileName}: JAR ist beschädigt und wurde nicht übernommen.`);
+        continue;
+      }
+
+      const compatibility = options.checkMinecraftCompatibility
+        ? getJarMinecraftCompatibility(filePath, modContext.minecraftVersion)
+        : { compatible: true, requirement: '', modName: fileName };
+      const shouldDisableForVersion = compatibility.compatible === false;
+      const shouldDisable = shouldDisableForVersion || (!options.keepAsLocal && requireManualApproval);
+      const targetDir = shouldDisable ? getDisabledModsDir(modContext) : modContext.modsDir;
+      const targetPath = path.join(targetDir, fileName);
+      if (!isPathInsideDirectory(targetDir, targetPath)) {
+        failed.push(`${fileName}: Zielpfad ist nicht sicher.`);
+        continue;
+      }
+
+      const copiedPath = copyFileWithUniqueName(filePath, targetPath);
+      if (!copiedPath) {
+        failed.push(`${fileName}: Datei konnte nicht kopiert werden.`);
+        continue;
+      }
+
+      if (shouldDisableForVersion) {
+        const requirement = compatibility.requirement || 'eine andere Minecraft-Version';
+        rememberDisabledFileReason(modContext, path.basename(copiedPath), {
+          reason: `Minecraft-Version nicht kompatibel: verlangt ${requirement}.`,
+          technicalEvidence: `Aktives Profil nutzt Minecraft ${modContext.minecraftVersion || 'unbekannt'}.`,
+          automated: true,
+          source: 'drag-drop-version-check'
+        });
+      } else if (shouldDisable) {
+        rememberDisabledFileReason(modContext, path.basename(copiedPath), {
+          reason: 'Eigene Drag-and-drop-Mod wartet auf Freigabe.',
+          technicalEvidence: 'Unbekannte lokale JAR wurde in den ausgeschalteten Mods abgelegt.',
+          automated: false,
+          source: 'drag-drop-approval'
+        });
+      }
+      if (options.keepAsLocal) {
+        await rememberKeptLocalModException(modContext, copiedPath, fileName);
+      }
+
+      imported.push({
+        fileName: path.basename(copiedPath),
+        enabled: !shouldDisable,
+        disabledForVersion: shouldDisableForVersion,
+        path: copiedPath,
+        requirement: compatibility.requirement || ''
+      });
+    } catch (error) {
+      failed.push(`${fileName}: ${error.message}`);
+    }
+  }
+
+  return { imported, failed };
+}
+
+async function importDroppedMods(filePaths, options = {}) {
+  const normalizedFilePaths = normalizeDroppedModFilePaths(filePaths);
+  if (!normalizedFilePaths.length) {
+    return {
+      success: false,
+      error: 'Keine gültige JAR-Datei erkannt.'
+    };
+  }
+
+  if (options?.mode === 'keep') {
+    const modContext = getActiveModContext();
+    const manualResult = await copyDroppedManualModFiles(normalizedFilePaths, modContext, {
+      requireManualApproval: options?.requireManualApproval,
+      keepAsLocal: true,
+      checkMinecraftCompatibility: true
+    });
+    if (!manualResult.imported.length) {
+      return {
+        success: false,
+        error: manualResult.failed[0] || 'Keine gültige JAR-Datei erkannt.',
+        rejected: manualResult.failed
+      };
+    }
+
+    const activeCount = manualResult.imported.filter((entry) => entry.enabled !== false).length;
+    const disabledForVersionCount = manualResult.imported.filter((entry) => entry.disabledForVersion).length;
+    const messageParts = [];
+    if (activeCount) {
+      messageParts.push(`${activeCount} aktiviert`);
+    }
+    if (disabledForVersionCount) {
+      messageParts.push(`${disabledForVersionCount} wegen falscher Minecraft-Version ausgeschaltet`);
+    }
+    return {
+      success: true,
+      selectedVersionId: modContext.versionId,
+      minecraftVersion: modContext.minecraftVersion,
+      installed: manualResult.imported.length,
+      total: manualResult.imported.length,
+      warning: formatManagedModsWarning(manualResult.failed),
+      rejected: manualResult.failed,
+      message: `${manualResult.imported.length} eigene Mod${manualResult.imported.length === 1 ? '' : 's'} behalten${messageParts.length ? `: ${messageParts.join(', ')}.` : '.'}`,
+      mods: await getInstalledMods(modContext.versionId)
+    };
+  }
+
+  const inspections = [];
+  for (const filePath of normalizedFilePaths) {
+    inspections.push(await recognizeDroppedModFile(filePath));
+  }
+
+  const recognizedMods = inspections.filter((entry) => entry.recognized);
+  const recognizedFilePaths = new Set(recognizedMods.map((entry) => path.resolve(entry.filePath)));
+  const manualFilePaths = normalizedFilePaths.filter((filePath) => !recognizedFilePaths.has(path.resolve(filePath)));
+  const rejectedMessages = inspections
+    .filter((entry) => !entry.recognized && entry.error)
+    .map((entry) => entry.error);
+
+  if (!recognizedMods.length) {
+    const modContext = getActiveModContext();
+    const manualResult = await copyDroppedManualModFiles(manualFilePaths, modContext, {
+      requireManualApproval: options?.requireManualApproval
+    });
+    if (manualResult.imported.length) {
+      const approvalText = options?.requireManualApproval !== false
+        ? ' wartet in der Modliste auf Freigabe.'
+        : ' wurde aktiviert.';
+      return {
+        success: true,
+        selectedVersionId: modContext.versionId,
+        minecraftVersion: modContext.minecraftVersion,
+        installed: manualResult.imported.length,
+        total: manualResult.imported.length,
+        warning: formatManagedModsWarning(manualResult.failed),
+        rejected: manualResult.failed,
+        message: `${manualResult.imported.length} eigene Mod${manualResult.imported.length === 1 ? '' : 's'} hinzugefügt und${approvalText}`,
+        mods: await getInstalledMods(modContext.versionId)
+      };
+    }
+
+    return {
+      success: false,
+      error: manualResult.failed[0] || rejectedMessages[0] || 'Keine gedroppte JAR wurde als Modrinth-Fabric-Mod erkannt.',
+      rejected: [...rejectedMessages, ...manualResult.failed]
+    };
+  }
+
+  const targetVersion = await resolveDroppedModsTargetVersion(recognizedMods);
+  if (!targetVersion.versionId || !targetVersion.minecraftVersion) {
+    return {
+      success: false,
+      error: targetVersion.error || 'Keine passende Fabric-Version gefunden.',
+      rejected: rejectedMessages
+    };
+  }
+
+  const previousVersionId = getEffectiveSelectedVersionId();
+  if (targetVersion.versionId !== previousVersionId) {
+    persistEffectiveSelectedVersionId(targetVersion.versionId);
+  }
+
+  const modContext = getActiveModContext(targetVersion.versionId);
+  ensureDir(modContext.modsDir);
+  const manualResult = await copyDroppedManualModFiles(manualFilePaths, modContext, {
+    requireManualApproval: options?.requireManualApproval
+  });
+
+  const projectsById = new Map();
+  for (const dropInfo of recognizedMods) {
+    const projectId = getModrinthProjectId(dropInfo.project);
+    if (!projectId || projectsById.has(projectId)) {
+      continue;
+    }
+    projectsById.set(projectId, dropInfo);
+  }
+
+  const installWarnings = [];
+  const installedTitles = [];
+  const failedMessages = [];
+  for (const dropInfo of projectsById.values()) {
+    try {
+      const installResult = await installManagedProjectVersion(dropInfo.project, targetVersion.minecraftVersion, {
+        forceRefresh: true,
+        visitedProjects: new Set(),
+        modContext
+      });
+      installedTitles.push(installResult.title || getModrinthProjectTitle(dropInfo.project) || dropInfo.fileName);
+      installWarnings.push(...(installResult.warnings || []));
+    } catch (error) {
+      failedMessages.push(`${dropInfo.fileName}: ${error.message}`);
+    }
+  }
+
+  if (!installedTitles.length && !manualResult.imported.length) {
+    if (targetVersion.versionId !== previousVersionId) {
+      persistEffectiveSelectedVersionId(previousVersionId);
+    }
+    return {
+      success: false,
+      error: failedMessages[0] || 'Keine erkannte Mod konnte installiert werden.',
+      rejected: [...rejectedMessages, ...manualResult.failed, ...failedMessages]
+    };
+  }
+
+  const syncResult = await syncManagedModsForVersion(targetVersion.versionId, { modContext });
+  const warning = formatManagedModsWarning([
+    ...rejectedMessages,
+    ...manualResult.failed,
+    ...failedMessages,
+    ...installWarnings,
+    ...(syncResult.warnings || [])
+  ]);
+  const versionText = `Fabric ${targetVersion.minecraftVersion}`;
+  const versionChangeText = targetVersion.versionId !== previousVersionId
+    ? ` Version wurde auf ${versionText} angepasst.`
+    : '';
+  const messageParts = [];
+  if (installedTitles.length) {
+    messageParts.push(`${installedTitles.length} Mod${installedTitles.length === 1 ? '' : 's'} installiert.`);
+  }
+  if (manualResult.imported.length) {
+    messageParts.push(`${manualResult.imported.length} eigene Mod${manualResult.imported.length === 1 ? '' : 's'} hinzugefügt${options?.requireManualApproval !== false ? ' und wartet auf Freigabe' : ''}.`);
+  }
+
+  return {
+    success: true,
+    selectedVersionId: targetVersion.versionId,
+    minecraftVersion: targetVersion.minecraftVersion,
+    installed: installedTitles.length + manualResult.imported.length,
+    total: recognizedMods.length + manualResult.imported.length,
+    warning,
+    rejected: [...rejectedMessages, ...manualResult.failed, ...failedMessages],
+    message: `${messageParts.join(' ')}${versionChangeText}`,
+    mods: await getInstalledMods(targetVersion.versionId)
+  };
+}
+
+async function refreshInstalledMod(modId) {
+  const normalizedModId = String(modId || '').trim();
+  if (!normalizedModId) {
+    return {
+      success: false,
+      error: 'Kein Mod angegeben.'
+    };
+  }
+
+  if (!normalizedModId.startsWith('project:')) {
+    return {
+      success: false,
+      error: 'Manuelle Mods können nicht automatisch aktualisiert werden.'
+    };
+  }
+
+  const projectId = normalizedModId.slice('project:'.length).trim();
+  const modContext = getActiveModContext();
+  const state = readModsState(modContext);
+  const project = state.projects[projectId];
+  if (!project) {
+    return {
+      success: false,
+      error: 'Der Mod wurde nicht mehr gefunden.'
+    };
+  }
+
+  const syncResult = await syncManagedModsForVersion(modContext.versionId, {
+    refreshProjects: new Set([projectId]),
+    modContext
+  });
+
+  return {
+    success: true,
+    warning: formatManagedModsWarning(syncResult.warnings),
+    message: `${project.title || projectId} wurde für ${getCurrentMinecraftVersion()} aktualisiert.`,
+    mods: await getInstalledMods()
+  };
+}
+
+async function updateAllManagedMods() {
+  const modContext = getActiveModContext();
+  const syncResult = await syncManagedModsForVersion(modContext.versionId, {
+    refreshAll: true,
+    refreshDisabledProjects: true,
+    modContext
+  });
+  const downloadableUpdateResult = await updateDownloadableModrinthProjects(['resourcepack', 'shader'], modContext);
+  const state = readModsState(modContext);
+  const visibleProjectIds = Object.keys(state.projects || {})
+    .filter((projectId) => (
+      !isManagedProjectHiddenForMinecraftVersion(projectId, modContext.minecraftVersion)
+      && !isManagedProjectHiddenInModsTab(projectId, state.projects?.[projectId])
+    ));
+  const visibleProjectIdSet = new Set(visibleProjectIds);
+  const checkedProjectIds = uniqueStrings([
+    ...(syncResult.files || [])
+      .map((entry) => String(entry?.projectId || '').trim())
+      .filter((projectId) => visibleProjectIdSet.has(projectId)),
+    ...(syncResult.disabledProjects || [])
+      .map((projectId) => String(projectId || '').trim())
+      .filter((projectId) => visibleProjectIdSet.has(projectId))
+  ]);
+  const totalProjects = visibleProjectIds.length + downloadableUpdateResult.total;
+  if (totalProjects === 0) {
+    return {
+      updated: 0,
+      total: 0,
+      warnings: [],
+      message: 'Noch keine Modrinth-Mods, Ressourcenpakete oder Shader im Launcher installiert.'
+    };
+  }
+
+  const checkedTotal = (checkedProjectIds.length || syncResult.synced) + downloadableUpdateResult.updated;
+  return {
+    updated: checkedTotal,
+    total: totalProjects,
+    warnings: uniqueStrings([
+      ...(syncResult.warnings || []),
+      ...(downloadableUpdateResult.warnings || [])
+    ]),
+    message: modContext.type === 'pack'
+      ? `Alle Mods in ${modContext.name} und Ressourcenpakete wurden geprüft und korrigiert.`
+      : `Alle verwalteten Mods für Fabric ${getCurrentMinecraftVersion() || 'aktuell'} und Ressourcenpakete wurden geprüft und korrigiert.`
+  };
+}
+
+function getDisabledModsDir(modContext = getActiveModContext()) {
+  return modContext.disabledModsDir || path.join(CONFIG_DIR, DISABLED_MODS_DIR_NAME);
+}
+
+function recordModDisableEntry(modContext, details = {}) {
+  const entry = {
+    action: 'mod-disabled',
+    contextType: String(modContext?.type || ''),
+    versionId: String(modContext?.versionId || ''),
+    minecraftVersion: String(modContext?.minecraftVersion || ''),
+    modsDir: String(modContext?.modsDir || ''),
+    projectId: String(details.projectId || ''),
+    fileName: String(details.fileName || ''),
+    filePath: String(details.filePath || ''),
+    reason: String(details.reason || 'Nicht angegeben.'),
+    technicalEvidence: String(details.technicalEvidence || '')
+  };
+
+  try {
+    entry.auditPath = ROBUSTNESS.appendAudit(MOD_DISABLE_AUDIT_NAME, entry);
+  } catch (error) {
+    logger.warn('Could not write mod disable audit entry', {
+      entry,
+      error: serializeError(error)
+    });
+  }
+
+  logger.warn('Mod disabled', entry);
+  return entry;
+}
+
+function createDisableReason(details = {}) {
+  return normalizeDisableReasonEntry({
+    reason: details.reason || 'Technischer Grund nicht angegeben.',
+    technicalEvidence: details.technicalEvidence || '',
+    disabledAt: new Date().toISOString(),
+    source: details.source || (details.automated ? 'auto-repair' : 'user')
+  });
+}
+
+function getDisabledFileReasonKey(fileName) {
+  return path.basename(String(fileName || '').trim()).toLowerCase();
+}
+
+function rememberDisabledFileReason(modContext, fileName, details = {}) {
+  const key = getDisabledFileReasonKey(fileName);
+  if (!key) {
+    return;
+  }
+
+  try {
+    const state = readModsState(modContext);
+    state.disabledFileReasons = {
+      ...(state.disabledFileReasons || {}),
+      [key]: createDisableReason(details)
+    };
+    writeModsState(state, modContext);
+  } catch (error) {
+    logger.warn('Could not remember disabled file reason', {
+      fileName,
+      error: serializeError(error)
+    });
+  }
+}
+
+function clearDisabledFileReason(modContext, fileName) {
+  const key = getDisabledFileReasonKey(fileName);
+  if (!key) {
+    return;
+  }
+
+  try {
+    const state = readModsState(modContext);
+    if (!state.disabledFileReasons?.[key]) {
+      return;
+    }
+    delete state.disabledFileReasons[key];
+    writeModsState(state, modContext);
+  } catch (error) {
+    logger.warn('Could not clear disabled file reason', {
+      fileName,
+      error: serializeError(error)
+    });
+  }
+}
+
+function formatStoredDisableReason(entry, fallback = '') {
+  const reason = String(entry?.reason || '').trim();
+  const evidence = String(entry?.technicalEvidence || '').trim();
+  if (reason && evidence) {
+    return `${reason} (${evidence})`;
+  }
+  return reason || evidence || fallback;
+}
+
+function stripDisabledModSuffix(filePath) {
+  return String(filePath || '').toLowerCase().endsWith(DISABLED_MOD_SUFFIX)
+    ? String(filePath || '').slice(0, -DISABLED_MOD_SUFFIX.length)
+    : String(filePath || '');
+}
+
+function getDisabledModPath(filePath, modContext = getActiveModContext()) {
+  const fileName = path.basename(stripDisabledModSuffix(filePath));
+  return path.join(getDisabledModsDir(modContext), fileName);
+}
+
+function getEnabledModPath(filePath, modContext = getActiveModContext()) {
+  const fileName = path.basename(stripDisabledModSuffix(filePath));
+  return path.join(modContext.modsDir, fileName);
+}
+
+function isModStoragePath(modContext, filePath) {
+  return isPathInsideDirectory(modContext.modsDir, filePath)
+    || isPathInsideDirectory(getDisabledModsDir(modContext), filePath);
+}
+
+function getManagedProjectFileNames(state) {
+  const names = new Set();
+  for (const project of Object.values(state?.projects || {})) {
+    for (const versionEntry of Object.values(project?.versions || {})) {
+      const fileName = String(versionEntry?.fileName || '').trim().toLowerCase();
+      if (fileName) {
+        names.add(fileName);
+      }
+    }
+  }
+  for (const syncEntry of state?.activeSync?.files || []) {
+    const fileName = String(syncEntry?.fileName || '').trim().toLowerCase();
+    if (fileName) {
+      names.add(fileName);
+    }
+  }
+  return names;
+}
+
+function cleanupManagedDisabledModCopies(modContext = getActiveModContext(), state = readModsState(modContext)) {
+  const disabledModsDir = getDisabledModsDir(modContext);
+  if (!fs.existsSync(disabledModsDir)) {
+    return;
+  }
+
+  const managedProjectFileNames = getManagedProjectFileNames(state);
+  for (const fileName of fs.readdirSync(disabledModsDir)) {
+    if (!managedProjectFileNames.has(fileName.toLowerCase())) {
+      continue;
+    }
+
+    const filePath = path.join(disabledModsDir, fileName);
+    if (isPathInsideDirectory(disabledModsDir, filePath) && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (_error) {
+        // keep sync resilient; this stale copy is not loaded from the mods folder
+      }
+    }
+  }
+}
+
+function quarantineLegacyDisabledMods(modContext = getActiveModContext()) {
+  if (!fs.existsSync(modContext.modsDir)) {
+    return;
+  }
+
+  ensureDir(getDisabledModsDir(modContext));
+  const state = readModsState(modContext);
+  const managedProjectFileNames = getManagedProjectFileNames(state);
+
+  for (const fileName of fs.readdirSync(modContext.modsDir)) {
+    if (!fileName.toLowerCase().endsWith(`.jar${DISABLED_MOD_SUFFIX}`)) {
+      continue;
+    }
+
+    const legacyPath = path.join(modContext.modsDir, fileName);
+    const enabledFileName = path.basename(stripDisabledModSuffix(fileName)).toLowerCase();
+    if (managedProjectFileNames.has(enabledFileName)) {
+      try {
+        fs.unlinkSync(legacyPath);
+      } catch (_error) {
+        // ignore cleanup failures; launch sync can continue safely
+      }
+      continue;
+    }
+
+    const disabledPath = getDisabledModPath(legacyPath, modContext);
+    if (isPathInsideDirectory(modContext.modsDir, legacyPath) && isPathInsideDirectory(getDisabledModsDir(modContext), disabledPath)) {
+      moveFileIfExists(legacyPath, disabledPath);
+    }
+  }
+
+  cleanupManagedDisabledModCopies(modContext, state);
+}
+
+function moveFileIfExists(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) {
+    return false;
+  }
+
+  let finalTargetPath = targetPath;
+  let counter = 0;
+  if (fs.existsSync(finalTargetPath)) {
+    const parsed = path.parse(targetPath);
+    const timestamp = Date.now();
+    do {
+      counter += 1;
+      finalTargetPath = path.join(parsed.dir, `${parsed.name}-${timestamp}-${counter}${parsed.ext}`);
+    } while (fs.existsSync(finalTargetPath));
+  }
+
+  try {
+    fs.renameSync(sourcePath, finalTargetPath);
+  } catch (error) {
+    if (error?.code !== 'EXDEV') {
+      throw error;
+    }
+
+    fs.copyFileSync(sourcePath, finalTargetPath);
+    fs.unlinkSync(sourcePath);
+  }
+
+  return finalTargetPath;
+}
+
+function copyFileWithUniqueName(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) {
+    return false;
+  }
+
+  let finalTargetPath = targetPath;
+  let counter = 0;
+  if (fs.existsSync(finalTargetPath)) {
+    const parsed = path.parse(targetPath);
+    const timestamp = Date.now();
+    do {
+      counter += 1;
+      finalTargetPath = path.join(parsed.dir, `${parsed.name}-${timestamp}-${counter}${parsed.ext}`);
+    } while (fs.existsSync(finalTargetPath));
+  }
+
+  fs.copyFileSync(sourcePath, finalTargetPath);
+  return finalTargetPath;
+}
+
+function cleanupExactDuplicateFilesInDirectory(sourceDir, extensions = [], backupLabel = 'files') {
+  if (!sourceDir || !fs.existsSync(sourceDir)) {
+    return [];
+  }
+
+  const normalizedExtensions = new Set(
+    extensions.map((extension) => String(extension || '').trim().toLowerCase()).filter(Boolean)
+  );
+  const filesByHash = new Map();
+  const moved = [];
+
+  for (const fileName of fs.readdirSync(sourceDir)) {
+    const filePath = path.join(sourceDir, fileName);
+    if (!isPathInsideDirectory(sourceDir, filePath)) {
+      continue;
+    }
+
+    try {
+      const stats = fs.statSync(filePath);
+      if (!stats.isFile()) {
+        continue;
+      }
+
+      const extension = path.extname(fileName).toLowerCase();
+      if (normalizedExtensions.size && !normalizedExtensions.has(extension)) {
+        continue;
+      }
+
+      const hashKey = `${stats.size}:${getFileSha1(filePath)}`;
+      const existing = filesByHash.get(hashKey);
+      if (!existing) {
+        filesByHash.set(hashKey, {
+          fileName,
+          filePath,
+          mtime: stats.mtimeMs
+        });
+        continue;
+      }
+
+      const keepEntry = existing.mtime >= stats.mtimeMs
+        ? existing
+        : { fileName, filePath, mtime: stats.mtimeMs };
+      const duplicateEntry = existing.mtime >= stats.mtimeMs
+        ? { fileName, filePath, mtime: stats.mtimeMs }
+        : existing;
+      filesByHash.set(hashKey, keepEntry);
+
+      const backupDir = path.join(CONFIG_DIR, 'duplicate-backups', sanitizePathSegment(backupLabel));
+      ensureDir(backupDir);
+      const movedPath = moveFileIfExists(
+        duplicateEntry.filePath,
+        path.join(backupDir, duplicateEntry.fileName)
+      );
+      moved.push({
+        fileName: duplicateEntry.fileName,
+        keptFileName: keepEntry.fileName,
+        backupPath: movedPath || ''
+      });
+    } catch (error) {
+      logger.warn('Duplicate cleanup skipped file', {
+        filePath,
+        error: serializeError(error)
+      });
+    }
+  }
+
+  return moved;
+}
+
+function cleanupProfileDuplicateFiles(modContext = getActiveModContext()) {
+  const contextLabel = modContext?.type === 'pack' && modContext.packId
+    ? `pack-${modContext.packId}`
+    : 'standard';
+  return [
+    ...cleanupExactDuplicateFilesInDirectory(modContext.modsDir, ['.jar'], `${contextLabel}-mods`),
+    ...cleanupExactDuplicateFilesInDirectory(modContext.resourcepacksDir, ['.zip'], `${contextLabel}-resourcepacks`),
+    ...cleanupExactDuplicateFilesInDirectory(modContext.shaderpacksDir, ['.zip'], `${contextLabel}-shaderpacks`)
+  ];
+}
+
+function getTrackedDownloadableFileNamesForContext(projectType, modContext = getActiveModContext()) {
+  const state = readDownloadableModrinthState();
+  const bucket = getDownloadableModrinthBucket(state, projectType);
+  const names = new Set();
+  let changed = false;
+
+  for (const [stateKey, entry] of Object.entries(bucket || {})) {
+    if (!downloadableModrinthEntryMatchesContext(stateKey, entry, modContext)) {
+      continue;
+    }
+
+    const target = getModrinthDownloadTarget(projectType, modContext);
+    const existingPath = getDownloadableModrinthEntryPath(entry, target.directory);
+    if (!existingPath) {
+      delete bucket[stateKey];
+      changed = true;
+      continue;
+    }
+
+    names.add(path.basename(existingPath).toLowerCase());
+    if (entry.fileName) {
+      names.add(path.basename(entry.fileName).toLowerCase());
+    }
+  }
+
+  if (changed) {
+    writeDownloadableModrinthState(state);
+  }
+
+  return names;
+}
+
+function cleanupUntrackedResourcePackFiles(modContext = getActiveModContext()) {
+  // Resource packs may be copied manually or appear before their Modrinth
+  // state entry is written. They must never be removed by an automatic scan.
+  return [];
+}
+
+function quarantineCorruptedModFiles(modContext = getActiveModContext()) {
+  if (!fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  ensureDir(getDisabledModsDir(modContext));
+  const warnings = [];
+  const managedProjectFileNames = getManagedProjectFileNames(readModsState(modContext));
+
+  for (const fileName of fs.readdirSync(modContext.modsDir)) {
+    if (!fileName.toLowerCase().endsWith('.jar')) {
+      continue;
+    }
+
+    const filePath = path.join(modContext.modsDir, fileName);
+    if (!isPathInsideDirectory(modContext.modsDir, filePath)) {
+      continue;
+    }
+
+    if (!isJarFileCorrupted(filePath)) {
+      continue;
+    }
+
+    try {
+      fs.unlinkSync(filePath);
+      warnings.push(`${fileName}: Corrupted mod jar deleted automatically.`);
+      logger.warn('Corrupted mod jar deleted automatically', {
+        fileName,
+        filePath,
+        minecraftVersion: modContext.minecraftVersion
+      });
+    } catch (error) {
+      warnings.push(`${fileName}: Corrupted mod jar detected but could not be deleted.`);
+      logger.warn('Corrupted mod jar could not be deleted', {
+        fileName,
+        filePath,
+        error: serializeError(error)
+      });
+    }
+    continue;
+
+    warnings.push(`${fileName}: Beschädigte MOD-Datei erkannt und deaktiviert (Korruptionsfehler).`);
+
+    const disabledPath = path.join(getDisabledModsDir(modContext), fileName);
+    recordModDisableEntry(modContext, {
+      fileName,
+      filePath,
+      reason: 'Beschädigte JAR-Datei.',
+      technicalEvidence: 'ZIP-Endverzeichnis konnte nicht gelesen werden oder Datei ist unvollständig.'
+    });
+    const movedPath = moveFileIfExists(filePath, disabledPath);
+    rememberDisabledFileReason(modContext, path.basename(movedPath || disabledPath), {
+      reason: 'Beschädigte JAR-Datei.',
+      technicalEvidence: 'ZIP-Endverzeichnis konnte nicht gelesen werden oder Datei ist unvollständig.',
+      automated: true
+    });
+  }
+
+  return warnings;
+}
+
+function scanCorruptedModFiles(modContext = getActiveModContext()) {
+  if (!fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  return fs.readdirSync(modContext.modsDir)
+    .filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+    .map((fileName) => {
+      const filePath = path.join(modContext.modsDir, fileName);
+      if (!isPathInsideDirectory(modContext.modsDir, filePath)) {
+        return null;
+      }
+      return isJarFileCorrupted(filePath) ? { fileName, filePath } : null;
+    })
+    .filter(Boolean);
+}
+
+async function ensureLaunchModFolderHealthy(modContext, versionId) {
+  const repairedWarnings = quarantineCorruptedModFiles(modContext);
+  if (repairedWarnings.length) {
+    logger.warn('Corrupted mods quarantined during launch preflight', {
+      versionId,
+      minecraftVersion: modContext.minecraftVersion,
+      repairedWarnings
+    });
+    await syncManagedModsForVersion(versionId, {
+      modContext,
+      launchPreflight: true,
+      refreshAll: false,
+      refreshDisabledProjects: false
+    });
+  }
+
+  const remainingCorruptedFiles = scanCorruptedModFiles(modContext);
+  if (remainingCorruptedFiles.length) {
+    throw new Error(`Beschädigte Mods blockieren den Start: ${remainingCorruptedFiles.map((entry) => entry.fileName).join(', ')}. Die Dateien konnten nicht automatisch repariert werden.`);
+  }
+
+  return repairedWarnings;
+}
+
+async function installMissingManifestDependencies(modContext = getActiveModContext()) {
+  const installed = [];
+  const warnings = [];
+  const ignoredIds = new Set(['minecraft', 'java', 'fabricloader']);
+  const attemptedIds = new Set();
+
+  for (let pass = 0; pass < 8; pass += 1) {
+    const manifests = fs.existsSync(modContext.modsDir)
+      ? fs.readdirSync(modContext.modsDir)
+        .filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+        .map((fileName) => readFabricModManifest(path.join(modContext.modsDir, fileName))?.manifest)
+        .filter(Boolean)
+      : [];
+    const installedIds = new Set(manifests.map((manifest) => String(manifest.id || '').trim().toLowerCase()).filter(Boolean));
+    let installedThisPass = false;
+
+    for (const manifest of manifests) {
+      const dependencies = manifest.depends && typeof manifest.depends === 'object' && !Array.isArray(manifest.depends)
+        ? Object.entries(manifest.depends)
+        : [];
+      for (const [rawId, requirement] of dependencies) {
+        const fabricId = String(rawId || '').trim().toLowerCase();
+        if (!fabricId || ignoredIds.has(fabricId) || installedIds.has(fabricId) || attemptedIds.has(fabricId)) continue;
+        attemptedIds.add(fabricId);
+        const projectId = KNOWN_FABRIC_MOD_ID_PROJECT_IDS[fabricId] || fabricId;
+        try {
+          const result = await installManagedProjectVersion({
+            projectId,
+            slug: fabricId,
+            title: fabricId,
+            versionRequirement: requirement
+          }, modContext.minecraftVersion, {
+            forceRefresh: true,
+            requiredVersionRequirement: requirement,
+            visitedProjects: new Set(),
+            modContext
+          });
+          installed.push(result.title || fabricId);
+          installedThisPass = true;
+        } catch (error) {
+          warnings.push(`${manifest.name || manifest.id}: Abhängigkeit ${fabricId} konnte nicht automatisch installiert werden (${error.message}).`);
+        }
+      }
+    }
+    if (!installedThisPass) break;
+  }
+
+  return { installed: uniqueStrings(installed), warnings: uniqueStrings(warnings) };
+}
+
+async function setInstalledModEnabled(modId, enabled, options = {}) {
+  const normalizedModId = String(modId || '').trim();
+  const shouldEnable = Boolean(enabled);
+  if (!normalizedModId) {
+    return { success: false, error: 'Kein Mod angegeben.' };
+  }
+
+  const modContext = getActiveModContext();
+  const state = readModsState(modContext);
+
+  if (normalizedModId.startsWith('project:')) {
+    const projectId = normalizedModId.slice('project:'.length).trim();
+    const project = state.projects[projectId];
+    if (!project) {
+      return { success: false, error: 'Der verwaltete Mod wurde nicht gefunden.' };
+    }
+    if (!shouldEnable && isManagedProjectDisableLocked(projectId, project)) {
+      return { success: false, error: 'Diese Pflichtmod ist erforderlich und kann nicht ausgeschaltet werden.' };
+    }
+
+    const disabledProjects = new Set(state.disabledProjects || []);
+    const autoDisabledProjects = new Set(state.autoDisabledProjects || []);
+    state.disabledProjectReasons = state.disabledProjectReasons || {};
+    if (shouldEnable) {
+      disabledProjects.delete(projectId);
+      autoDisabledProjects.delete(projectId);
+      delete state.disabledProjectReasons[projectId];
+    } else {
+      const disableReason = options.reason || 'Nutzer hat die verwaltete Mod manuell ausgeschaltet.';
+      const technicalEvidence = options.technicalEvidence || 'Manuelle Aktion im Launcher.';
+      recordModDisableEntry(modContext, {
+        projectId,
+        reason: disableReason,
+        technicalEvidence
+      });
+      state.disabledProjectReasons[projectId] = createDisableReason({
+        reason: disableReason,
+        technicalEvidence,
+        automated: Boolean(options.automated),
+        source: options.source || (options.automated ? 'auto-repair' : 'user')
+      });
+      disabledProjects.add(projectId);
+      autoDisabledProjects.delete(projectId);
+      for (const entry of state.activeSync?.files || []) {
+        if (entry.projectId === projectId && entry.targetPath && isPathInsideDirectory(modContext.modsDir, entry.targetPath) && fs.existsSync(entry.targetPath)) {
+          fs.unlinkSync(entry.targetPath);
+        }
+      }
+      const versionEntry = project?.versions?.[modContext.minecraftVersion] || {};
+      const expectedFileName = String(versionEntry.fileName || '').trim();
+      const expectedPath = expectedFileName ? path.join(modContext.modsDir, expectedFileName) : '';
+      if (expectedPath && isPathInsideDirectory(modContext.modsDir, expectedPath) && fs.existsSync(expectedPath)) {
+        fs.unlinkSync(expectedPath);
+      }
+      state.activeSync = {
+        minecraftVersion: String(state.activeSync?.minecraftVersion || '').trim(),
+        files: (state.activeSync?.files || []).filter((entry) => entry.projectId !== projectId)
+      };
+    }
+
+    state.disabledProjects = [...disabledProjects];
+    state.autoDisabledProjects = [...autoDisabledProjects];
+    writeModsState(state, modContext);
+    const syncResult = await syncManagedModsForVersion(modContext.versionId, { modContext });
+    const autoDisabledAgain = shouldEnable
+      && (syncResult.disabledProjects || []).includes(projectId)
+      && readModsState(modContext).autoDisabledProjects.includes(projectId);
+    return {
+      success: true,
+      warning: formatManagedModsWarning(syncResult.warnings),
+      message: autoDisabledAgain
+        ? `${project.title || projectId} konnte nicht eingeschaltet werden, weil keine passende Version gefunden wurde.`
+        : `${project.title || projectId} wurde ${shouldEnable ? 'eingeschaltet' : 'ausgeschaltet'}.`,
+      mods: await getInstalledMods()
+    };
+  }
+
+  if (normalizedModId.startsWith('file:')) {
+    const filePath = normalizedModId.slice('file:'.length).trim();
+    const sourcePath = shouldEnable ? filePath : getEnabledModPath(filePath, modContext);
+    const targetPath = shouldEnable ? getEnabledModPath(filePath, modContext) : getDisabledModPath(filePath, modContext);
+    if (!sourcePath || !isModStoragePath(modContext, sourcePath) || !isModStoragePath(modContext, targetPath)) {
+      return { success: false, error: 'Die Mod-Datei konnte nicht sicher geändert werden.' };
+    }
+    if (!shouldEnable && isRequiredModFileDisableLocked(path.basename(getEnabledModPath(filePath, modContext)))) {
+      return { success: false, error: 'Diese Pflichtmod ist erforderlich und kann nicht ausgeschaltet werden.' };
+    }
+
+    ensureDir(path.dirname(targetPath));
+    if (!shouldEnable) {
+      const disableReason = options.reason || 'Nutzer hat die lokale Mod-Datei manuell ausgeschaltet.';
+      const technicalEvidence = options.technicalEvidence || 'Manuelle Aktion im Launcher.';
+      recordModDisableEntry(modContext, {
+        fileName: path.basename(getEnabledModPath(filePath, modContext)),
+        filePath: sourcePath,
+        reason: disableReason,
+        technicalEvidence
+      });
+    } else {
+      clearDisabledFileReason(modContext, path.basename(sourcePath));
+    }
+    const movedPath = moveFileIfExists(sourcePath, targetPath);
+    if (shouldEnable && isKeptLocalModFile(state, sourcePath, path.basename(sourcePath))) {
+      await rememberKeptLocalModException(modContext, movedPath || targetPath, path.basename(sourcePath));
+    }
+    if (!shouldEnable) {
+      rememberDisabledFileReason(modContext, path.basename(movedPath || targetPath), {
+        reason: options.reason || 'Nutzer hat die lokale Mod-Datei manuell ausgeschaltet.',
+        technicalEvidence: options.technicalEvidence || 'Manuelle Aktion im Launcher.',
+        automated: Boolean(options.automated),
+        source: options.source || (options.automated ? 'auto-repair' : 'user')
+      });
+    }
+    return {
+      success: true,
+      message: `${path.basename(getEnabledModPath(filePath, modContext))} wurde ${shouldEnable ? 'eingeschaltet' : 'ausgeschaltet'}.`,
+      mods: await getInstalledMods()
+    };
+  }
+
+  return { success: false, error: 'Unbekannter Mod-Typ.' };
+}
+
+async function removeInstalledMod(modId) {
+  const normalizedModId = String(modId || '').trim();
+  if (!normalizedModId) {
+    return {
+      success: false,
+      error: 'Kein Mod angegeben.'
+    };
+  }
+
+  if (normalizedModId.startsWith('project:')) {
+    const projectId = normalizeManagedProjectId(normalizedModId.slice('project:'.length).trim());
+    const modContext = getActiveModContext();
+    const state = readModsState(modContext);
+    const project = state.projects[projectId];
+    if (!project) {
+      return {
+        success: false,
+        error: 'Der verwaltete Mod wurde nicht gefunden.'
+      };
+    }
+    if (isManagedProjectRemoveLocked(projectId, project)) {
+      return {
+        success: false,
+        error: 'Diese Pflichtmod ist erforderlich und kann nicht entfernt werden.'
+      };
+    }
+
+    for (const entry of state.activeSync?.files || []) {
+      if (entry.projectId !== projectId) {
+        continue;
+      }
+
+      if (entry.targetPath && isPathInsideDirectory(modContext.modsDir, entry.targetPath) && fs.existsSync(entry.targetPath)) {
+        try {
+          fs.unlinkSync(entry.targetPath);
+        } catch (_error) {
+          // ignore single-file cleanup failures here
+        }
+      }
+    }
+    removeManagedProjectCopiesFromModStorage(modContext, projectId, project);
+
+    delete state.projects[projectId];
+    state.disabledProjects = (state.disabledProjects || []).filter((entry) => entry !== projectId);
+    state.autoDisabledProjects = (state.autoDisabledProjects || []).filter((entry) => entry !== projectId);
+    if (state.disabledProjectReasons) {
+      delete state.disabledProjectReasons[projectId];
+    }
+    state.ignoredDefaultProjects = uniqueStrings([...(state.ignoredDefaultProjects || []), projectId]);
+    state.activeSync = {
+      minecraftVersion: String(state.activeSync?.minecraftVersion || '').trim(),
+      files: (state.activeSync?.files || []).filter((entry) => entry.projectId !== projectId)
+    };
+    writeModsState(state, modContext);
+
+    const projectLibraryDir = path.join(modContext.libraryDir, sanitizePathSegment(projectId));
+    if (isPathInsideDirectory(modContext.libraryDir, projectLibraryDir) && fs.existsSync(projectLibraryDir)) {
+      fs.rmSync(projectLibraryDir, { recursive: true, force: true });
+    }
+
+    const syncResult = await syncManagedModsForVersion(modContext.versionId, { modContext });
+    return {
+      success: true,
+      warning: formatManagedModsWarning(syncResult.warnings),
+      message: `${project.title || projectId} wurde entfernt.`,
+      mods: await getInstalledMods()
+    };
+  }
+
+  if (normalizedModId.startsWith('download:')) {
+    const match = normalizedModId.match(/^download:(shader|resourcepack):(.+)$/u);
+    if (!match) {
+      return {
+        success: false,
+        error: 'Unbekannter Download-Typ.'
+      };
+    }
+
+    const projectType = match[1];
+    const projectId = String(match[2] || '').trim();
+    const modContext = getActiveModContext();
+    const downloadTarget = getModrinthDownloadTarget(projectType, modContext);
+    const state = readDownloadableModrinthState();
+    const bucket = getDownloadableModrinthBucket(state, projectType);
+    const stateKey = createDownloadableModrinthStateKey(projectId, modContext);
+    const entry = bucket?.[stateKey] || (getDownloadableModrinthContextKey(modContext) === 'global' ? bucket?.[projectId] : null);
+    if (!entry) {
+      return {
+        success: false,
+        error: 'Der Eintrag wurde nicht mehr gefunden.'
+      };
+    }
+
+    if (!removeTrackedDownloadableModrinthFiles(state, projectType, projectId, downloadTarget.directory, '', modContext)) {
+      return {
+        success: false,
+        error: `${entry.title || projectId} konnte nicht vollständig entfernt werden.`
+      };
+    }
+
+    writeDownloadableModrinthState(state);
+    return {
+      success: true,
+      message: `${entry.title || entry.fileName || projectId} wurde aus ${downloadTarget.folderLabel} entfernt.`,
+      mods: await getInstalledMods(getEffectiveSelectedVersionId(), { skipManagedSync: true })
+    };
+  }
+
+  if (normalizedModId.startsWith('file:')) {
+    const filePath = normalizedModId.slice('file:'.length).trim();
+    const modContext = getActiveModContext();
+    if (!filePath || !isModStoragePath(modContext, filePath) || (!filePath.toLowerCase().endsWith('.jar') && !filePath.toLowerCase().endsWith(`.jar${DISABLED_MOD_SUFFIX}`))) {
+      return {
+        success: false,
+        error: 'Die Mod-Datei konnte nicht sicher entfernt werden.'
+      };
+    }
+    if (isRequiredModFileName(path.basename(getEnabledModPath(filePath, modContext)))) {
+      return {
+        success: false,
+        error: 'Diese Pflichtmod ist erforderlich und kann nicht entfernt werden.'
+      };
+    }
+
+    const enabledPath = getEnabledModPath(filePath, modContext);
+    const disabledPath = getDisabledModPath(filePath, modContext);
+    for (const candidatePath of uniqueStrings([filePath, enabledPath, disabledPath])) {
+      if (candidatePath && isModStoragePath(modContext, candidatePath) && fs.existsSync(candidatePath)) {
+        fs.unlinkSync(candidatePath);
+      }
+    }
+    clearDisabledFileReason(modContext, path.basename(filePath));
+    clearDisabledFileReason(modContext, path.basename(enabledPath));
+    clearDisabledFileReason(modContext, path.basename(disabledPath));
+
+    return {
+      success: true,
+      message: `${path.basename(filePath)} wurde entfernt.`,
+      mods: await getInstalledMods()
+    };
+  }
+
+  return {
+    success: false,
+    error: 'Unbekannter Mod-Typ.'
+  };
+}
+
+async function getInstalledMods(versionId = getEffectiveSelectedVersionId(), options = {}) {
+  const modContext = getActiveModContext(versionId);
+  if (!options.skipManagedSync) {
+    await syncManagedModsForVersion(versionId, { modContext });
+  }
+  quarantineLegacyDisabledMods(modContext);
+
+  if (!fs.existsSync(modContext.modsDir)) {
+    ensureDir(modContext.modsDir);
+  }
+  ensureDir(modContext.resourcepacksDir || RESOURCEPACKS_DIR);
+  ensureDir(modContext.shaderpacksDir || SHADERPACKS_DIR);
+  cleanupProfileDuplicateFiles(modContext);
+  cleanupUntrackedResourcePackFiles(modContext);
+
+  const minecraftVersion = getCurrentMinecraftVersion(versionId);
+  const state = readModsState(modContext);
+  const managedProjectFileNames = getManagedProjectFileNames(state);
+  const managedFilesByPath = new Map(
+    (state.activeSync?.files || []).map((entry) => [path.resolve(entry.targetPath), entry])
+  );
+  const mods = [];
+
+  for (const file of fs.readdirSync(modContext.modsDir)
+    .filter((entry) => entry.toLowerCase().endsWith('.jar'))) {
+      const fullPath = path.join(modContext.modsDir, file);
+      const stats = fs.statSync(fullPath);
+      const managedEntry = managedFilesByPath.get(path.resolve(fullPath));
+      const enabled = true;
+      if (managedEntry) {
+        const project = state.projects?.[managedEntry.projectId];
+        const hiddenInModsTab = isManagedProjectHiddenInModsTab(managedEntry.projectId, project);
+
+        const versionEntry = project?.versions?.[minecraftVersion];
+        mods.push({
+          id: `project:${managedEntry.projectId}`,
+          projectId: managedEntry.projectId,
+          slug: project?.slug || '',
+          name: project?.title || file.replace(/\.jar$/i, ''),
+          description: project?.description || '',
+          iconUrl: project?.iconUrl || '',
+          isProtected: isManagedProjectRemoveLocked(managedEntry.projectId, project) || isRequiredModFileName(file),
+          canDisable: !isManagedProjectDisableLocked(managedEntry.projectId, project) && !isRequiredModFileDisableLocked(file),
+          path: fullPath,
+          size: stats.size,
+          enabled,
+          autoDisabled: false,
+          disabledReason: '',
+          managed: true,
+          source: 'modrinth',
+          sourceLabel: hiddenInModsTab ? 'Pflichtmod' : '',
+          hiddenInModsTab,
+          fileName: file,
+          minecraftVersion,
+          versionName: versionEntry?.versionName || '',
+          versionNumber: versionEntry?.versionNumber || '',
+          lastUpdated: stats.mtime.toISOString()
+        });
+        continue;
+      }
+
+      const hiddenInModsTab = isRequiredModFileHiddenInModsTab(file);
+
+      mods.push({
+        id: `file:${fullPath}`,
+        projectId: '',
+        slug: '',
+        name: file.replace(/\.jar(?:\.disabled)?$/i, ''),
+        description: '',
+        iconUrl: '',
+        isProtected: isRequiredModFileName(file.replace(new RegExp(`${DISABLED_MOD_SUFFIX}$`, 'i'), '')),
+        canDisable: !isRequiredModFileDisableLocked(file.replace(new RegExp(`${DISABLED_MOD_SUFFIX}$`, 'i'), '')),
+        path: fullPath,
+        size: stats.size,
+        enabled,
+        autoDisabled: false,
+        disabledReason: '',
+        managed: false,
+        source: 'manual',
+        sourceLabel: hiddenInModsTab ? 'Pflichtmod' : '',
+        hiddenInModsTab,
+        fileName: file,
+        minecraftVersion,
+        versionName: '',
+        versionNumber: '',
+        lastUpdated: stats.mtime.toISOString()
+      });
+  }
+
+  const disabledModsDir = getDisabledModsDir(modContext);
+  for (const file of fs.existsSync(disabledModsDir) ? fs.readdirSync(disabledModsDir).filter((entry) => entry.toLowerCase().endsWith('.jar')) : []) {
+    if (managedProjectFileNames.has(file.toLowerCase())) {
+      continue;
+    }
+    const hiddenInModsTab = isRequiredModFileHiddenInModsTab(file);
+
+    const fullPath = path.join(disabledModsDir, file);
+    const stats = fs.statSync(fullPath);
+    const disabledReason = formatStoredDisableReason(
+      state.disabledFileReasons?.[getDisabledFileReasonKey(file)],
+      'Ausgeschaltet.'
+    );
+    mods.push({
+      id: `file:${fullPath}`,
+      projectId: '',
+      slug: '',
+      name: file.replace(/\.jar$/i, ''),
+      description: '',
+      iconUrl: '',
+      isProtected: isRequiredModFileName(file),
+      canDisable: !isRequiredModFileDisableLocked(file),
+      path: fullPath,
+      size: stats.size,
+      enabled: false,
+      autoDisabled: false,
+      disabledReason,
+      managed: false,
+      source: 'manual',
+      sourceLabel: hiddenInModsTab ? 'Pflichtmod' : '',
+      hiddenInModsTab,
+      fileName: file,
+      minecraftVersion,
+      versionName: '',
+      versionNumber: '',
+      lastUpdated: stats.mtime.toISOString()
+    });
+  }
+
+  const manuallyDisabledProjectIds = new Set(state.disabledProjects || []);
+  const autoDisabledProjectIds = new Set(state.autoDisabledProjects || []);
+  const disabledProjectIds = uniqueStrings([
+    ...manuallyDisabledProjectIds,
+    ...autoDisabledProjectIds
+  ]).filter((projectId) => (
+    !isManagedProjectHiddenForMinecraftVersion(projectId, minecraftVersion)
+  ));
+
+  for (const projectId of disabledProjectIds) {
+    if (mods.some((entry) => entry.projectId === projectId)) {
+      continue;
+    }
+    const project = state.projects?.[projectId];
+    const versionEntry = project?.versions?.[minecraftVersion] || {};
+    const libraryPath = String(versionEntry.libraryPath || '').trim();
+    const stats = libraryPath && fs.existsSync(libraryPath) ? fs.statSync(libraryPath) : null;
+    const autoDisabled = autoDisabledProjectIds.has(projectId) && !manuallyDisabledProjectIds.has(projectId);
+    const storedDisabledReason = formatStoredDisableReason(state.disabledProjectReasons?.[projectId]);
+    const hiddenInModsTab = isManagedProjectHiddenInModsTab(projectId, project);
+    mods.push({
+      id: `project:${projectId}`,
+      projectId,
+      slug: project?.slug || '',
+      name: project?.title || projectId,
+      description: project?.description || '',
+      iconUrl: project?.iconUrl || '',
+      isProtected: isManagedProjectRemoveLocked(projectId, project) || isRequiredModFileName(versionEntry.fileName),
+      canDisable: !isManagedProjectDisableLocked(projectId, project) && !isRequiredModFileDisableLocked(versionEntry.fileName),
+      path: path.join(modContext.modsDir, versionEntry.fileName || `${projectId}.jar`),
+      size: stats?.size || 0,
+      enabled: false,
+      autoDisabled,
+      disabledReason: storedDisabledReason || (autoDisabled
+        ? `Keine passende Version für Minecraft ${minecraftVersion} gefunden.`
+        : ''),
+      managed: true,
+      source: 'modrinth',
+      sourceLabel: hiddenInModsTab ? 'Pflichtmod' : '',
+      hiddenInModsTab,
+      fileName: versionEntry.fileName || '',
+      minecraftVersion,
+      versionName: versionEntry.versionName || '',
+      versionNumber: versionEntry.versionNumber || '',
+      lastUpdated: (stats?.mtime || new Date()).toISOString()
+    });
+  }
+
+  mods.push(...await getInstalledDownloadableModrinthEntries(modContext));
+
+  return mods.sort((left, right) => {
+    const typeOrder = { mod: 0, resourcepack: 1, shader: 2 };
+    const leftType = left.itemType || 'mod';
+    const rightType = right.itemType || 'mod';
+    const typeDiff = (typeOrder[leftType] ?? 9) - (typeOrder[rightType] ?? 9);
+    if (typeDiff !== 0) {
+      return typeDiff;
+    }
+    if (left.enabled !== right.enabled) {
+      return left.enabled ? -1 : 1;
+    }
+    if (left.managed !== right.managed) {
+      return left.managed ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name, 'de', { sensitivity: 'base' });
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

@@ -1,0 +1,4597 @@
+        const refreshed = await window.electronAPI.configureDirectHosting(this.activeHostedServerId);
+        this.updateHostedServerStatus(refreshed);
+      } catch (error) {
+        this.showNotification('Router-Konfiguration fehlgeschlagen: ' + error.message);
+      } finally {
+        password = '';
+        this.hideLoading();
+      }
+    });
+    document.getElementById('router-password-cancel-btn')?.addEventListener('click', () => this.resolveRouterPasswordPrompt(''));
+    document.getElementById('router-password-ok-btn')?.addEventListener('click', () => {
+      this.resolveRouterPasswordPrompt(document.getElementById('router-password-input')?.value || '');
+    });
+    document.getElementById('router-password-input')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') this.resolveRouterPasswordPrompt(event.currentTarget.value || '');
+      if (event.key === 'Escape') this.resolveRouterPasswordPrompt('');
+    });
+    document.getElementById('hosted-server-command-send-btn')?.addEventListener('click', () => this.sendHostedServerCommand());
+    document.getElementById('hosted-server-command-input')?.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        this.sendHostedServerCommand();
+      }
+    });
+    document.getElementById('hosting-player-search')?.addEventListener('input', (event) => {
+      this.hostedPlayerSearch = event.target?.value || '';
+      this.renderHostingPlayers(this.hostedServerStatus);
+    });
+    document.getElementById('hosting-player-sort')?.addEventListener('change', (event) => {
+      this.hostedPlayerSort = event.target?.value || 'name';
+      this.renderHostingPlayers(this.hostedServerStatus);
+    });
+    document.getElementById('hosting-player-list')?.addEventListener('click', (event) => this.handleHostingPlayerAction(event));
+    document.getElementById('hosting-ban-list')?.addEventListener('click', (event) => this.handleHostingPlayerAction(event));
+    document.getElementById('hosting-console-search')?.addEventListener('input', (event) => {
+      this.hostingConsoleSearch = event.target?.value || '';
+      this.renderHostingConsole(this.hostedServerStatus);
+    });
+    document.getElementById('hosting-refresh-bans-btn')?.addEventListener('click', () => this.requestHostingBanList());
+    document.getElementById('hosting-unban-btn')?.addEventListener('click', () => this.unbanHostingPlayer());
+    document.getElementById('hosting-plugin-upload-input')?.addEventListener('change', (event) => this.importHostedServerMods(event));
+    document.getElementById('hosting-file-list')?.addEventListener('click', (event) => this.handleHostedServerModsClick(event));
+    document.getElementById('hosting-open-folder-btn')?.addEventListener('click', () => this.openHostedServerFolder());
+    document.getElementById('hosting-create-backup-btn')?.addEventListener('click', () => this.createHostedServerBackup());
+    document.getElementById('hosting-restore-backup-btn')?.addEventListener('click', () => this.restoreHostedServerBackup());
+    document.getElementById('hosting-unban-input')?.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        this.unbanHostingPlayer();
+      }
+    });
+    [
+      'hosted-server-name-input',
+      'hosted-server-edition-select',
+      'hosted-server-software-select',
+      'hosted-server-version-input',
+      'hosted-server-ram-input',
+      'hosted-server-port-input',
+      'hosted-server-max-players-input',
+      'hosted-server-difficulty-select',
+      'hosted-server-gamemode-select',
+      'hosted-server-motd-input',
+      'hosted-server-view-distance-input',
+      'hosted-server-simulation-distance-input',
+      'hosted-server-spawn-protection-input',
+      'hosted-server-pvp-checkbox',
+      'hosted-server-whitelist-checkbox',
+      'hosted-server-online-mode-checkbox',
+      'hosted-server-command-block-checkbox',
+      'hosted-server-eula-checkbox'
+    ].forEach((id) => {
+      const element = document.getElementById(id);
+      const eventName = element?.type === 'checkbox' || element?.tagName === 'SELECT' ? 'change' : 'input';
+      element?.addEventListener(eventName, () => this.markHostedServerDirty());
+    });
+    document.getElementById('hosted-server-edition-select')?.addEventListener('change', () => this.updateHostedServerSoftwareOptions());
+    document.getElementById('hosted-server-software-select')?.addEventListener('change', () => this.updateHostedServerSoftwareOptions());
+    document.getElementById('add-microsoft-account-btn')?.addEventListener('click', () => this.addMicrosoftAccount());
+    document.getElementById('add-offline-account-btn')?.addEventListener('click', () => this.addOfflineAccount());
+    document.getElementById('offline-account-name-input')?.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        this.addOfflineAccount();
+      }
+    });
+    document.getElementById('accounts-list')?.addEventListener('click', (event) => this.handleAccountsListClick(event));
+    document.getElementById('choose-skin-btn')?.addEventListener('click', () => this.chooseSkin());
+    document.getElementById('clear-skin-btn')?.addEventListener('click', () => this.clearSkin());
+    document.getElementById('skins-list')?.addEventListener('click', (event) => this.handleSkinListClick(event));
+    document.getElementById('custom-capes-list')?.addEventListener('click', (event) => {
+      if (event.target.closest('[data-open-cape-editor]')) this.openCapeEditor();
+      else if (event.target.closest('[data-edit-cape-id]')) this.openCapeEditor(event.target.closest('[data-edit-cape-id]').dataset.editCapeId);
+      else if (event.target.closest('[data-delete-cape-id]')) this.deleteCustomCape(event.target.closest('[data-delete-cape-id]').dataset.deleteCapeId);
+      else this.handleCapeClick(event);
+    });
+    document.getElementById('official-capes-list')?.addEventListener('click', (event) => this.handleCapeClick(event));
+    document.getElementById('unequip-cape-btn')?.addEventListener('click', () => this.activateCape(''));
+    document.getElementById('close-cape-editor-btn')?.addEventListener('click', () => this.closeCapeEditor());
+    document.getElementById('cape-editor')?.addEventListener('click', (event) => {
+      if (event.target?.id === 'cape-editor') this.closeCapeEditor();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !document.getElementById('cape-editor')?.classList.contains('hidden')) this.closeCapeEditor();
+    });
+    document.getElementById('save-cape-btn')?.addEventListener('click', () => this.saveCustomCape());
+    this.setupCapeCanvas();
+    document.getElementById('refresh-versions-btn')?.addEventListener('click', () => this.refreshVersions());
+    document.getElementById('download-version-btn')?.addEventListener('click', () => this.downloadSelectedVersion());
+    document.getElementById('version-select')?.addEventListener('change', () => this.handleVersionChange());
+    document.getElementById('change-path-btn')?.addEventListener('click', () => this.saveMinecraftWindowsUserName());
+    document.getElementById('minecraft-windows-user-input')?.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        this.saveMinecraftWindowsUserName();
+      }
+    });
+    document.getElementById('choose-standard-mods-path-btn')?.addEventListener('click', () => this.chooseStandardModsPath());
+    document.getElementById('reset-standard-mods-path-btn')?.addEventListener('click', () => this.resetStandardModsPath());
+    document.getElementById('debug-mode-toggle')?.addEventListener('change', (event) => this.setDebugMode(event.target.checked));
+    document.getElementById('run-diagnostics-btn')?.addEventListener('click', () => this.runDiagnostics());
+    document.getElementById('cleanup-numbered-mods-btn')?.addEventListener('click', () => this.cleanupNumberedAndDuplicateMods());
+    document.getElementById('open-diagnostics-folder-btn')?.addEventListener('click', () => this.openDiagnosticsFolder());
+    document.getElementById('replay-tutorial-btn')?.addEventListener('click', () => this.startTutorial({ force: true }));
+    document.getElementById('check-launcher-update-btn')?.addEventListener('click', () => this.checkLauncherAppUpdateManually());
+    document.getElementById('install-launcher-update-btn')?.addEventListener('click', () => this.installLauncherAppUpdateManually());
+    document.getElementById('logout-btn')?.addEventListener('click', () => this.logout());
+    document.getElementById('offline-btn')?.addEventListener('click', () => this.handleOfflineLogin());
+    this.setupTutorialEvents();
+  }
+
+  setupModsDragAndDrop() {
+    const dropZone = document.getElementById('mods-drop-zone');
+    if (!dropZone) {
+      return;
+    }
+
+    const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
+    const preventFileOpen = (event) => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    document.addEventListener('dragover', preventFileOpen);
+    document.addEventListener('drop', preventFileOpen);
+
+    dropZone.addEventListener('dragenter', (event) => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      dropZone.classList.add('is-drag-over');
+    });
+
+    dropZone.addEventListener('dragover', (event) => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      dropZone.classList.add('is-drag-over');
+    });
+
+    dropZone.addEventListener('dragleave', (event) => {
+      if (!dropZone.contains(event.relatedTarget)) {
+        dropZone.classList.remove('is-drag-over');
+      }
+    });
+
+    dropZone.addEventListener('click', () => {
+      // Datapacks are installed from the Modrinth tab.
+    });
+
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dropZone.classList.remove('is-drag-over');
+      if (this.modsViewType !== 'mod') {
+        this.showNotification('Ressourcenpakete und Shader bitte über den Modrinth-Tab installieren.');
+        return;
+      }
+      this.importDroppedMods(this.getDroppedFilePaths(event.dataTransfer));
+    });
+  }
+
+  getDroppedFilePaths(dataTransfer) {
+    return Array.from(dataTransfer?.files || [])
+      .map((file) => {
+        if (typeof window.electronAPI?.getPathForFile === 'function') {
+          try {
+            return window.electronAPI.getPathForFile(file);
+          } catch (_error) {
+            return file?.path || '';
+          }
+        }
+        return file?.path || '';
+      })
+      .filter(Boolean);
+  }
+
+  async importDroppedMods(filePaths) {
+    if (!filePaths.length) {
+      this.showNotification('Keine gültige JAR-Datei erkannt.');
+      return;
+    }
+
+    if (typeof window.electronAPI?.importDroppedMods !== 'function') {
+      this.showNotification('Fehler: Drag-and-drop Import ist nicht verfügbar.');
+      return;
+    }
+
+    const shouldCheckModrinth = await this.showConfirm({
+      title: 'Mod hinzufügen',
+      message: 'Soll der Launcher diese Mod so behalten oder auf Modrinth nach einer passenden Version suchen und sie ersetzen?',
+      confirmText: 'Modrinth prüfen',
+      cancelText: 'Behalten'
+    });
+    const importMode = shouldCheckModrinth ? 'modrinth' : 'keep';
+
+    this.showLoading(importMode === 'keep'
+      ? (this.requireDroppedModApprovalEnabled ? 'Bereite eigene Mods vor...' : 'Füge eigene Mods hinzu...')
+      : (this.requireDroppedModApprovalEnabled ? 'Erkenne Mods und bereite eigene Mods vor...' : 'Erkenne und installiere Mods...'));
+
+    try {
+      const result = await window.electronAPI.importDroppedMods(filePaths, {
+        mode: importMode,
+        requireManualApproval: this.requireDroppedModApprovalEnabled
+      });
+      if (!result.success) {
+        const rejectedText = result.rejected?.length ? ` Hinweis: ${result.rejected.slice(0, 2).join(' | ')}` : '';
+        this.showNotification(`Fehler: ${result.error || 'Mod konnte nicht installiert werden.'}${rejectedText}`);
+        return;
+      }
+
+      this.selectedVersionId = result.selectedVersionId || this.selectedVersionId;
+      await this.refreshPackContext({ force: true });
+      const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+      this.showNotification(`${result.message || 'Mod installiert.'}${warningText}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  setupButtonFeedback() {
+    document.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const button = event.target.closest('button, .btn, [role="button"], input[type="checkbox"], input[type="range"], select');
+      if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') {
+        return;
+      }
+
+      if (button.dataset.skipClickSound !== 'true') {
+        this.playButtonSound();
+      }
+      button.classList.remove('is-clicked');
+      window.requestAnimationFrame(() => {
+        button.classList.add('is-clicked');
+        window.setTimeout(() => button.classList.remove('is-clicked'), 180);
+      });
+    });
+  }
+
+  getButtonAudioContext() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+
+    if (!this.buttonAudioContext) {
+      this.buttonAudioContext = new AudioContextClass();
+    }
+
+    if (this.buttonAudioContext.state === 'suspended') {
+      this.buttonAudioContext.resume().catch(() => {});
+    }
+
+    return this.buttonAudioContext;
+  }
+
+  getClickSoundProfiles() {
+    return {
+      alpaca: { src: 'assets/sounds/typersguild/alpaca.mp3' },
+      blackink: { src: 'assets/sounds/typersguild/blackink.mp3' },
+      bluealps: { src: 'assets/sounds/typersguild/bluealps.mp3' },
+      boxnavy: { src: 'assets/sounds/typersguild/boxnavy.mp3' },
+      cream: { src: 'assets/sounds/typersguild/cream.mp3' },
+      holypanda: { src: 'assets/sounds/typersguild/holypanda.mp3' },
+      mxblack: { src: 'assets/sounds/typersguild/mxblack.mp3' },
+      mxblue: { src: 'assets/sounds/typersguild/mxblue.mp3' },
+      mxbrown: { src: 'assets/sounds/typersguild/mxbrown.mp3' },
+      redink: { src: 'assets/sounds/typersguild/redink.mp3' },
+      topre: { src: 'assets/sounds/typersguild/topre.mp3' },
+      turquoise: { src: 'assets/sounds/typersguild/turquoise.mp3' }
+    };
+  }
+
+  getClickSoundProfile(soundId) {
+    return this.getClickSoundProfiles()[soundId] || null;
+  }
+
+  getSoundGainMultiplier(boost = 1, cap = 6, referenceVolume = 0.2) {
+    const volume = Math.min(3, Math.max(0, Number(this.soundVolume) || 0));
+    if (volume <= 0) {
+      return 0;
+    }
+
+    return Math.min(cap, (volume / referenceVolume) * boost);
+  }
+
+  playButtonSound(options = {}) {
+    const now = performance.now();
+    if (!options.force && now - this.lastButtonSoundAt < 45) {
+      return;
+    }
+    this.lastButtonSoundAt = now;
+
+    const soundId = options.soundId || this.clickSound;
+    const profile = this.getClickSoundProfile(soundId) || this.getClickSoundProfile('alpaca');
+    const volume = Math.min(2, Math.max(0, Number(this.soundVolume) || 0));
+    const amplifiedVolume = volume * 14.4;
+    if (!profile || volume <= 0) return;
+
+    let player = this.clickSoundPlayers.get(soundId);
+    if (!player) {
+      player = new Audio(profile.src);
+      player.preload = 'auto';
+      this.clickSoundPlayers.set(soundId, player);
+    }
+
+    player.pause();
+    player.currentTime = 0;
+    const audioContext = this.getButtonAudioContext();
+    if (audioContext) {
+      let audioNode = this.clickSoundAudioNodes.get(soundId);
+      if (!audioNode) {
+        try {
+          const source = audioContext.createMediaElementSource(player);
+          const gain = audioContext.createGain();
+          source.connect(gain);
+          gain.connect(audioContext.destination);
+          audioNode = { gain };
+          this.clickSoundAudioNodes.set(soundId, audioNode);
+        } catch (_error) {
+          audioNode = null;
+        }
+      }
+      if (audioNode) {
+        player.volume = 1;
+        audioNode.gain.gain.value = amplifiedVolume;
+      } else {
+        player.volume = Math.min(1, amplifiedVolume);
+      }
+    } else {
+      player.volume = Math.min(1, amplifiedVolume);
+    }
+    player.play().catch(() => {});
+  }
+
+  playLoadingSound(type = 'start') {
+    const now = performance.now();
+    if (now - this.lastLoadingSoundAt < 260) {
+      return;
+    }
+    this.lastLoadingSoundAt = now;
+
+    const audioContext = this.getButtonAudioContext();
+    if (!audioContext) {
+      return;
+    }
+
+    const volumeMultiplier = this.getSoundGainMultiplier(2.2, 6);
+    if (volumeMultiplier <= 0) {
+      return;
+    }
+
+    try {
+      const startAt = audioContext.currentTime + 0.01;
+      const master = audioContext.createGain();
+      const compressor = audioContext.createDynamicsCompressor();
+      const tones = type === 'complete'
+        ? [
+            { frequency: 392, offset: 0, duration: 0.11, gain: 0.032, waveform: 'sine' },
+            { frequency: 659.25, offset: 0.055, duration: 0.13, gain: 0.026, waveform: 'triangle' },
+            { frequency: 987.77, offset: 0.12, duration: 0.16, gain: 0.018, waveform: 'sine' }
+          ]
+        : [
+            { frequency: 196, offset: 0, duration: 0.12, gain: 0.028, waveform: 'triangle' },
+            { frequency: 392, offset: 0.045, duration: 0.13, gain: 0.024, waveform: 'sine' },
+            { frequency: 587.33, offset: 0.09, duration: 0.12, gain: 0.016, waveform: 'sine' }
+          ];
+
+      compressor.threshold.setValueAtTime(-22, startAt);
+      compressor.knee.setValueAtTime(18, startAt);
+      compressor.ratio.setValueAtTime(4, startAt);
+      master.gain.setValueAtTime(0.9, startAt);
+      master.connect(compressor);
+      compressor.connect(audioContext.destination);
+
+      let lastStopAt = startAt;
+      tones.forEach((tone) => {
+        const toneStart = startAt + tone.offset;
+        const toneEnd = toneStart + tone.duration;
+        const oscillator = audioContext.createOscillator();
+        const filter = audioContext.createBiquadFilter();
+        const gain = audioContext.createGain();
+
+        oscillator.type = tone.waveform;
+        oscillator.frequency.setValueAtTime(tone.frequency, toneStart);
+        oscillator.frequency.exponentialRampToValueAtTime(tone.frequency * 1.018, toneEnd);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(type === 'complete' ? 2600 : 2100, toneStart);
+        filter.Q.setValueAtTime(0.62, toneStart);
+
+        gain.gain.setValueAtTime(0.0001, toneStart);
+        gain.gain.linearRampToValueAtTime(tone.gain * volumeMultiplier, toneStart + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0001, toneEnd);
+
+        oscillator.connect(filter);
+        filter.connect(gain);
+        gain.connect(master);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          filter.disconnect();
+          gain.disconnect();
+        };
+
+        oscillator.start(toneStart);
+        oscillator.stop(toneEnd + 0.015);
+        lastStopAt = Math.max(lastStopAt, toneEnd + 0.015);
+      });
+
+      window.setTimeout(() => {
+        master.disconnect();
+        compressor.disconnect();
+      }, Math.max(180, Math.ceil((lastStopAt - audioContext.currentTime) * 1000) + 40));
+    } catch (error) {
+      console.warn('Loading sound error:', error);
+    }
+  }
+
+  showConfirm({ title = 'Aktion bestätigen', message = 'Bist du sicher?', confirmText = 'Bestätigen', cancelText = 'Abbrechen' } = {}) {
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-title');
+    const messageEl = document.getElementById('confirm-message');
+    const okButton = document.getElementById('confirm-ok-btn');
+    const cancelButton = document.getElementById('confirm-cancel-btn');
+
+    if (!modal || !titleEl || !messageEl || !okButton || !cancelButton) {
+      return Promise.resolve(window.confirm(this.localizeText(message)));
+    }
+
+    if (this.pendingConfirm) {
+      this.resolveConfirm(false);
+    }
+
+    titleEl.textContent = this.localizeText(title);
+    messageEl.textContent = this.localizeText(message);
+    okButton.textContent = this.localizeText(confirmText);
+    cancelButton.textContent = this.localizeText(cancelText);
+    modal.classList.remove('hidden');
+
+    return new Promise((resolve) => {
+      this.pendingConfirm = {
+        resolve,
+        previousFocus: document.activeElement
+      };
+      window.setTimeout(() => cancelButton.focus(), 0);
+    });
+  }
+
+  resolveConfirm(confirmed) {
+    if (!this.pendingConfirm) {
+      return;
+    }
+
+    const modal = document.getElementById('confirm-modal');
+    const { resolve, previousFocus } = this.pendingConfirm;
+    this.pendingConfirm = null;
+    modal?.classList.add('hidden');
+
+    if (previousFocus && typeof previousFocus.focus === 'function') {
+      previousFocus.focus();
+    }
+
+    resolve(Boolean(confirmed));
+  }
+
+  handleConfirmKeydown(event) {
+    if (this.pendingSkinVariantChoice && event.key === 'Escape') {
+      event.preventDefault();
+      this.resolveSkinVariantChoice(null);
+      return;
+    }
+
+    if (!this.pendingConfirm) {
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.resolveConfirm(false);
+    }
+
+  }
+
+  showSkinVariantChoice() {
+    const modal = document.getElementById('skin-variant-modal');
+    const slimButton = document.getElementById('skin-variant-slim-btn');
+    const wideButton = document.getElementById('skin-variant-wide-btn');
+
+    if (!modal || !slimButton || !wideButton) {
+      const selectedVariant = window.confirm(this.localizeText('Slim-Modell verwenden? OK = Slim, Abbrechen = Wide'))
+        ? 'slim'
+        : 'classic';
+      return Promise.resolve(selectedVariant);
+    }
+
+    if (this.pendingSkinVariantChoice) {
+      this.resolveSkinVariantChoice(null);
+    }
+
+    modal.classList.remove('hidden');
+
+    return new Promise((resolve) => {
+      this.pendingSkinVariantChoice = {
+        resolve,
+        previousFocus: document.activeElement
+      };
+      window.setTimeout(() => slimButton.focus(), 0);
+    });
+  }
+
+  resolveSkinVariantChoice(variant) {
+    if (!this.pendingSkinVariantChoice) {
+      return;
+    }
+
+    const modal = document.getElementById('skin-variant-modal');
+    const { resolve, previousFocus } = this.pendingSkinVariantChoice;
+    this.pendingSkinVariantChoice = null;
+    modal?.classList.add('hidden');
+
+    if (previousFocus && typeof previousFocus.focus === 'function') {
+      previousFocus.focus();
+    }
+
+    resolve(variant);
+  }
+
+  async minimizeWindow() {
+    try {
+      await window.electronAPI.windowMinimize();
+    } catch (error) {
+      console.error('Window minimize error:', error);
+    }
+  }
+
+  async toggleMaximizeWindow() {
+    try {
+      const result = await window.electronAPI.windowToggleMaximize();
+      if (result?.success && typeof result.maximized === 'boolean') {
+        this.setMaximizeButtonState(result.maximized);
+      }
+    } catch (error) {
+      console.error('Window maximize error:', error);
+    }
+  }
+
+  async closeWindow() {
+    try {
+      await window.electronAPI.windowClose();
+    } catch (error) {
+      console.error('Window close error:', error);
+    }
+  }
+
+  getWindowsUserNameFromMinecraftPath(minecraftPath = '') {
+    const parts = String(minecraftPath || '').split(/[\\/]/).filter(Boolean);
+    const usersIndex = parts.findIndex((part) => part.toLowerCase() === 'users');
+    return usersIndex >= 0 && parts[usersIndex + 1] ? parts[usersIndex + 1] : '';
+  }
+
+  async changeMinecraftPath() {
+    try {
+      const result = await window.electronAPI.chooseMinecraftPath();
+      if (!result || result.canceled) {
+        return;
+      }
+      if (!result.success) {
+        this.showNotification(`Fehler: ${result.error || 'Pfad konnte nicht gespeichert werden.'}`);
+        return;
+      }
+
+      this.minecraftPath = result.minecraftPath || this.minecraftPath;
+      const minecraftPathEl = document.getElementById('minecraft-path');
+      if (minecraftPathEl) {
+        minecraftPathEl.textContent = this.minecraftPath || 'Nicht gefunden';
+      }
+      const minecraftWindowsUserInput = document.getElementById('minecraft-windows-user-input');
+      if (minecraftWindowsUserInput) {
+        minecraftWindowsUserInput.value = this.getWindowsUserNameFromMinecraftPath(this.minecraftPath);
+      }
+
+      this.showNotification(`Minecraft-Pfad gespeichert: ${this.minecraftPath}`);
+      await this.loadStandardModsPath();
+      await this.refreshPackContext();
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async saveMinecraftWindowsUserName() {
+    try {
+      const minecraftWindowsUserInput = document.getElementById('minecraft-windows-user-input');
+      const windowsUserName = minecraftWindowsUserInput?.value.trim() || this.getWindowsUserNameFromMinecraftPath(this.minecraftPath);
+      const result = await window.electronAPI.setMinecraftWindowsUserName(windowsUserName);
+      if (!result.success) {
+        this.showNotification(`Fehler: ${result.error || 'Name konnte nicht gespeichert werden.'}`);
+        return;
+      }
+
+      this.minecraftPath = result.minecraftPath || this.minecraftPath;
+      const minecraftPathEl = document.getElementById('minecraft-path');
+      if (minecraftPathEl) {
+        minecraftPathEl.textContent = this.minecraftPath || 'Nicht gefunden';
+      }
+      if (minecraftWindowsUserInput) {
+        minecraftWindowsUserInput.value = result.minecraftWindowsUserName || this.getWindowsUserNameFromMinecraftPath(this.minecraftPath);
+      }
+
+      this.showNotification(`Windows-Name gespeichert: ${this.minecraftPath}`);
+      await this.loadStandardModsPath();
+      await this.refreshPackContext();
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  updateStandardModsPathUI(pathInfo = {}) {
+    const standardModsPathEl = document.getElementById('standard-mods-path');
+    const resetButton = document.getElementById('reset-standard-mods-path-btn');
+    const modsPath = pathInfo.modsPath || this.standardModsPath || '';
+    this.standardModsPath = modsPath;
+
+    if (standardModsPathEl) {
+      standardModsPathEl.textContent = modsPath || 'Nicht gefunden';
+    }
+    if (resetButton) {
+      resetButton.disabled = !pathInfo.custom;
+    }
+  }
+
+  async loadStandardModsPath() {
+    if (typeof window.electronAPI?.getStandardModsPath !== 'function') {
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.getStandardModsPath();
+      if (result?.success) {
+        this.updateStandardModsPathUI(result);
+      }
+    } catch (error) {
+      console.error('Standard mods path error:', error);
+    }
+  }
+
+  async chooseStandardModsPath() {
+    if (typeof window.electronAPI?.chooseStandardModsPath !== 'function') {
+      this.showNotification('Fehler: Standard Mods-Ordner kann nicht geändert werden.');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.chooseStandardModsPath();
+      if (!result || result.canceled) {
+        return;
+      }
+      if (!result.success) {
+        this.showNotification(`Fehler: ${result.error || 'Mods-Ordner konnte nicht gespeichert werden.'}`);
+        return;
+      }
+
+      this.updateStandardModsPathUI(result);
+      this.showNotification(`Standard Mods-Ordner gespeichert: ${result.modsPath}`);
+      await this.refreshPackContext();
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async resetStandardModsPath() {
+    if (typeof window.electronAPI?.resetStandardModsPath !== 'function') {
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.resetStandardModsPath();
+      if (!result.success) {
+        this.showNotification(`Fehler: ${result.error || 'Mods-Ordner konnte nicht zurückgesetzt werden.'}`);
+        return;
+      }
+
+      this.updateStandardModsPathUI(result);
+      this.showNotification(`Standard Mods-Ordner zurückgesetzt: ${result.modsPath}`);
+      await this.refreshPackContext();
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  setupNavigation() {
+    const navItems = document.querySelectorAll('.nav-item');
+
+    navItems.forEach((item) => {
+      item.addEventListener('click', () => {
+        const sectionId = item.getAttribute('data-section');
+        this.activateSection(sectionId);
+      });
+    });
+
+    const initialSectionId = document.querySelector('.nav-item.active')?.getAttribute('data-section')
+      || navItems[0]?.getAttribute('data-section');
+    if (initialSectionId) {
+      this.activateSection(initialSectionId);
+    }
+
+    this.scheduleScrollFadeUpdate();
+  }
+
+  setupReactBitsMotion() {
+    // Global pointer tracking and DOM-wide motion observation caused frame drops
+    // on large mod lists. The launcher intentionally uses a static, instant UI.
+    document.documentElement.classList.remove('reactbits-motion-ready');
+    document.documentElement.classList.add('launcher-static-ui');
+  }
+
+  scheduleReactBitsMotionUpdate() {
+    if (this.reactBitsMotionFrame) {
+      return;
+    }
+
+    this.reactBitsMotionFrame = requestAnimationFrame(() => {
+      this.reactBitsMotionFrame = null;
+      this.prepareReactBitsMotion();
+    });
+  }
+
+  prepareReactBitsMotion() {
+    this.prepareReactBitsText();
+    this.prepareReactBitsSurfaces();
+    this.prepareReactBitsMotionItems();
+
+    document.querySelectorAll('.content-section.active').forEach((section) => {
+      this.prepareSectionMotion(section);
+    });
+  }
+
+  prepareReactBitsText() {
+    const textTargets = [
+      '.login-title',
+      '.title',
+      '.section-header h2',
+      '.section-header p',
+      '.mods-subtitle',
+      '.panel-context-text',
+      '.start-status',
+      '.modrinth-status',
+      '.mods-check-status',
+      '.skin-status',
+      '.setting-heading h4',
+      '.setting-heading p',
+      '.hosting-hero h2',
+      '.tutorial-card h3',
+      '.confirm-content h3'
+    ].join(', ');
+
+    document.querySelectorAll(textTargets).forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.dataset.reactbitsTextReady === 'true') {
+        return;
+      }
+
+      element.dataset.reactbitsTextReady = 'true';
+      element.classList.add('rb-text-reveal');
+      element.style.setProperty('--rb-text-length', String((element.textContent || '').trim().length || 8));
+    });
+  }
+
+  prepareReactBitsSurfaces() {
+    const surfaceTargets = [
+      '.login-box',
+      '.header',
+      '.sidebar',
+      '.start-hero-card',
+      '.start-direct-server',
+      '.installed-mods-panel',
+      '.modrinth-panel',
+      '.mod-item',
+      '.modrinth-project-card',
+      '.pack-creator-card',
+      '.pack-list-panel',
+      '.pack-card',
+      '.server-card',
+      '.server-list-panel',
+      '.server-favorite-card',
+      '.hosting-card',
+      '.hosted-server-card',
+      '.hosting-player-card',
+      '.account-card',
+      '.account-list-panel',
+      '.account-switch-card',
+      '.skin-card',
+      '.saved-skin-chip',
+      '.online-skin-card',
+      '.mods-drop-zone',
+      '.modrinth-pack-target',
+      '.setting-item',
+      '.rgb-sliders',
+      '.color-preview',
+      '.confirm-box',
+      '.tutorial-card',
+      '[class$="-panel"]',
+      '[class$="-card"]',
+      '[class$="-chip"]'
+    ].join(', ');
+
+    document.querySelectorAll(surfaceTargets).forEach((element, index) => {
+      if (!(element instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!element.classList.contains('rb-surface')) {
+        element.classList.add('rb-surface');
+      }
+
+      const surfaceIndex = String(index % 18);
+      if (element.style.getPropertyValue('--rb-surface-index') !== surfaceIndex) {
+        element.style.setProperty('--rb-surface-index', surfaceIndex);
+      }
+    });
+  }
+
+  prepareReactBitsMotionItems() {
+    const itemTargets = [
+      'button',
+      '.btn',
+      '.nav-item',
+      '.modrinth-type-tab',
+      '.input-field',
+      '.rgb-slider',
+      '.setting-toggle',
+      '.checkbox-row',
+      '.section-actions > *',
+      '.settings-actions > *',
+      '.skin-actions > *',
+      '.server-actions > *',
+      '.mod-actions > *',
+      '.pack-actions > *',
+      '.saved-skin-actions > *',
+      '.online-skin-actions > *',
+      '.login-form > *',
+      '.login-info > *',
+      '.pack-form > *',
+      '.server-form > *',
+      '.account-form > *',
+      '.skin-library-search-row > *',
+      '.modrinth-search-row > *',
+      '.sound-controls > *',
+      '.slider-group',
+      '.sound-select-row',
+      '.server-command-row > *',
+      '.hosting-toolbar > *',
+      '.hosting-ban-tools > *',
+      '.loader-shell > *',
+      '.update-shell > *',
+      '.confirm-actions > *',
+      '.tutorial-actions > *'
+    ].join(', ');
+
+    document.querySelectorAll(itemTargets).forEach((element, index) => {
+      if (!(element instanceof HTMLElement) || element.closest('.hidden, .is-hidden')) {
+        return;
+      }
+
+      element.classList.add('rb-motion-item');
+      const itemIndex = String(index % 24);
+      if (element.style.getPropertyValue('--rb-item-index') !== itemIndex) {
+        element.style.setProperty('--rb-item-index', itemIndex);
+      }
+    });
+  }
+
+  handleReactBitsPointerMove(event) {
+    this.reactBitsPointer = {
+      x: event.clientX,
+      y: event.clientY
+    };
+
+    if (this.reactBitsPointerFrame) {
+      return;
+    }
+
+    this.reactBitsPointerFrame = requestAnimationFrame(() => {
+      this.reactBitsPointerFrame = null;
+      this.updateReactBitsPointerEffects();
+    });
+  }
+
+  updateReactBitsPointerEffects() {
+    const pointer = this.reactBitsPointer;
+    const targets = document.querySelectorAll('.rb-surface, .rb-motion-item, .btn, .nav-item, .modrinth-type-tab, .input-field');
+
+    targets.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.closest('.hidden, .is-hidden')) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return;
+      }
+
+      const centerX = rect.left + (rect.width / 2);
+      const centerY = rect.top + (rect.height / 2);
+      const distance = Math.hypot(pointer.x - centerX, pointer.y - centerY);
+      const radius = Math.max(160, Math.min(360, Math.max(rect.width, rect.height) * 1.7));
+      const active = distance <= radius;
+
+      element.classList.toggle('rb-pointer-active', active);
+      if (!active) {
+        element.style.removeProperty('--rb-pointer-x');
+        element.style.removeProperty('--rb-pointer-y');
+        element.style.removeProperty('--rb-magnet-x');
+        element.style.removeProperty('--rb-magnet-y');
+        return;
+      }
+
+      const localX = ((pointer.x - rect.left) / rect.width) * 100;
+      const localY = ((pointer.y - rect.top) / rect.height) * 100;
+      element.style.setProperty('--rb-pointer-x', `${localX.toFixed(2)}%`);
+      element.style.setProperty('--rb-pointer-y', `${localY.toFixed(2)}%`);
+    });
+  }
+
+  clearReactBitsPointerEffects() {
+    document.querySelectorAll('.rb-pointer-active').forEach((element) => {
+      if (!(element instanceof HTMLElement)) {
+        return;
+      }
+
+      element.classList.remove('rb-pointer-active');
+      element.style.removeProperty('--rb-pointer-x');
+      element.style.removeProperty('--rb-pointer-y');
+      element.style.removeProperty('--rb-magnet-x');
+      element.style.removeProperty('--rb-magnet-y');
+    });
+  }
+
+  prepareSectionMotion(section) {
+    if (!section) {
+      return;
+    }
+
+    this.prepareMotionGroup(section, ':scope > *', 45);
+    [
+      '.mods-list',
+      '.packs-list',
+      '.servers-list',
+      '.accounts-list',
+      '.skins-list',
+      '.skin-library-results',
+      '.modrinth-results',
+      '.start-server-list',
+      '.hosting-server-list',
+      '.hosting-player-list',
+      '.hosting-ban-list',
+      '.hosting-history-list',
+      '.hosting-metric-grid',
+      '.settings-container'
+    ].forEach((selector) => {
+      this.prepareMotionGroup(section.querySelector(selector), ':scope > *', 34);
+    });
+  }
+
+  prepareMotionGroup(container, selector = ':scope > *', stepMs = 36) {
+    // Motion staggering is disabled to avoid touching every rendered list item.
+    return;
+  }
+
+  setupScrollFade() {
+    const sections = this.getScrollFadeContainers();
+    const scheduleUpdate = () => this.scheduleScrollFadeUpdate();
+
+    sections.forEach((section) => {
+      section.addEventListener('scroll', scheduleUpdate, { passive: true });
+
+      if (typeof MutationObserver !== 'undefined') {
+        const observer = new MutationObserver(scheduleUpdate);
+        observer.observe(section, { childList: true, subtree: true });
+        this.scrollFadeObservers.push(observer);
+      }
+    });
+
+    document.addEventListener('scroll', scheduleUpdate, { passive: true, capture: true });
+    window.addEventListener('resize', scheduleUpdate);
+    this.scheduleScrollFadeUpdate();
+  }
+
+  getNeonFrameSelector() {
+    return [
+      '.server-card',
+      '.server-list-panel',
+      '.server-host-card',
+      '.hosting-card',
+      '.hosted-server-card',
+      '.hosted-mod-card',
+      '.hosting-player-card',
+      '.server-favorite-card',
+      '.account-card',
+      '.account-list-panel',
+      '.account-switch-card',
+      '.mod-item',
+      '.mods-drop-zone',
+      '.modrinth-pack-target',
+      '.pack-creator-card',
+      '.pack-list-panel',
+      '.pack-card',
+      '.skin-card',
+      '.saved-skin-chip',
+      '.online-skin-card',
+      '.setting-item',
+      '.rgb-sliders',
+      '.color-preview',
+      '.tutorial-card'
+    ].join(', ');
+  }
+
+  setupNeonFrameTracking() {
+    this.refreshNeonFrameTargets();
+
+    const schedulePointerUpdate = (event) => {
+      this.neonFramePointer = {
+        x: event.clientX,
+        y: event.clientY
+      };
+      this.scheduleNeonFrameUpdate();
+    };
+
+    document.addEventListener('mousemove', schedulePointerUpdate, { passive: true });
+    document.addEventListener('mouseleave', () => this.clearNeonFrameHotspots());
+    window.addEventListener('blur', () => this.clearNeonFrameHotspots());
+    window.addEventListener('resize', () => this.scheduleNeonFrameUpdate());
+
+    if (typeof MutationObserver !== 'undefined') {
+      this.neonFrameMutationObserver = new MutationObserver(() => {
+        this.refreshNeonFrameTargets();
+        this.scheduleNeonFrameUpdate();
+      });
+      this.neonFrameMutationObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+  }
+
+  refreshNeonFrameTargets() {
+    if (!this.neonFramesEnabled) {
+      return;
+    }
+
+    document.querySelectorAll(this.getNeonFrameSelector()).forEach((element) => {
+      if (element instanceof HTMLElement) {
+        element.classList.add('neon-frame-hotspot');
+        this.getOrCreateNeonFrameCurve(element);
+      }
+    });
+  }
+
+  getOrCreateNeonFrameCurve(element) {
+    if (!(element instanceof HTMLElement)) {
+      return null;
+    }
+
+    let svg = element.querySelector(':scope > .neon-frame-curve');
+    let path = svg?.querySelector?.(':scope > .neon-frame-curve-path-core')
+      || svg?.querySelector?.(':scope > .neon-frame-curve-path');
+    let softPath = svg?.querySelector?.(':scope > .neon-frame-curve-path-soft');
+    let gradient = svg?.querySelector?.(':scope > defs > linearGradient.neon-frame-curve-gradient');
+    if (!(svg instanceof SVGElement) || !(path instanceof SVGPathElement)) {
+      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      gradient = this.createNeonFrameGradient(element);
+      softPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      svg.classList.add('neon-frame-curve');
+      softPath.classList.add('neon-frame-curve-path', 'neon-frame-curve-path-soft');
+      path.classList.add('neon-frame-curve-path', 'neon-frame-curve-path-core');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('focusable', 'false');
+      defs.appendChild(gradient);
+      svg.appendChild(defs);
+      svg.appendChild(softPath);
+      svg.appendChild(path);
+      element.appendChild(svg);
+    } else {
+      path.classList.add('neon-frame-curve-path', 'neon-frame-curve-path-core');
+      if (!(gradient instanceof SVGLinearGradientElement)) {
+        const defs = svg.querySelector(':scope > defs') || document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        gradient = this.createNeonFrameGradient(element);
+        defs.appendChild(gradient);
+        if (!defs.parentElement) {
+          svg.insertBefore(defs, svg.firstChild);
+        }
+      }
+      if (!(softPath instanceof SVGPathElement)) {
+        softPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        softPath.classList.add('neon-frame-curve-path', 'neon-frame-curve-path-soft');
+        svg.insertBefore(softPath, path);
+      }
+    }
+
+    path.setAttribute('stroke', `url(#${gradient.id})`);
+    return { svg, path, softPath, gradient };
+  }
+
+  createNeonFrameGradient(element) {
+    const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+    const gradientId = element.dataset.neonFrameGradientId
+      || `neon-frame-gradient-${this.neonFrameGradientCounter += 1}`;
+    element.dataset.neonFrameGradientId = gradientId;
+    gradient.id = gradientId;
+    gradient.classList.add('neon-frame-curve-gradient');
+    gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
+
+    [
+      ['0%', 'rgb(var(--primary-rgb))', '0'],
+      ['18%', 'rgb(var(--primary-rgb))', '0.16'],
+      ['50%', 'rgb(245, 253, 255)', '0.96'],
+      ['82%', 'rgb(var(--primary-rgb))', '0.16'],
+      ['100%', 'rgb(var(--primary-rgb))', '0']
+    ].forEach(([offset, color, opacity]) => {
+      const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+      stop.setAttribute('offset', offset);
+      stop.style.stopColor = color;
+      stop.style.stopOpacity = opacity;
+      gradient.appendChild(stop);
+    });
+
+    return gradient;
+  }
+
+  getOrCreateNeonFrameLight(element, variant = 'primary') {
+    if (!(element instanceof HTMLElement)) {
+      return null;
+    }
+
+    const variantClass = `neon-frame-light-${variant}`;
+    let light = element.querySelector(`:scope > .${variantClass}`);
+    if (!(light instanceof HTMLElement) && variant === 'primary') {
+      light = element.querySelector(':scope > .neon-frame-light:not(.neon-frame-light-secondary)');
+    }
+
+    if (!(light instanceof HTMLElement)) {
+      light = document.createElement('span');
+      light.className = `neon-frame-light ${variantClass}`;
+      light.setAttribute('aria-hidden', 'true');
+      element.appendChild(light);
+    } else {
+      light.classList.add('neon-frame-light', variantClass);
+    }
+    return light;
+  }
+
+  scheduleNeonFrameUpdate() {
+    if (this.neonFrameTrackingFrame) {
+      return;
+    }
+
+    this.neonFrameTrackingFrame = requestAnimationFrame(() => {
+      this.neonFrameTrackingFrame = null;
+      this.updateNeonFrameHotspots();
+    });
+  }
+
+  updateNeonFrameHotspots() {
+    if (!this.neonFramesEnabled) {
+      this.clearNeonFrameHotspots();
+      return;
+    }
+
+    if (!this.neonFramePointer) {
+      this.clearNeonFrameHotspots();
+      return;
+    }
+
+    const glowRange = 38;
+    const candidates = Array.from(document.querySelectorAll('.neon-frame-hotspot'))
+      .filter((element) => element instanceof HTMLElement);
+    const nextActive = new Set();
+
+    candidates.forEach((element) => {
+      if (!this.isNeonFrameVisible(element)) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (this.isPointerOutsideNeonFrameRange(rect, this.neonFramePointer, glowRange)) {
+        return;
+      }
+
+      const curve = this.getOrCreateNeonFrameCurve(element);
+      if (!curve) {
+        return;
+      }
+
+      const hotspot = this.getCurvedFrameHotspot(element, curve.svg, curve.path, rect, this.neonFramePointer);
+      if (!hotspot || hotspot.distance > glowRange) {
+        return;
+      }
+
+      const opacity = Math.max(0, Math.min(1, 1 - (hotspot.distance / glowRange)));
+      const easedOpacity = Math.pow(opacity, 0.85);
+      this.positionNeonFrameCurve(curve.svg, curve.path, curve.gradient, hotspot, easedOpacity);
+      nextActive.add(element);
+    });
+
+    this.neonFrameActiveElements.forEach((element) => {
+      if (!nextActive.has(element)) {
+        this.resetNeonFrameElement(element);
+      }
+    });
+    this.neonFrameActiveElements = nextActive;
+  }
+
+  isPointerOutsideNeonFrameRange(rect, pointer, range) {
+    return pointer.x < rect.left - range
+      || pointer.x > rect.right + range
+      || pointer.y < rect.top - range
+      || pointer.y > rect.bottom + range;
+  }
+
+  getCurvedFrameHotspot(element, svg, path, rect, pointer) {
+    this.updateNeonFrameCurvePath(element, svg, path, rect);
+
+    const totalLength = path.getTotalLength();
+    if (!Number.isFinite(totalLength) || totalLength <= 0) {
+      return null;
+    }
+
+    const target = {
+      x: pointer.x - rect.left,
+      y: pointer.y - rect.top
+    };
+    const nearest = this.findNearestPointOnNeonFramePath(path, target, totalLength);
+    return nearest
+      ? {
+        ...nearest,
+        totalLength
+      }
+      : null;
+  }
+
+  updateNeonFrameCurvePath(element, svg, path, rect) {
+    const strokeInset = 4;
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const radius = this.getNeonFrameRadius(element, width, height);
+    const x = strokeInset;
+    const y = strokeInset;
+    const w = Math.max(1, width - (strokeInset * 2));
+    const h = Math.max(1, height - (strokeInset * 2));
+    const r = Math.max(0, Math.min(radius - strokeInset, w / 2, h / 2));
+    const d = r > 0
+      ? `M ${x + r} ${y} H ${x + w - r} Q ${x + w} ${y} ${x + w} ${y + r} V ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h} H ${x + r} Q ${x} ${y + h} ${x} ${y + h - r} V ${y + r} Q ${x} ${y} ${x + r} ${y} Z`
+      : `M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
+
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.querySelectorAll(':scope > .neon-frame-curve-path').forEach((curvePath) => {
+      curvePath.setAttribute('d', d);
+    });
+  }
+
+  getNeonFrameRadius(element, width, height) {
+    const style = window.getComputedStyle(element);
+    const rawRadius = style.borderTopLeftRadius || style.borderRadius || '0';
+    const radius = Number.parseFloat(String(rawRadius).split(' ')[0]) || 0;
+    return Math.min(radius, width / 2, height / 2);
+  }
+
+  findNearestPointOnNeonFramePath(path, target, totalLength) {
+    const sampleCount = 96;
+    let best = null;
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      const length = (index / sampleCount) * totalLength;
+      const point = path.getPointAtLength(length);
+      const distance = Math.hypot(point.x - target.x, point.y - target.y);
+      if (!best || distance < best.distance) {
+        best = { length, point, distance };
+      }
+    }
+
+    let step = totalLength / sampleCount;
+    for (let pass = 0; pass < 6; pass += 1) {
+      const candidates = [
+        this.wrapNeonFrameLength(best.length - step, totalLength),
+        best.length,
+        this.wrapNeonFrameLength(best.length + step, totalLength)
+      ];
+
+      candidates.forEach((length) => {
+        const point = path.getPointAtLength(length);
+        const distance = Math.hypot(point.x - target.x, point.y - target.y);
+        if (distance < best.distance) {
+          best = { length, point, distance };
+        }
+      });
+      step /= 2;
+    }
+
+    return best;
+  }
+
+  wrapNeonFrameLength(length, totalLength) {
+    return ((length % totalLength) + totalLength) % totalLength;
+  }
+
+  positionNeonFrameCurve(svg, path, gradient, hotspot, opacity) {
+    const totalLength = hotspot.totalLength;
+    const segmentLength = Math.min(totalLength * 0.52, 114);
+    const dashOffset = -(hotspot.length - (segmentLength / 2));
+    const startPoint = path.getPointAtLength(this.wrapNeonFrameLength(hotspot.length - (segmentLength / 2), totalLength));
+    const endPoint = path.getPointAtLength(this.wrapNeonFrameLength(hotspot.length + (segmentLength / 2), totalLength));
+
+    svg.style.setProperty('--neon-frame-opacity', opacity.toFixed(3));
+    svg.classList.add('is-visible');
+    gradient.setAttribute('x1', String(startPoint.x));
+    gradient.setAttribute('y1', String(startPoint.y));
+    gradient.setAttribute('x2', String(endPoint.x));
+    gradient.setAttribute('y2', String(endPoint.y));
+    path.style.strokeDasharray = `${segmentLength} ${Math.max(1, totalLength - segmentLength)}`;
+    path.style.strokeDashoffset = String(dashOffset);
+  }
+
+  positionNeonFrameLights(primaryLight, secondaryLight, rect, hotspot, opacity) {
+    const thickness = 12;
+    const length = 118 + Math.round(opacity * 48);
+    const localX = hotspot.x - rect.left;
+    const localY = hotspot.y - rect.top;
+
+    this.setNeonFrameLight(primaryLight, rect, hotspot.side, localX, localY, length, thickness, opacity);
+    this.positionCornerNeonFrameLight(secondaryLight, rect, hotspot.side, localX, localY, length, thickness, opacity);
+  }
+
+  setNeonFrameLight(light, rect, side, localX, localY, length, thickness, opacity) {
+    const clampedLeft = Math.min(Math.max(localX - (length / 2), 0), Math.max(0, rect.width - length));
+    const clampedTop = Math.min(Math.max(localY - (length / 2), 0), Math.max(0, rect.height - length));
+
+    light.style.setProperty('--neon-frame-opacity', opacity.toFixed(3));
+    light.style.setProperty('--neon-frame-thickness', `${thickness}px`);
+    light.classList.toggle('is-vertical', side === 'left' || side === 'right');
+    light.classList.remove('is-top', 'is-right', 'is-bottom', 'is-left');
+    light.classList.add(`is-${side}`);
+
+    if (side === 'left') {
+      light.style.setProperty('--neon-frame-light-width', `${thickness}px`);
+      light.style.setProperty('--neon-frame-light-height', `${length}px`);
+      light.style.setProperty('--neon-frame-light-left', '0px');
+      light.style.setProperty('--neon-frame-light-top', `${clampedTop}px`);
+    } else if (side === 'right') {
+      light.style.setProperty('--neon-frame-light-width', `${thickness}px`);
+      light.style.setProperty('--neon-frame-light-height', `${length}px`);
+      light.style.setProperty('--neon-frame-light-left', `${Math.max(0, rect.width - thickness)}px`);
+      light.style.setProperty('--neon-frame-light-top', `${clampedTop}px`);
+    } else if (side === 'bottom') {
+      light.style.setProperty('--neon-frame-light-width', `${length}px`);
+      light.style.setProperty('--neon-frame-light-height', `${thickness}px`);
+      light.style.setProperty('--neon-frame-light-left', `${clampedLeft}px`);
+      light.style.setProperty('--neon-frame-light-top', `${Math.max(0, rect.height - thickness)}px`);
+    } else {
+      light.style.setProperty('--neon-frame-light-width', `${length}px`);
+      light.style.setProperty('--neon-frame-light-height', `${thickness}px`);
+      light.style.setProperty('--neon-frame-light-left', `${clampedLeft}px`);
+      light.style.setProperty('--neon-frame-light-top', '0px');
+    }
+
+    light.classList.add('is-visible');
+  }
+
+  positionCornerNeonFrameLight(light, rect, side, localX, localY, length, thickness, opacity) {
+    const cornerRange = 72;
+    const corner = this.getNeonFrameCornerBlend(rect, side, localX, localY, cornerRange);
+    if (!corner) {
+      light.classList.remove('is-visible');
+      light.style.setProperty('--neon-frame-opacity', '0');
+      return;
+    }
+
+    const cornerOpacity = opacity * corner.strength * 0.72;
+    const cornerLength = Math.min(length * 0.72, 104);
+    this.setNeonFrameLight(light, rect, corner.side, corner.x, corner.y, cornerLength, thickness, cornerOpacity);
+  }
+
+  getNeonFrameCornerBlend(rect, side, localX, localY, range) {
+    const nearStartX = localX;
+    const nearEndX = rect.width - localX;
+    const nearStartY = localY;
+    const nearEndY = rect.height - localY;
+
+    if ((side === 'top' || side === 'bottom') && nearStartX < range) {
+      return { side: 'left', x: 0, y: side === 'top' ? 0 : rect.height, strength: 1 - (nearStartX / range) };
+    }
+    if ((side === 'top' || side === 'bottom') && nearEndX < range) {
+      return { side: 'right', x: rect.width, y: side === 'top' ? 0 : rect.height, strength: 1 - (nearEndX / range) };
+    }
+    if ((side === 'left' || side === 'right') && nearStartY < range) {
+      return { side: 'top', x: side === 'left' ? 0 : rect.width, y: 0, strength: 1 - (nearStartY / range) };
+    }
+    if ((side === 'left' || side === 'right') && nearEndY < range) {
+      return { side: 'bottom', x: side === 'left' ? 0 : rect.width, y: rect.height, strength: 1 - (nearEndY / range) };
+    }
+
+    return null;
+  }
+
+  isNeonFrameVisible(element) {
+    if (!(element instanceof HTMLElement) || element.classList.contains('hidden') || element.closest('.hidden, .is-hidden')) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 8 && rect.height >= 8
+      && rect.bottom >= 0
+      && rect.right >= 0
+      && rect.top <= window.innerHeight
+      && rect.left <= window.innerWidth;
+  }
+
+  getFrameHotspot(rect, pointer) {
+    if (!rect || rect.width <= 0 || rect.height <= 0 || !pointer) {
+      return null;
+    }
+
+    const clampedX = Math.min(Math.max(pointer.x, rect.left), rect.right);
+    const clampedY = Math.min(Math.max(pointer.y, rect.top), rect.bottom);
+    const inside = pointer.x >= rect.left
+      && pointer.x <= rect.right
+      && pointer.y >= rect.top
+      && pointer.y <= rect.bottom;
+
+    if (!inside) {
+      const side = this.getNearestFrameSide(rect, pointer, clampedX, clampedY);
+      return {
+        x: clampedX,
+        y: clampedY,
+        side,
+        distance: Math.hypot(pointer.x - clampedX, pointer.y - clampedY)
+      };
+    }
+
+    const distances = [
+      { side: 'left', value: Math.abs(pointer.x - rect.left) },
+      { side: 'right', value: Math.abs(rect.right - pointer.x) },
+      { side: 'top', value: Math.abs(pointer.y - rect.top) },
+      { side: 'bottom', value: Math.abs(rect.bottom - pointer.y) }
+    ].sort((a, b) => a.value - b.value);
+
+    switch (distances[0].side) {
+      case 'left':
+        return { x: rect.left, y: pointer.y, side: 'left', distance: distances[0].value };
+      case 'right':
+        return { x: rect.right, y: pointer.y, side: 'right', distance: distances[0].value };
+      case 'top':
+        return { x: pointer.x, y: rect.top, side: 'top', distance: distances[0].value };
+      default:
+        return { x: pointer.x, y: rect.bottom, side: 'bottom', distance: distances[0].value };
+    }
+  }
+
+  getNearestFrameSide(rect, pointer, clampedX, clampedY) {
+    const nearLeft = Math.abs(clampedX - rect.left);
+    const nearRight = Math.abs(clampedX - rect.right);
+    const nearTop = Math.abs(clampedY - rect.top);
+    const nearBottom = Math.abs(clampedY - rect.bottom);
+
+    return [
+      { side: 'left', value: nearLeft + Math.max(0, rect.left - pointer.x) },
+      { side: 'right', value: nearRight + Math.max(0, pointer.x - rect.right) },
+      { side: 'top', value: nearTop + Math.max(0, rect.top - pointer.y) },
+      { side: 'bottom', value: nearBottom + Math.max(0, pointer.y - rect.bottom) }
+    ].sort((a, b) => a.value - b.value)[0].side;
+  }
+
+  clearNeonFrameHotspots() {
+    this.neonFramePointer = null;
+    this.neonFrameActiveElements.forEach((element) => this.resetNeonFrameElement(element));
+    this.neonFrameActiveElements.clear();
+  }
+
+  resetNeonFrameElement(element) {
+    if (!(element instanceof HTMLElement)) {
+      return;
+    }
+
+    const lights = element.querySelectorAll(':scope > .neon-frame-light');
+    lights.forEach((light) => {
+      if (!(light instanceof HTMLElement)) {
+        return;
+      }
+      light.classList.remove('is-visible');
+      light.style.setProperty('--neon-frame-opacity', '0');
+    });
+
+    const curve = element.querySelector(':scope > .neon-frame-curve');
+    if (curve instanceof SVGElement) {
+      curve.classList.remove('is-visible');
+      curve.style.setProperty('--neon-frame-opacity', '0');
+    }
+  }
+
+  getScrollFadeContainerSelector() {
+    return [
+      '.content-section:not(#dashboard)',
+      '.login-box',
+      '.tutorial-card',
+      '.mods-list',
+      '.packs-list',
+      '.skins-list',
+      '.skin-library-results',
+      '.settings-container'
+    ].join(', ');
+  }
+
+  getScrollFadeContainers() {
+    return Array.from(document.querySelectorAll(this.getScrollFadeContainerSelector()))
+      .filter((element) => element instanceof HTMLElement);
+  }
+
+  getScrollFadeItems(section) {
+    const blockSelector = [
+      '.modrinth-type-tabs',
+      '.modrinth-search-row',
+      '.modrinth-load-more',
+      '.mods-drop-zone',
+      '.mod-item',
+      '.pack-creator-card',
+      '.pack-list-panel',
+      '.pack-card',
+      '.skin-card',
+      '.setting-item',
+      '.saved-skin-chip',
+      '.online-skin-card',
+      '.section-header',
+      '.mods-check-status',
+      '.modrinth-status',
+      '.mods-empty',
+      '.packs-empty',
+      '.skins-empty',
+      '.skin-library-search-row',
+      '.settings-actions',
+      '.sound-controls',
+      '.sound-select-row',
+      '.rgb-sliders',
+      '.color-preview'
+    ].join(', ');
+
+    const candidates = Array.from(new Set(Array.from(section.querySelectorAll(blockSelector))));
+    const candidateSet = new Set(candidates);
+
+    return candidates
+      .filter((item) => {
+        let parent = item.parentElement;
+        while (parent && parent !== section) {
+          if (candidateSet.has(parent)) {
+            return false;
+          }
+          parent = parent.parentElement;
+        }
+        return true;
+      })
+      .filter((item) => this.isScrollFadeObject(item, section));
+  }
+
+  isScrollFadeObject(item, container) {
+    if (!(item instanceof HTMLElement) || item === container) {
+      return false;
+    }
+
+    if (item.classList.contains('hidden') || item.closest('.hidden, .is-hidden')) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(item);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+
+    const rect = item.getBoundingClientRect();
+    if (rect.width < 4 || rect.height < 4) {
+      return false;
+    }
+
+    return true;
+  }
+
+  scheduleScrollFadeUpdate() {
+    if (this.scrollFadeFrame) {
+      return;
+    }
+
+    this.scrollFadeFrame = requestAnimationFrame(() => {
+      this.scrollFadeFrame = null;
+      this.updateScrollFade();
+    });
+  }
+
+  isScrollableFadeContainer(section) {
+    if (!(section instanceof HTMLElement)) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(section);
+    if (!/(auto|scroll|overlay)/u.test(style.overflowY)) {
+      return false;
+    }
+
+    return section.scrollHeight > section.clientHeight + 4;
+  }
+
+  hasScrollableFadeAncestor(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const selector = this.getScrollFadeContainerSelector();
+    let parent = element.parentElement;
+    while (parent) {
+      if (parent.matches(selector) && this.isScrollableFadeContainer(parent)) {
+        return true;
+      }
+      parent = parent.parentElement;
+    }
+
+    return false;
+  }
+
+  resetScrollFadeItem(item) {
+    if (!(item instanceof HTMLElement)) {
+      return;
+    }
+
+    item.classList.remove('scroll-fade-item');
+    item.style.removeProperty('--scroll-fade-scale');
+    item.style.removeProperty('--scroll-fade-y');
+  }
+
+  resetScrollFadeContainer(section) {
+    if (!(section instanceof HTMLElement)) {
+      return;
+    }
+
+    section.querySelectorAll('.scroll-fade-item').forEach((item) => this.resetScrollFadeItem(item));
+  }
+
+  updateScrollFade() {
+    this.getScrollFadeContainers().forEach((section) => {
+      if (section.classList.contains('content-section') && !section.classList.contains('active')) {
+        this.resetScrollFadeContainer(section);
+        return;
+      }
+
+      const containerStyle = window.getComputedStyle(section);
+      const sectionRect = section.getBoundingClientRect();
+      if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden' || sectionRect.height <= 0) {
+        this.resetScrollFadeContainer(section);
+        return;
+      }
+
+      const items = this.getScrollFadeItems(section);
+      const visibleItems = new Set(items);
+      section.querySelectorAll('.scroll-fade-item').forEach((item) => {
+        if (!visibleItems.has(item)) {
+          this.resetScrollFadeItem(item);
+        }
+      });
+
+      if (!this.isScrollableFadeContainer(section)) {
+        if (!this.hasScrollableFadeAncestor(section)) {
+          items.forEach((item) => this.resetScrollFadeItem(item));
+        }
+        return;
+      }
+
+      const fadeTop = Math.min(240, Math.max(120, sectionRect.height * 0.34));
+      const fadeBottom = Math.min(260, Math.max(130, sectionRect.height * 0.38));
+      const visibleTop = sectionRect.top;
+      const visibleBottom = sectionRect.bottom;
+
+      items.forEach((item) => {
+        item.classList.add('scroll-fade-item');
+
+        const itemRect = item.getBoundingClientRect();
+        const itemHeight = Math.max(1, itemRect.height);
+        const topVisibleProgress = (itemRect.bottom - visibleTop) / Math.min(fadeTop, itemHeight);
+        const bottomVisibleProgress = (visibleBottom - itemRect.top) / Math.min(fadeBottom, itemHeight);
+        const edgeProgress = Math.min(1, Math.max(0, Math.min(topVisibleProgress, bottomVisibleProgress)));
+        const easedProgress = edgeProgress * edgeProgress * edgeProgress * (edgeProgress * ((edgeProgress * 6) - 15) + 10);
+        const hiddenProgress = 1 - easedProgress;
+        const scale = 0.8 + (0.2 * easedProgress);
+        const direction = topVisibleProgress < bottomVisibleProgress ? -1 : 1;
+        const translateY = direction * Math.round(hiddenProgress * 26);
+
+        item.style.setProperty('--scroll-fade-scale', scale.toFixed(3));
+        item.style.setProperty('--scroll-fade-y', `${translateY}px`);
+      });
+    });
+  }
+
+  async handleLogin() {
+    if (!this.accountsConfig) {
+      await this.loadAccounts({ render: false });
+    }
+    const savedAccount = this.getPreferredSavedAccount();
+    if (savedAccount) {
+      await this.useSavedAccountFromLogin(savedAccount);
+      return;
+    }
+
+    this.showLoading(this.authConfig?.forcedOfflineMode ? 'Preparing offline sign-in...' : 'Opening Xbox/Microsoft sign-in in your browser...');
+
+    try {
+      const result = await window.electronAPI.login();
+      if (result.success) {
+        this.user = setCurrentUser(result.user);
+        const greeting = this.user.username || 'Player';
+        this.showNotification(result.warning || `Welcome, ${greeting}!`);
+        this.showMainScreen();
+        await this.loadGameData();
+      } else {
+        this.showNotification(`Sign-in failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      this.showNotification('Error: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async loadAuthConfig() {
+    try {
+      const result = await window.electronAPI.getAuthConfig();
+      if (!result.success) {
+        return;
+      }
+
+      this.authConfig = result;
+      this.updateMicrosoftConfigUI();
+    } catch (error) {
+      console.error('Auth config error:', error);
+    }
+  }
+
+  async loadDiagnosticSettings() {
+    const toggle = document.getElementById('debug-mode-toggle');
+    if (!toggle || typeof window.electronAPI?.getDebugMode !== 'function') {
+      return;
+    }
+
+    try {
+      const status = await window.electronAPI.getDebugMode();
+      this.setSettingToggleChecked(toggle, Boolean(status?.debugMode));
+      this.updateDiagnosticsStatus(status?.logFile ? `Logdatei: ${status.logFile}` : '');
+    } catch (error) {
+      console.error('Diagnostic settings error:', error);
+    }
+  }
+
+  updateDiagnosticsStatus(text, state = '') {
+    const statusEl = document.getElementById('diagnostics-status');
+    if (!statusEl) {
+      return;
+    }
+
+    statusEl.classList.remove('is-error', 'is-warning', 'is-ok');
+    if (state) {
+      statusEl.classList.add(state);
+    }
+    statusEl.textContent = this.localizeText(text || 'Logs und Integritätsprüfung bereit.');
+  }
+
+  async setDebugMode(enabled) {
+    const toggle = document.getElementById('debug-mode-toggle');
+    if (typeof window.electronAPI?.setDebugMode !== 'function') {
+      if (toggle) {
+        this.syncSettingToggleVisualState(toggle);
+      }
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.setDebugMode(Boolean(enabled));
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        await this.loadDiagnosticSettings();
+        return;
+      }
+      if (toggle) {
+        this.setSettingToggleChecked(toggle, result.debugMode ?? Boolean(enabled));
+      }
+      this.showNotification(result.message || 'Debug-Modus gespeichert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+      await this.loadDiagnosticSettings();
+    }
+  }
+
+  async cleanupNumberedAndDuplicateMods() {
+    if (typeof window.electronAPI?.cleanupNumberedAndDuplicateMods !== 'function') {
+      this.showNotification('Fehler: Mod-Bereinigung ist im Launcher nicht verfügbar.');
+      return;
+    }
+
+    const confirmed = await this.showConfirm({
+      title: 'Alle -2-Mods löschen',
+      message: 'Jede Mod-Datei mit „-2.jar“ am Ende wird sofort und dauerhaft aus allen Launcher-Modordnern gelöscht. Pflichtmods werden nicht ausgenommen und nicht neu installiert.',
+      confirmText: 'Endgültig löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const button = document.getElementById('cleanup-numbered-mods-btn');
+    const status = document.getElementById('numbered-mod-cleanup-status');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Clearing...';
+    }
+    if (status) {
+      status.textContent = 'Alle Mod-Dateien mit -2.jar am Ende werden gelöscht...';
+    }
+    this.showLoading('Lösche alle -2-Mods...');
+
+    try {
+      this.suppressModSyncUntil = Date.now() + 10000;
+      const result = await window.electronAPI.cleanupNumberedAndDuplicateMods();
+      if (!result.success) {
+        throw new Error(result.error || 'Mod-Bereinigung fehlgeschlagen.');
+      }
+      const summary = `${result.removed || 0} Mod-Datei${result.removed === 1 ? '' : 'en'} mit -2.jar am Ende dauerhaft gelöscht.`;
+      if (status) {
+        status.textContent = summary;
+      }
+      this.showNotification(result.message || summary);
+      await this.loadMods({ skipManagedSync: true });
+    } catch (error) {
+      if (status) {
+        status.textContent = `Fehler: ${error.message}`;
+      }
+      this.showNotification(`Fehler: ${error.message}`);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Clear';
+      }
+      this.hideLoading();
+    }
+  }
+
+  async runDiagnostics() {
+    if (typeof window.electronAPI?.runDiagnostics !== 'function') {
+      this.showNotification('Diagnose ist nicht verfügbar.');
+      return;
+    }
+
+    this.showLoading('Diagnose läuft...');
+    try {
+      const result = await window.electronAPI.runDiagnostics();
+      if (!result.success) {
+        this.updateDiagnosticsStatus(`Diagnose fehlgeschlagen: ${result.error}`, 'is-error');
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.lastDiagnostics = result;
+      const issueCount = result.issues?.length || 0;
+      const warningCount = result.warnings?.length || 0;
+      const repairCount = result.repairs?.length || 0;
+      const crashFinding = Array.isArray(result.crashAnalysis?.findings) ? result.crashAnalysis.findings[0] : null;
+      const statusText = issueCount
+        ? `${issueCount} Problem${issueCount === 1 ? '' : 'e'}, ${warningCount} Hinweis${warningCount === 1 ? '' : 'e'}, ${repairCount} Reparaturprüfung${repairCount === 1 ? '' : 'en'}.`
+        : `${warningCount} Hinweis${warningCount === 1 ? '' : 'e'}, ${repairCount} Reparaturprüfung${repairCount === 1 ? '' : 'en'}.`;
+      const crashText = crashFinding ? ` Crash: ${crashFinding.title}.` : '';
+      this.updateDiagnosticsStatus(`${statusText}${crashText}`, issueCount ? 'is-error' : (warningCount ? 'is-warning' : 'is-ok'));
+      this.showNotification(`Diagnose abgeschlossen: ${statusText}${crashText}`);
+    } catch (error) {
+      this.updateDiagnosticsStatus(`Diagnose fehlgeschlagen: ${error.message}`, 'is-error');
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async openDiagnosticsFolder() {
+    if (typeof window.electronAPI?.openDiagnosticsFolder !== 'function') {
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.openDiagnosticsFolder();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.showNotification(`Logs geöffnet: ${result.path}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  updateMicrosoftConfigUI() {
+    return;
+  }
+
+  async saveMicrosoftClientId(showNotification = true) {
+    const clientIdInput = document.getElementById('client-id-input');
+    const clientId = clientIdInput?.value.trim() || '';
+
+    try {
+      const result = await window.electronAPI.setMicrosoftClientId(clientId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return false;
+      }
+
+      this.authConfig = result;
+      this.updateMicrosoftConfigUI();
+
+      if (showNotification) {
+        this.showNotification(clientId ? 'Client-ID gespeichert.' : 'Client-ID entfernt.');
+      }
+
+      return true;
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+      return false;
+    }
+  }
+
+  async openLauncherConfig() {
+    try {
+      const result = await window.electronAPI.openLauncherConfig();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+
+      this.showNotification(`Config geöffnet: ${result.configPath}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async handleOfflineLogin() {
+    this.showLoading('Preparing offline account...');
+    try {
+      const result = await window.electronAPI.loginOffline('OfflinePlayer');
+      if (!result.success) {
+        this.showNotification('Error: ' + result.error);
+        return;
+      }
+      this.user = setCurrentUser(result.user);
+      this.accountsConfig = {
+        activeAccountId: result.activeAccountId || '',
+        accounts: result.accounts || []
+      };
+      this.showMainScreen();
+      await this.loadGameData();
+      this.showNotification(result.warning || `Offline sign-in active. Welcome, ${this.user.username}.`);
+    } catch (error) {
+      this.showNotification('Error: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async logout() {
+    const confirmed = await this.showConfirm({
+      title: 'Abmelden',
+      message: 'Möchtest du dich wirklich abmelden?',
+      confirmText: 'Abmelden'
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await window.electronAPI.logout();
+      this.user = setCurrentUser(null);
+      await this.loadAccounts({ render: false });
+      this.showLoginScreen();
+      this.showNotification('Abgemeldet!');
+    } catch (error) {
+      this.showNotification('Fehler beim Abmelden!');
+    }
+  }
+
+  showLoginScreen() {
+    this.stopAnonymousStats();
+    this.updateLoginScreenAccountUI();
+    document.getElementById('login-screen').classList.add('active');
+    document.getElementById('main-screen').classList.remove('active');
+    this.scheduleScrollFadeUpdate();
+  }
+
+  updateUsernameDisplays() {
+    const username = this.user?.username || 'Player';
+    const headerUsername = document.getElementById('username-display');
+
+    if (headerUsername) {
+      headerUsername.textContent = username;
+    }
+    const adminStatus = document.getElementById('admin-status');
+    if (adminStatus) {
+      adminStatus.classList.toggle('hidden', !this.adminCapabilities.owner);
+    }
+    document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.adminCapabilities.owner);
+    this.updateHostingBetaUI();
+  }
+
+  showMainScreen() {
+    document.getElementById('login-screen').classList.remove('active');
+    document.getElementById('main-screen').classList.add('active');
+    this.updateUsernameDisplays();
+    this.loadAdminCapabilities().catch((error) => console.error('Admin capability refresh failed:', error));
+    this.scheduleScrollFadeUpdate();
+    this.startAnonymousStats();
+  }
+
+  getPreferredSavedAccount() {
+    const accounts = Array.isArray(this.accountsConfig?.accounts) ? this.accountsConfig.accounts : [];
+    const activeAccountId = String(this.accountsConfig?.activeAccountId || '');
+    return accounts.find((account) => account.id === activeAccountId) || accounts[0] || null;
+  }
+
+  updateLoginScreenAccountUI() {
+    const savedAccount = this.getPreferredSavedAccount();
+    const label = document.getElementById('login-primary-label');
+    const primaryInfo = document.getElementById('login-info-primary');
+    const secondaryInfo = document.getElementById('login-info-secondary');
+    const tertiaryInfo = document.getElementById('login-info-tertiary');
+    const offlineDescription = document.getElementById('login-offline-description');
+    const offlineButton = document.getElementById('offline-btn');
+
+    if (savedAccount) {
+      if (label) label.textContent = 'Use this account';
+      if (primaryInfo) primaryInfo.textContent = 'Continue with your saved account.';
+      if (secondaryInfo) secondaryInfo.textContent = savedAccount.username || 'Minecraft account';
+      if (tertiaryInfo) {
+        const isOffline = String(savedAccount.loginSource || savedAccount.userType || '').toLowerCase().includes('offline');
+        tertiaryInfo.textContent = savedAccount.email || (isOffline ? 'Offline account' : 'Email unavailable');
+      }
+      offlineDescription?.classList.add('hidden');
+      offlineButton?.classList.add('hidden');
+      return;
+    }
+
+    if (label) label.textContent = 'Sign in with Xbox';
+    if (primaryInfo) primaryInfo.textContent = 'Sign in on the official Xbox/Microsoft website.';
+    if (secondaryInfo) secondaryInfo.textContent = 'Your browser will open automatically.';
+    if (tertiaryInfo) tertiaryInfo.textContent = 'The launcher will continue after a successful sign-in.';
+    if (offlineDescription) {
+      offlineDescription.textContent = 'Offline mode is available.';
+      offlineDescription.classList.remove('hidden');
+    }
+    offlineButton?.classList.remove('hidden');
+  }
+
+  async useSavedAccountFromLogin(account) {
+    if (!account?.id || typeof window.electronAPI?.switchAccount !== 'function') {
+      return;
+    }
+    this.showLoading('Opening saved account...');
+    try {
+      const result = await window.electronAPI.switchAccount(account.id);
+      if (!result.success) {
+        this.showNotification('Could not open the saved account: ' + result.error);
+        return;
+      }
+      this.user = setCurrentUser(result.user);
+      this.accountsConfig = {
+        activeAccountId: result.activeAccountId || '',
+        accounts: result.accounts || []
+      };
+      this.showMainScreen();
+      await this.loadGameData();
+      this.showNotification(`Welcome back, ${this.user?.username || 'Player'}!`);
+    } catch (error) {
+      this.showNotification('Could not open the saved account: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  getAnonymousStatsAccountKey() {
+    const localIdentity = this.user?.uuid || this.user?.id || this.user?.username;
+    return localIdentity ? String(localIdentity).trim().toLowerCase() : '';
+  }
+
+  getAnonymousStatsMinuteKey(date = new Date()) {
+    return date.toISOString().slice(0, 16).replace(/[-:t]/gi, '');
+  }
+
+  async hitAnonymousCounter(key) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(key)}`, {
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
+      return true;
+    } catch (error) {
+      console.warn('Anonymous launcher statistics are temporarily unavailable:', error);
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async recordAnonymousFirstLogin() {
+    const accountKey = this.getAnonymousStatsAccountKey();
+    if (!accountKey || this.anonymousLoginCountPending) return;
+
+    const storageKey = 'xLauncherAnonymousCountedAccountsV1';
+    let countedAccounts = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (Array.isArray(stored)) countedAccounts = stored;
+    } catch (_) {}
+    if (countedAccounts.includes(accountKey)) return;
+
+    this.anonymousLoginCountPending = true;
+    const counted = await this.hitAnonymousCounter('xlauncher-prod-a7f3-total');
+    this.anonymousLoginCountPending = false;
+    if (!counted) return;
+
+    countedAccounts.push(accountKey);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...new Set(countedAccounts)]));
+    } catch (_) {}
+  }
+
+  async sendAnonymousHeartbeat() {
+    if (!this.user || !this.anonymousStatsActive) return;
+    const minuteKey = this.getAnonymousStatsMinuteKey();
+    if (this.anonymousStatsLastMinute === minuteKey) return;
+    this.anonymousStatsLastMinute = minuteKey;
+    await window.electronAPI.setAnonymousPresence(true);
+  }
+
+  startAnonymousStats() {
+    if (!this.user) return;
+    this.anonymousStatsActive = true;
+    void this.recordAnonymousFirstLogin();
+    void this.sendAnonymousHeartbeat();
+    if (!this.anonymousStatsTimer) {
+      this.anonymousStatsTimer = window.setInterval(() => {
+        void this.sendAnonymousHeartbeat();
+      }, 60 * 1000);
+    }
+  }
+
+  stopAnonymousStats() {
+    this.closeAnonymousStatsSession();
+    if (this.anonymousStatsTimer) {
+      window.clearInterval(this.anonymousStatsTimer);
+      this.anonymousStatsTimer = null;
+    }
+  }
+
+  closeAnonymousStatsSession() {
+    if (!this.anonymousStatsActive || !this.anonymousStatsLastMinute) return;
+    this.anonymousStatsActive = false;
+    this.anonymousStatsLastMinute = '';
+    void window.electronAPI.setAnonymousPresence(false).catch(() => {});
+  }
+
+  async launchMinecraft(options = {}) {
+    if (!this.user) {
+      this.showNotification('Bitte anmelden!');
+      return;
+    }
+
+    const incompatibleMods = this.getIncompatibleMods();
+    if (incompatibleMods.length > 0) {
+      this.showNotification(`Start blockiert: ${incompatibleMods.length} Mod${incompatibleMods.length === 1 ? '' : 's'} passen nicht zur ausgewählten Version.`);
+      return;
+    }
+
+    const launchGate = this.canStartMinecraft();
+    if (!launchGate.allowed) {
+      this.showNotification(`Start blockiert: ${launchGate.reason || 'Mod-Änderungen laufen noch.'}`);
+      this.updateLaunchButtonAvailability();
+      return;
+    }
+
+    if (this.minecraftLaunchState !== 'idle') {
+      this.showNotification('Minecraft startet bereits.');
+      return;
+    }
+
+    const versionLabel = this.getSelectedVersionDisplayName() || 'Minecraft';
+    const launchOptions = {};
+    if (options.directJoin) {
+      const serverId = options.serverId || this.selectedDirectServerId || '';
+      if (!serverId) {
+        this.showNotification('Bitte wähle zuerst einen Server-Favoriten aus.');
+        return;
+      }
+      launchOptions.serverId = serverId;
+    }
+
+    const launchButton = document.getElementById('launch-btn');
+    const previousLaunchButtonText = launchButton?.querySelector('.launch-progress-label')?.textContent || 'Play';
+    this.minecraftLaunchButtonIdleText = previousLaunchButtonText;
+    this.setMinecraftLaunchState('launching');
+    this.showNotification(options.directJoin
+      ? `Starte ${versionLabel} und trete Server bei...`
+      : `Starte ${versionLabel} als ${this.user.username}...`);
+
+    try {
+      const accessToken = this.user?.accessToken || '';
+      const result = await window.electronAPI.launchMinecraft(this.user.username, accessToken, launchOptions);
+      if (result.success) {
+        let processStillRunning = true;
+        if (typeof window.electronAPI.getMinecraftRuntimeStatus === 'function') {
+          try {
+            const runtimeStatus = await window.electronAPI.getMinecraftRuntimeStatus();
+            processStillRunning = Boolean(runtimeStatus?.running || runtimeStatus?.launching);
+          } catch (_error) {
+            // The lifecycle event remains authoritative if the status probe fails.
+          }
+        }
+        if (!processStillRunning) this.setMinecraftLaunchState('idle');
+        this.showNotification(result.message);
+      } else {
+        if (result.alreadyRunning) {
+          this.setMinecraftLaunchState('running');
+        } else {
+          this.setMinecraftLaunchState('idle');
+        }
+        this.showNotification('Fehler beim Starten: ' + result.error);
+      }
+    } catch (error) {
+      this.setMinecraftLaunchState('idle');
+      console.error('Launch error:', error);
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+    this.updateModCompatibilityUI();
+    if (previousState !== normalizedState && this.loadedSections.has('mods')) {
+      this.modsRenderSignature = '';
+      this.renderMods();
+    }
+      this.resetDashboardSkinLaunchExitAnimation();
+    }
+  }
+
+  playDashboardSkinLaunchExitAnimation() {
+    return;
+    /* Exit animations are intentionally disabled: the dashboard skin stays put.
+    const stage = document.querySelector('.dashboard-skin-stage');
+    const canvas = document.getElementById('dashboard-skin-canvas');
+    if (!stage || !canvas || canvas.classList.contains('hidden')) {
+      return;
+    }
+
+    if (stage.classList.contains('is-sprinting-back')) {
+      this.playDashboardSkinContinueRightExitAnimation(stage, canvas);
+      return;
+    }
+
+    this.clearDashboardSkinCanvasAnimation();
+    this.clearDashboardSkinEffects();
+    this.clearDashboardSkinLaunchExitAnimationListener(canvas);
+    this.dashboardSkinLaunchExitActive = true;
+    if (this.dashboardSkinViewer && window.skinview3d?.CrouchAnimation && window.skinview3d?.FunctionAnimation) {
+      const crouchAnimation = new window.skinview3d.CrouchAnimation();
+      crouchAnimation.speed = 0;
+      crouchAnimation.progress = 0.125;
+
+      this.dashboardSkinWalkAnimation = new window.skinview3d.FunctionAnimation((player, progress) => {
+        crouchAnimation.animate(player);
+
+        const stride = progress * 5.2;
+        player.skin.leftLeg.rotation.x = 0.45 * Math.sin(stride);
+        player.skin.rightLeg.rotation.x = 0.45 * Math.sin(stride + Math.PI);
+        player.skin.leftArm.rotation.x = 0.33 + (0.16 * Math.sin(stride + Math.PI));
+        player.skin.rightArm.rotation.x = 0.33 + (0.16 * Math.sin(stride));
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.07);
+
+        const turnProgress = Math.min(1, progress * 3.8);
+        const easedTurn = 1 - Math.pow(1 - turnProgress, 3);
+        const targetRotation = -Math.PI / 2;
+        player.rotation.y = -0.2 + ((targetRotation + 0.2) * easedTurn);
+        player.position.y = -3.5;
+      });
+      this.dashboardSkinWalkAnimation.speed = 1;
+      this.dashboardSkinViewer.animation = this.dashboardSkinWalkAnimation;
+      this.configureDashboardSkinViewerCamera();
+    } else if (this.dashboardSkinViewer && window.skinview3d?.WalkingAnimation) {
+      this.dashboardSkinWalkAnimation = new window.skinview3d.WalkingAnimation();
+      this.dashboardSkinWalkAnimation.speed = 0.7;
+      this.dashboardSkinWalkAnimation.headBobbing = false;
+      this.dashboardSkinWalkAnimation.addAnimation((player, progress) => {
+        const turnProgress = Math.min(1, progress * 3.8);
+        const easedTurn = 1 - Math.pow(1 - turnProgress, 3);
+        const targetRotation = -Math.PI / 2;
+        player.rotation.y = -0.2 + ((targetRotation + 0.2) * easedTurn);
+        player.position.y = -3.5;
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.07);
+      });
+      this.dashboardSkinViewer.animation = this.dashboardSkinWalkAnimation;
+      this.configureDashboardSkinViewerCamera();
+    }
+
+    document.body.classList.add('dashboard-skin-exiting');
+    stage.classList.remove('is-walking-left');
+    this.dashboardSkinLaunchExitAnimationEndHandler = (event) => {
+      if (event.target !== canvas || event.animationName !== 'dashboardSkinWalkLeft') {
+        return;
+      }
+
+      this.completeDashboardSkinLaunchExitAnimation();
+    };
+    canvas.addEventListener('animationend', this.dashboardSkinLaunchExitAnimationEndHandler);
+    void stage.offsetWidth;
+    stage.classList.add('is-walking-left');
+    */
+  }
+
+  playDashboardSkinContinueRightExitAnimation(stage, canvas) {
+    return;
+    /* Exit animations are intentionally disabled.
+    this.clearDashboardSkinReturnAnimationListener(canvas);
+    this.clearDashboardSkinEffects();
+
+    const computedStyle = window.getComputedStyle(canvas);
+    const currentTransform = computedStyle.transform && computedStyle.transform !== 'none'
+      ? computedStyle.transform
+      : 'translate3d(0, -4%, 0) scale(1)';
+    const currentOpacity = computedStyle.opacity || '1';
+    const currentFilter = computedStyle.filter && computedStyle.filter !== 'none'
+      ? computedStyle.filter
+      : 'drop-shadow(0 0 20px rgba(var(--primary-rgb), 0.22))';
+
+    this.clearDashboardSkinCanvasAnimation({ keepInlineStyles: true });
+    stage.classList.remove('is-sprinting-back', 'is-walking-left');
+    canvas.style.transform = currentTransform;
+    canvas.style.opacity = currentOpacity;
+    canvas.style.filter = currentFilter;
+
+    if (this.dashboardSkinViewer && window.skinview3d?.FunctionAnimation) {
+      this.dashboardSkinWalkAnimation = new window.skinview3d.FunctionAnimation((player, progress) => {
+        const stride = progress * 14.6;
+        player.rotation.y = Math.PI / 2;
+        player.rotation.z = 0.014 * Math.sin(stride + Math.PI);
+        player.position.y = -3.5;
+        player.skin.body.rotation.x = 0.05;
+        player.skin.leftLeg.rotation.x = 0.66 * Math.sin(stride + Math.PI);
+        player.skin.rightLeg.rotation.x = 0.66 * Math.sin(stride);
+        player.skin.leftArm.rotation.x = 0.72 * Math.sin(stride);
+        player.skin.rightArm.rotation.x = 0.72 * Math.sin(stride + Math.PI);
+        player.skin.leftArm.rotation.z = 0.05;
+        player.skin.rightArm.rotation.z = -0.05;
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.07);
+      });
+      this.dashboardSkinWalkAnimation.speed = 1;
+      this.dashboardSkinViewer.animation = this.dashboardSkinWalkAnimation;
+      this.configureDashboardSkinViewerCamera();
+    }
+
+    document.body.classList.add('dashboard-skin-exiting');
+    void canvas.offsetWidth;
+    this.dashboardSkinCanvasAnimation = canvas.animate([
+      {
+        opacity: Number.parseFloat(currentOpacity) || 1,
+        filter: currentFilter,
+        transform: currentTransform
+      },
+      {
+        opacity: 1,
+        filter: 'drop-shadow(0 10px 18px rgba(var(--primary-rgb), 0.18))',
+        transform: 'translate3d(46vw, -4%, 0) scale(1)',
+        offset: 0.58
+      },
+      {
+        opacity: 0,
+        filter: 'drop-shadow(0 0 0 rgba(var(--primary-rgb), 0))',
+        transform: 'translate3d(94vw, -4%, 0) scale(1)'
+      }
+    ], {
+      duration: 1120,
+      easing: 'linear',
+      fill: 'forwards'
+    });
+
+    this.dashboardSkinCanvasAnimation.onfinish = () => {
+      canvas.style.opacity = '0';
+      canvas.style.filter = 'drop-shadow(0 0 0 rgba(var(--primary-rgb), 0))';
+      canvas.style.transform = 'translate3d(94vw, -4%, 0) scale(1)';
+      this.dashboardSkinCanvasAnimation = null;
+    };
+    */
+  }
+
+  previewDashboardSkinAnimation(animationType) {
+    return;
+    /* Dashboard skin movement previews were removed with exit animations.
+    this.activateSection('dashboard');
+    window.setTimeout(() => {
+      if (animationType === 'sneak-exit') {
+        this.playDashboardSkinLaunchExitAnimation();
+        this.dashboardSkinEffectTimers.push(window.setTimeout(() => {
+          this.resetDashboardSkinLaunchExitAnimation();
+        }, 3450));
+        return;
+      }
+
+      if (animationType === 'sprint-return') {
+        this.playDashboardSkinReturnAnimation('sprint');
+        return;
+      }
+
+      if (animationType === 'continue-right-exit') {
+        const stage = document.querySelector('.dashboard-skin-stage');
+        const canvas = document.getElementById('dashboard-skin-canvas');
+        if (stage && canvas && !canvas.classList.contains('hidden')) {
+          this.playDashboardSkinContinueRightExitAnimation(stage, canvas);
+        }
+        return;
+      }
+
+      this.playDashboardSkinReturnAnimation('random');
+    }, 180);
+    */
+  }
+
+  playDashboardSkinReturnAnimation(mode = 'random') {
+    return;
+  }
+
+  playDashboardSkinSprintReturnAnimation() {
+    return;
+    /* Return animations are intentionally disabled.
+    const stage = document.querySelector('.dashboard-skin-stage');
+    const canvas = document.getElementById('dashboard-skin-canvas');
+    if (!stage || !canvas || canvas.classList.contains('hidden')) {
+      this.resetDashboardSkinLaunchExitAnimation();
+      return;
+    }
+
+    this.clearDashboardSkinCanvasAnimation();
+    this.clearDashboardSkinEffects();
+    if (this.dashboardSkinViewer && window.skinview3d?.FunctionAnimation) {
+      this.dashboardSkinWalkAnimation = new window.skinview3d.FunctionAnimation((player, progress) => {
+        const clamp01 = (value) => Math.max(0, Math.min(1, value));
+        const easeInOut = (value) => value * value * (3 - (2 * value));
+        const stride = progress * 14.6;
+        const bodyTurnProgress = easeInOut(clamp01((progress - 1.08) / 0.22));
+        const recoveryProgress = easeInOut(clamp01((progress - 1.02) / 0.26));
+        const motionAmount = 1 - recoveryProgress;
+        const startRotation = Math.PI / 2;
+        const targetRotation = -0.2;
+        player.rotation.y = startRotation + ((targetRotation - startRotation) * bodyTurnProgress);
+        player.rotation.z = 0.018 * Math.sin(stride + Math.PI) * motionAmount;
+        player.position.y = -3.5;
+        player.skin.body.rotation.x = 0.06 * motionAmount;
+        player.skin.leftLeg.rotation.x = 0.64 * Math.sin(stride + Math.PI) * motionAmount;
+        player.skin.rightLeg.rotation.x = 0.64 * Math.sin(stride) * motionAmount;
+        player.skin.leftArm.rotation.x = 0.7 * Math.sin(stride) * motionAmount;
+        player.skin.rightArm.rotation.x = 0.7 * Math.sin(stride + Math.PI) * motionAmount;
+        player.skin.leftArm.rotation.z = 0.05 * motionAmount;
+        player.skin.rightArm.rotation.z = -0.05 * motionAmount;
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.07);
+      });
+      this.dashboardSkinWalkAnimation.speed = 1;
+      this.dashboardSkinViewer.animation = this.dashboardSkinWalkAnimation;
+      this.configureDashboardSkinViewerCamera();
+    } else if (this.dashboardSkinViewer && window.skinview3d?.WalkingAnimation) {
+      this.dashboardSkinWalkAnimation = new window.skinview3d.WalkingAnimation();
+      this.dashboardSkinWalkAnimation.speed = 1.75;
+      this.dashboardSkinWalkAnimation.headBobbing = false;
+      this.dashboardSkinWalkAnimation.addAnimation((player, progress) => {
+        const clamp01 = (value) => Math.max(0, Math.min(1, value));
+        const easeInOut = (value) => value * value * (3 - (2 * value));
+        const bodyTurnProgress = easeInOut(clamp01((progress - 1.08) / 0.22));
+        const startRotation = Math.PI / 2;
+        const targetRotation = -0.2;
+        player.rotation.y = startRotation + ((targetRotation - startRotation) * bodyTurnProgress);
+        player.position.y = -3.5;
+        this.applyDashboardSkinSmoothHeadTracking(player, 0.07);
+      });
+      this.dashboardSkinViewer.animation = this.dashboardSkinWalkAnimation;
+      this.configureDashboardSkinViewerCamera();
+    }
+
+    document.body.classList.add('dashboard-skin-exiting');
+    stage.classList.remove('is-walking-left', 'is-sprinting-back');
+
+    this.clearDashboardSkinReturnAnimationListener(canvas);
+    const handleReturnEnd = (event) => {
+      if (event.target !== canvas) {
+        return;
+      }
+
+      stage.classList.remove('is-sprinting-back');
+      this.dashboardSkinReturnAnimationEndHandler = null;
+      this.resetDashboardSkinLaunchExitAnimation();
+    };
+
+    this.dashboardSkinReturnAnimationEndHandler = handleReturnEnd;
+    canvas.addEventListener('animationend', handleReturnEnd, { once: true });
+    void stage.offsetWidth;
+    stage.classList.add('is-sprinting-back');
+    */
+  }
+
+  clearDashboardSkinEffects() {
+    this.dashboardSkinEffectTimers.forEach((timerId) => window.clearTimeout(timerId));
+    this.dashboardSkinEffectTimers = [];
+    document.querySelector('.dashboard-skin-effect-layer')?.replaceChildren();
+  }
+
+  clearDashboardSkinCanvasAnimation(options = {}) {
+    if (this.dashboardSkinCanvasAnimation) {
+      this.dashboardSkinCanvasAnimation.cancel();
+      this.dashboardSkinCanvasAnimation = null;
+    }
+
+    if (!options.keepInlineStyles) {
+      const canvas = document.getElementById('dashboard-skin-canvas');
+      if (canvas) {
+        canvas.style.opacity = '';
+        canvas.style.filter = '';
+        canvas.style.transform = '';
+      }
+    }
+  }
+
+  clearDashboardSkinLaunchExitAnimationListener(canvas = document.getElementById('dashboard-skin-canvas')) {
+    if (!canvas || !this.dashboardSkinLaunchExitAnimationEndHandler) {
+      return;
+    }
+
+    canvas.removeEventListener('animationend', this.dashboardSkinLaunchExitAnimationEndHandler);
+    this.dashboardSkinLaunchExitAnimationEndHandler = null;
+  }
+
+  completeDashboardSkinLaunchExitAnimation() {
+    this.resetDashboardSkinLaunchExitAnimation();
+  }
+
+  clearDashboardSkinReturnAnimationListener(canvas = document.getElementById('dashboard-skin-canvas')) {
+    if (!canvas || !this.dashboardSkinReturnAnimationEndHandler) {
+      return;
+    }
+
+    canvas.removeEventListener('animationend', this.dashboardSkinReturnAnimationEndHandler);
+    this.dashboardSkinReturnAnimationEndHandler = null;
+  }
+
+  applyDashboardSkinSmoothHeadTracking(player, lerp = 0.12) {
+    if (!player?.skin?.head) {
+      return;
+    }
+
+    this.dashboardSkinHeadCurrentYaw += (this.dashboardSkinHeadTargetYaw - this.dashboardSkinHeadCurrentYaw) * lerp;
+    this.dashboardSkinHeadCurrentPitch += (this.dashboardSkinHeadTargetPitch - this.dashboardSkinHeadCurrentPitch) * lerp;
+    player.skin.head.rotation.x = this.dashboardSkinHeadCurrentPitch;
+    player.skin.head.rotation.y = this.dashboardSkinHeadCurrentYaw;
+    player.skin.head.rotation.z = 0;
+  }
+
+  updateDashboardSkinHeadTarget(event) {
+    const canvas = document.getElementById('dashboard-skin-canvas');
+    if (!canvas || canvas.classList.contains('hidden') || !this.dashboardSkinViewer || !this.dashboardSkinIdleAnimation) {
+      this.dashboardSkinHeadTargetYaw = 0;
+      this.dashboardSkinHeadTargetPitch = 0;
+      return;
+    }
+
+    const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    if (!viewportWidth) {
+      this.dashboardSkinHeadTargetYaw = 0;
+      this.dashboardSkinHeadTargetPitch = 0;
+      return;
+    }
+
+    const horizontalDistance = ((Number(event.clientX) || 0) - (viewportWidth / 2)) / Math.max(1, viewportWidth / 2);
+    const clampedDistance = Math.max(-1, Math.min(1, horizontalDistance));
+    this.dashboardSkinHeadTargetYaw = clampedDistance * 0.92;
+
+    const launchButton = document.getElementById('launch-btn');
+    const buttonRect = launchButton?.getBoundingClientRect();
+    if (!buttonRect?.width || !buttonRect?.height) {
+      this.dashboardSkinHeadTargetPitch = 0;
+      return;
+    }
+
+    const buttonCenterX = buttonRect.left + (buttonRect.width / 2);
+    const buttonCenterY = buttonRect.top + (buttonRect.height / 2);
+    const buttonDistance = Math.hypot((Number(event.clientX) || 0) - buttonCenterX, (Number(event.clientY) || 0) - buttonCenterY);
+    const closeness = Math.max(0, Math.min(1, 1 - (buttonDistance / 360)));
+    this.dashboardSkinHeadTargetPitch = 0.38 * Math.pow(closeness, 1.45);
+  }
+
+  startDashboardSkinGlobalCursorTracking() {
+    if (this.dashboardSkinCursorTrackingTimer || typeof window.electronAPI?.getGlobalCursorPosition !== 'function') {
+      return;
+    }
+
+    const trackCursor = async () => {
+      if (!this.dashboardSkinCursorTrackingInFlight) {
+        this.dashboardSkinCursorTrackingInFlight = true;
+        try {
+          const cursor = await window.electronAPI.getGlobalCursorPosition();
+          if (cursor?.success) {
+            this.updateDashboardSkinHeadTarget({
+              clientX: Number(cursor.clientX) || 0,
+              clientY: Number(cursor.clientY) || 0
+            });
+          }
+        } catch (error) {
+          console.warn('Global cursor tracking failed:', error);
+        } finally {
+          this.dashboardSkinCursorTrackingInFlight = false;
+        }
+      }
+    };
+
+    this.dashboardSkinCursorTrackingTimer = window.setInterval(trackCursor, 33);
+    trackCursor();
+  }
+
+  resetDashboardSkinLaunchExitAnimation() {
+    document.body.classList.remove('dashboard-skin-exiting');
+    const stage = document.querySelector('.dashboard-skin-stage');
+    stage?.classList.remove('is-walking-left', 'is-sprinting-back');
+    this.dashboardSkinLaunchExitActive = false;
+    this.clearDashboardSkinLaunchExitAnimationListener();
+    this.clearDashboardSkinReturnAnimationListener();
+    this.clearDashboardSkinCanvasAnimation();
+    this.clearDashboardSkinEffects();
+    if (this.dashboardSkinViewer && this.dashboardSkinIdleAnimation) {
+      this.dashboardSkinViewer.animation = this.dashboardSkinIdleAnimation;
+      this.configureDashboardSkinViewerCamera();
+    }
+  }
+
+  async installFabric() {
+    this.showLoading('Aktiviere lokales Fabric...');
+
+    try {
+      const result = await window.electronAPI.installFabric();
+      if (result.success) {
+        this.selectedVersionId = result.selectedVersionId || this.selectedVersionId;
+        await this.refreshPackContext();
+        const warningText = result.warning ? ` Hinweis: ${result.warning}` : '';
+        this.showNotification(`${result.message}${warningText}`);
+      } else {
+        this.showNotification('Fehler: ' + result.error);
+      }
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async loadMods(options = {}) {
+    this.modsLoadGeneration = (this.modsLoadGeneration || 0) + 1;
+    const loadGeneration = this.modsLoadGeneration;
+    const container = document.getElementById('mods-list');
+    if (!this.mods.length && container) {
+      container.innerHTML = `<div class="mods-loading-state" role="status" aria-label="Mods werden geladen">
+        <div class="mods-loading-row"></div><div class="mods-loading-row"></div><div class="mods-loading-row"></div>
+      </div>`;
+    }
+    try {
+      const getMods = options.skipManagedSync && typeof window.electronAPI?.getModsWithoutSync === 'function'
+        ? window.electronAPI.getModsWithoutSync
+        : window.electronAPI.getMods;
+      const contextKey = `${this.selectedVersionId || 'active'}:${options.skipManagedSync ? 'local' : 'managed'}`;
+      const [result] = await Promise.all([
+        this.loadingManager.run(`content:mods:${contextKey}`, () => getMods(), {
+          scope: 'mods', priority: 100, ttl: this.contentCacheTtlMs, force: Boolean(options.force), label: 'Mods werden geladen'
+        }),
+        this.loadingManager.run(`content:project-ids:${this.selectedVersionId || 'active'}`, () => this.loadInstalledModProjectIds(), {
+          scope: 'mods', priority: 90, ttl: this.contentCacheTtlMs, force: Boolean(options.force), label: 'Metadaten werden geladen'
+        })
+      ]);
+      if (loadGeneration !== this.modsLoadGeneration) {
+        return;
+      }
+      this.mods = Array.isArray(result) ? result : [];
+      if (loadGeneration !== this.modsLoadGeneration) {
+        return;
+      }
+      this.renderMods();
+      this.updateModsCount();
+      this.updateRemoveIncompatibleModsButton();
+      this.updateModCompatibilityUI();
+      this.renderModrinthResults({ force: true });
+      this.updatePackContextUI();
+      this.updateModsCheckStatus();
+    } catch (error) {
+      if (loadGeneration !== this.modsLoadGeneration) {
+        return;
+      }
+      console.error('Error loading mods:', error);
+      this.mods = [];
+      this.installedModProjectIds = new Set();
+      this.renderMods();
+      this.updateModsCount();
+      this.updateRemoveIncompatibleModsButton();
+      this.updateModCompatibilityUI();
+      this.renderModrinthResults({ force: true });
+      this.updatePackContextUI();
+      this.updateModsCheckStatus('Mod-Status konnte nicht geladen werden.');
+    }
+  }
+
+  preloadImageAsset(source, timeoutMs = 12000) {
+    const normalizedSource = String(source || '').trim();
+    if (!normalizedSource) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const image = new Image();
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        image.onload = null;
+        image.onerror = null;
+        resolve();
+      };
+      const timer = window.setTimeout(finish, timeoutMs);
+      image.onerror = finish;
+      image.onload = () => {
+        if (typeof image.decode === 'function') {
+          image.decode().catch(() => {}).finally(finish);
+          return;
+        }
+        finish();
+      };
+      image.decoding = 'async';
+      image.src = normalizedSource;
+    });
+  }
+
+  async preloadStartupContentIcons() {
+    const iconSources = new Set([
+      ...this.mods.map((entry) => entry?.iconUrl),
+      ...this.modrinthLoadedResults.map((entry) => entry?.iconUrl),
+      ...(this.skinConfig?.skins || []).map((entry) => entry?.previewDataUrl),
+      this.skinConfig?.activeSkin?.previewDataUrl
+    ].map((source) => String(source || '').trim()).filter(Boolean));
+    await Promise.all(Array.from(iconSources, (source) => this.preloadImageAsset(source)));
+  }
+
+  getInstalledModProjectIdsFromLoadedMods() {
+    return this.mods
+      .filter((mod) => mod.managed && mod.projectId)
+      .map((mod) => mod.projectId);
+  }
+
+  getVisibleInstalledModProjectIds() {
+    return this.getInstalledModProjectIdsFromLoadedMods();
+  }
+
+  setInstalledModProjectIds(projectIds) {
+    this.installedModProjectIds = new Set(
+      (Array.isArray(projectIds) ? projectIds : [])
+        .map((projectId) => String(projectId || '').trim())
+        .filter(Boolean)
+    );
+  }
+
+  markModrinthProjectInstalled(projectId, options = {}) {
+    const normalizedProjectId = String(projectId || '').trim();
+    if (!normalizedProjectId) {
+      return;
+    }
+
+    this.setInstalledModProjectIds([...this.installedModProjectIds, normalizedProjectId]);
+    const markInstalled = (project) => project?.projectId === normalizedProjectId
+      ? { ...project, installed: true }
+      : project;
+    this.modrinthLoadedResults = this.modrinthLoadedResults.map(markInstalled);
+    this.modrinthResults = this.modrinthResults.map(markInstalled);
+    if (options.render !== false) {
+      this.renderModrinthResults({ force: true });
+    }
+  }
+
+  getInstalledModSlugsFromLoadedMods() {
+    return this.mods
+      .filter((mod) => mod.managed && mod.slug)
+      .map((mod) => String(mod.slug || '').trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  async loadInstalledModProjectIds() {
+    const loadedProjectIds = this.getInstalledModProjectIdsFromLoadedMods();
+    if (typeof window.electronAPI?.getInstalledModProjectIds !== 'function') {
+      this.setInstalledModProjectIds(loadedProjectIds);
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.getInstalledModProjectIds(this.getActiveContextVersionId());
+      this.setInstalledModProjectIds([...loadedProjectIds, ...(Array.isArray(result) ? result : [])]);
+    } catch (error) {
+      console.warn('Installed mod project id load failed:', error);
+      this.setInstalledModProjectIds(loadedProjectIds);
+    }
+  }
+
+  async loadPacks() {
+    try {
+      const result = await window.electronAPI.getPacks();
+      if (!result.success) {
+        return;
+      }
+
+      this.packsConfig = result;
+      this.hasCopiedProfileSettings = Boolean(result.settingsClipboardAvailable);
+      this.renderVersionOptions();
+      this.renderPacks();
+      this.updatePackContextUI();
+    } catch (error) {
+      console.error('Profile config error:', error);
+    }
+  }
+
+  async loadServerFavorites() {
+    if (typeof window.electronAPI?.getServerFavorites !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.getServerFavorites();
+      if (!result.success) {
+        return;
+      }
+      this.serverFavorites = result.servers || [];
+      this.renderServerFavorites();
+      this.renderStartServerList();
+    } catch (error) {
+      console.error('Server favorites error:', error);
+    }
+  }
+
+
+  async loadHostedServerStatus() {
+    if (typeof window.electronAPI?.getHostedServerStatus !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.getHostedServerStatus();
+      if (!result?.success) {
+        this.updateHostedServerStatus({ running: false, error: result?.error || 'Serverstatus konnte nicht geladen werden.' });
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServers = result.servers || [];
+      this.activeHostedServerId = result.activeServerId || result.activeServer?.id || '';
+      this.updateHostedServerStatus(result);
+    } catch (error) {
+      console.error('Hosted server status error:', error);
+      this.updateHostedServerStatus({ running: false, error: error.message });
+    }
+  }
+
+  updateHostedServerStatus(status = this.hostedServerStatus || {}) {
+    const statusEl = document.getElementById('hosted-server-status');
+    const listStatusEl = document.getElementById('hosted-server-list-status');
+    const addressEl = document.getElementById('hosted-server-address');
+    const hostNote = document.querySelector('.server-host-note');
+    const nameInput = document.getElementById('hosted-server-name-input');
+    const editionSelect = document.getElementById('hosted-server-edition-select');
+    const softwareSelect = document.getElementById('hosted-server-software-select');
+    const versionInput = document.getElementById('hosted-server-version-input');
+    const ramInput = document.getElementById('hosted-server-ram-input');
+    const portInput = document.getElementById('hosted-server-port-input');
+    const maxPlayersInput = document.getElementById('hosted-server-max-players-input');
+    const difficultySelect = document.getElementById('hosted-server-difficulty-select');
+    const gamemodeSelect = document.getElementById('hosted-server-gamemode-select');
+    const motdInput = document.getElementById('hosted-server-motd-input');
+    const viewDistanceInput = document.getElementById('hosted-server-view-distance-input');
+    const simulationDistanceInput = document.getElementById('hosted-server-simulation-distance-input');
+    const spawnProtectionInput = document.getElementById('hosted-server-spawn-protection-input');
+    const pvpCheckbox = document.getElementById('hosted-server-pvp-checkbox');
+    const whitelistCheckbox = document.getElementById('hosted-server-whitelist-checkbox');
+    const onlineModeCheckbox = document.getElementById('hosted-server-online-mode-checkbox');
+    const commandBlockCheckbox = document.getElementById('hosted-server-command-block-checkbox');
+    const eulaCheckbox = document.getElementById('hosted-server-eula-checkbox');
+    const startBtn = document.getElementById('hosted-server-start-btn');
+    const restartBtn = document.getElementById('hosted-server-restart-btn');
+    const runtimeEl = document.getElementById('hosted-server-runtime');
+    const consoleEl = document.getElementById('hosted-server-console');
+    const commandInput = document.getElementById('hosted-server-command-input');
+    const commandSendBtn = document.getElementById('hosted-server-command-send-btn');
+    const statusPill = document.getElementById('hosting-status-pill');
+    const serverSubtitle = document.getElementById('hosting-server-subtitle');
+    const activeServer = status.activeServer || {};
+    this.renderHostedServerVersionOptions(activeServer.minecraftVersion || 'latest');
+    const runningServerId = status.runningServerId || '';
+    const stopping = Boolean(status.stopping);
+    const running = Boolean((status.running && (!runningServerId || runningServerId === activeServer.id)) || stopping);
+    const anotherServerRunning = false;
+
+    this.hostedServers = status.servers || this.hostedServers || [];
+    this.activeHostedServerId = status.activeServerId || activeServer.id || '';
+    if (!this.hostedServers.length && this.hostedServerFormMode !== 'create') {
+      this.hostedServerFormMode = 'hidden';
+    }
+    if (this.hostedServerFormMode === 'edit' && !this.activeHostedServerId) {
+      this.hostedServerFormMode = 'hidden';
+    }
+    this.updateHostedServerEditorMode();
+    this.renderHostedServerList(status);
+    this.renderHostingPlayers(status);
+    this.updateHostingBanListFromConsole(status.consoleOutput || '');
+    this.renderHostingModeration();
+
+    if (statusEl) {
+      statusEl.classList.remove('is-ok', 'is-warning', 'is-error');
+      if (status.error) {
+        statusEl.textContent = `Fehler: ${status.error}`;
+        statusEl.classList.add('is-error');
+      } else if (stopping) {
+        statusEl.textContent = 'Stoppt...';
+        statusEl.classList.add('is-warning');
+      } else if (running) {
+        statusEl.textContent = `Online: ${activeServer.name || 'Server'}`;
+        statusEl.classList.add('is-ok');
+      } else if (anotherServerRunning) {
+        statusEl.textContent = 'Ein anderer Server läuft gerade. Stoppe ihn zuerst.';
+        statusEl.classList.add('is-warning');
+      } else {
+        statusEl.textContent = status.installed ? 'Bereit.' : 'Download beim Start.';
+        statusEl.classList.add(status.installed ? 'is-ok' : 'is-warning');
+      }
+    }
+    if (listStatusEl) {
+      listStatusEl.textContent = this.hostedServers.length
+        ? `${this.hostedServers.length} Server gespeichert.`
+        : 'Du hast noch keine Server erstellt.';
+    }
+    if (statusPill) {
+      statusPill.classList.remove('online', 'offline', 'warning');
+      const networkStatus = status.networkStatus || {};
+      const warningCodes = new Set(['dns-missing', 'port-closed', 'lan-only', 'firewall-blocked']);
+      statusPill.classList.add(stopping || warningCodes.has(networkStatus.code) ? 'warning' : (running ? 'online' : 'offline'));
+      statusPill.textContent = stopping ? 'Stoppt' : (networkStatus.label || (running ? 'Online' : 'Offline'));
+    }
+    if (serverSubtitle) {
+      const players = status.players || {};
+      const softwareLabel = activeServer.softwareLabel || activeServer.software || (activeServer.edition === 'bedrock' ? 'Bedrock' : 'Vanilla');
+      serverSubtitle.textContent = activeServer.name
+        ? `${softwareLabel} · ${activeServer.minecraftVersion || 'latest'} · ${players.online ?? 0}/${players.max || activeServer.maxPlayers || 0} · Port ${activeServer.port || 25565}`
+        : 'Server öffnen.';
+    }
+
+    const network = status.networkAddresses || {};
+    const address = status.address || network.domain || status.domain || activeServer.joinAddress || 'Server nicht gestartet.';
+    const fallbackAddressEl = document.getElementById('hosted-server-fallback-address');
+    const upnp = status.upnp || {};
+    const router = status.router || {};
+    const protocol = router.protocol || activeServer.networkProtocol || (activeServer.edition === 'bedrock' ? 'UDP' : 'TCP');
+    const publicAddressText = [
+      network.local ? `Dieser PC: ${network.local}` : '',
+      network.lan ? `LAN: ${network.lan}` : '',
+      network.public ? `Internet: ${network.public}` : '',
+      network.domain ? `Domain: ${network.domain}${status.domainReady ? '' : ' (DNS fehlt)'}` : '',
+      upnp.success ? 'Router: automatisch freigegeben' : (network.public ? `Router: Port ${router.externalPort || activeServer.port || 25565} ${protocol} freigeben oder UPnP aktivieren` : ''),
+      status.domainReady ? 'Domain: verbunden' : (status.networkStatus?.detail || status.domainStatus || '')
+    ].filter(Boolean).join(' | ');
+    if (addressEl) {
+      addressEl.textContent = address;
+    }
+    if (fallbackAddressEl) {
+      fallbackAddressEl.textContent = publicAddressText;
+      fallbackAddressEl.classList.toggle('hidden', !publicAddressText);
+    }
+    if (nameInput && !nameInput.matches(':focus')) {
+      nameInput.value = activeServer.name || '';
+    }
+    if (editionSelect && !editionSelect.matches(':focus')) {
+      editionSelect.value = activeServer.edition || 'java';
+    }
+    if (softwareSelect && !softwareSelect.matches(':focus')) {
+      softwareSelect.value = activeServer.software || activeServer.serverSoftware || (activeServer.edition === 'bedrock' ? 'bedrock' : 'vanilla');
+    }
+    this.updateHostedServerSoftwareOptions({ preservePort: true });
+    if (versionInput && !versionInput.matches(':focus')) {
+      versionInput.value = activeServer.minecraftVersion || 'latest';
+    }
+    if (ramInput && !ramInput.matches(':focus')) {
+      ramInput.value = String(activeServer.ramGb || ramInput.value || 2);
+    }
+    if (portInput && !portInput.matches(':focus')) {
+      portInput.value = String(activeServer.port || 25565);
+    }
+    if (maxPlayersInput && !maxPlayersInput.matches(':focus')) {
+      maxPlayersInput.value = String(activeServer.maxPlayers || 20);
+    }
+    if (difficultySelect && activeServer.difficulty) {
+      difficultySelect.value = activeServer.difficulty;
+    }
+    if (gamemodeSelect && activeServer.gamemode) {
+      gamemodeSelect.value = activeServer.gamemode;
+    }
+    if (motdInput && !motdInput.matches(':focus')) {
+      motdInput.value = activeServer.motd || '';
+    }
+    if (viewDistanceInput && !viewDistanceInput.matches(':focus')) {
+      viewDistanceInput.value = String(activeServer.viewDistance || 10);
+    }
+    if (simulationDistanceInput && !simulationDistanceInput.matches(':focus')) {
+      simulationDistanceInput.value = String(activeServer.simulationDistance || 10);
+    }
+    if (spawnProtectionInput && !spawnProtectionInput.matches(':focus')) {
+      spawnProtectionInput.value = String(activeServer.spawnProtection ?? 16);
+    }
+    if (pvpCheckbox) {
+      pvpCheckbox.checked = activeServer.pvp !== false;
+    }
+    if (whitelistCheckbox) {
+      whitelistCheckbox.checked = Boolean(activeServer.whitelist);
+    }
+    if (onlineModeCheckbox) {
+      onlineModeCheckbox.checked = activeServer.onlineMode !== false;
+    }
+    if (commandBlockCheckbox) {
+      commandBlockCheckbox.checked = Boolean(activeServer.enableCommandBlock);
+    }
+    if (eulaCheckbox && typeof activeServer.eulaAccepted === 'boolean') {
+      eulaCheckbox.checked = activeServer.eulaAccepted;
+    }
+    if (startBtn) {
+      startBtn.disabled = running;
+    }
+    if (restartBtn) {
+      restartBtn.disabled = !running || stopping;
+    }
+    if (hostNote) {
+      const primaryFinding = Array.isArray(status.diagnostics?.findings) ? status.diagnostics.findings[0] : '';
+      if (primaryFinding && status.networkStatus?.code !== 'internet-ok') {
+        hostNote.textContent = primaryFinding;
+      } else if (status.domainStatus) {
+        hostNote.textContent = status.domainStatus;
+      } else if (running) {
+        hostNote.textContent = 'Für externe Spieler muss der Port im Router und in der Firewall erlaubt sein.';
+      } else {
+        hostNote.textContent = 'Für externe Spieler muss der Port im Router und in der Firewall erlaubt sein.';
+      }
+    }
+    if (runtimeEl) {
+      const players = status.players || {};
+      const resources = status.resources || {};
+      const uptime = status.uptimeMs ? this.formatDuration(status.uptimeMs) : '0s';
+      runtimeEl.innerHTML = `
+        <div class="hosting-metric"><span>Status</span><strong>${running ? 'Online' : (stopping ? 'Stoppt' : 'Offline')}</strong></div>
+        <div class="hosting-metric"><span>Port</span><strong>${status.localReachable ? 'Erreichbar' : (running ? 'Startet' : 'Offline')}</strong></div>
+        <div class="hosting-metric"><span>Spieler</span><strong>${this.escapeHtml(players.online ?? 0)}/${this.escapeHtml(players.max || activeServer.maxPlayers || 0)}</strong></div>
+        <div class="hosting-metric"><span>RAM</span><strong>${resources.memoryMb ? `${this.escapeHtml(resources.memoryMb)} MB` : 'unbekannt'}</strong></div>
+        <div class="hosting-metric"><span>CPU</span><strong>${resources.cpuTime ? this.escapeHtml(resources.cpuTime) : 'unbekannt'}</strong></div>
+        <div class="hosting-metric"><span>Uptime</span><strong>${this.escapeHtml(uptime)}</strong></div>
+        <div class="hosting-metric"><span>Netzwerk</span><strong>${this.escapeHtml(status.networkStatus?.label || 'Unbekannt')}</strong></div>
+      `;
+    }
+    this.renderHostingConsole(status);
+    if (commandInput) {
+      commandInput.disabled = !running;
+    }
+    if (commandSendBtn) {
+      commandSendBtn.disabled = !running;
+    }
+
+    if ((running || this.hostedServerFormMode === 'edit') && !this.hostedServerStatusTimer) {
+      this.hostedServerStatusTimer = window.setInterval(() => {
+        if (!document.hidden && this.activeSectionId === 'hosting') {
+          this.loadHostedServerStatus();
+        }
+      }, running ? 8000 : 15000);
+    } else if (!running && this.hostedServerFormMode !== 'edit' && this.hostedServerStatusTimer) {
+      window.clearInterval(this.hostedServerStatusTimer);
+      this.hostedServerStatusTimer = null;
+    }
+  }
+
+  renderHostingConsole(status = this.hostedServerStatus || {}) {
+    const consoleEl = document.getElementById('hosted-server-console');
+    if (!consoleEl) {
+      return;
+    }
+    const output = status?.consoleOutput || 'Noch keine Konsolen-Ausgabe.';
+    const query = String(this.hostingConsoleSearch || '').trim().toLowerCase();
+    if (!query) {
+      consoleEl.textContent = output;
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+      return;
+    }
+    const lines = String(output).split(/\r?\n/u);
+    const filtered = lines.filter((line) => line.toLowerCase().includes(query));
+    consoleEl.textContent = filtered.length ? filtered.join('\n') : `Keine Konsolenzeile gefunden für "${this.hostingConsoleSearch}".`;
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  getHostedPlayersFromStatus(status = this.hostedServerStatus || {}) {
+    const directPlayers = Array.isArray(status?.playerDetails) ? status.playerDetails : [];
+    const parsedNames = this.parseHostedPlayerNames(status?.consoleOutput || '');
+    const players = directPlayers.length
+      ? directPlayers
+      : parsedNames.map((name) => ({ name, ping: null, playTimeMs: null }));
+    return players.map((player) => ({
+      name: String(player.name || player.username || '').trim(),
+      ping: Number.isFinite(Number(player.ping)) ? Number(player.ping) : null,
+      playTimeMs: Number.isFinite(Number(player.playTimeMs)) ? Number(player.playTimeMs) : null
+    })).filter((player) => player.name);
+  }
+
+  parseHostedPlayerNames(consoleOutput = '') {
+    const lines = String(consoleOutput || '').split(/\r?\n/u).reverse();
+    const listLine = lines.find((line) => /There are \d+ of a max of \d+ players online:/iu.test(line));
+    if (!listLine) {
+      return [];
+    }
+    const namesText = listLine.split(/players online:/iu).pop() || '';
+    return namesText.split(',')
+      .map((name) => name.trim())
+      .filter((name) => /^[A-Za-z0-9_]{1,16}$/u.test(name));
+  }
+
+  renderHostingPlayers(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosting-player-list');
+    const summary = document.getElementById('hosting-players-summary');
+    if (!list) {
+      return;
+    }
+    const query = String(this.hostedPlayerSearch || '').trim().toLowerCase();
+    const sortMode = this.hostedPlayerSort || 'name';
+    let players = this.getHostedPlayersFromStatus(status);
+    if (query) {
+      players = players.filter((player) => player.name.toLowerCase().includes(query));
+    }
+    players.sort((left, right) => {
+      if (sortMode === 'ping') {
+        return (left.ping ?? Number.MAX_SAFE_INTEGER) - (right.ping ?? Number.MAX_SAFE_INTEGER);
+      }
+      if (sortMode === 'time') {
+        return (right.playTimeMs ?? -1) - (left.playTimeMs ?? -1);
+      }
+      return left.name.localeCompare(right.name);
+    });
+    if (summary) {
+      const count = status?.players?.online ?? players.length;
+      summary.textContent = `${count} online · aktualisiert automatisch`;
+    }
+    if (!players.length) {
+      list.innerHTML = '<p class="hosting-empty-state">Keine Spieler online.</p>';
+      return;
+    }
+    list.innerHTML = players.map((player) => {
+      const name = this.escapeHtml(player.name);
+      return `
+        <article class="hosting-player-card" data-player-name="${name}">
+          <div class="hosting-player-avatar" aria-hidden="true">${this.escapeHtml(player.name[0]?.toUpperCase() || '?')}</div>
+          <div class="hosting-player-main">
+            <span class="hosting-player-name">${name}</span>
+            <span class="hosting-player-meta">
+              <span>Ping: ${player.ping === null ? 'unbekannt' : `${this.escapeHtml(player.ping)} ms`}</span>
+              <span>Spielzeit: ${player.playTimeMs === null ? 'unbekannt' : this.escapeHtml(this.formatDuration(player.playTimeMs))}</span>
+            </span>
+          </div>
+          <div class="hosting-player-actions">
+            <button class="btn btn-secondary" type="button" data-player-action="message">Nachricht</button>
+            <button class="btn btn-secondary" type="button" data-player-action="tp">TP</button>
+            <button class="btn btn-secondary" type="button" data-player-action="op">OP</button>
+            <button class="btn btn-secondary" type="button" data-player-action="deop">DeOP</button>
+            <button class="btn btn-secondary" type="button" data-player-action="whitelist-add">WL+</button>
+            <button class="btn btn-secondary" type="button" data-player-action="whitelist-remove">WL-</button>
+            <button class="btn btn-danger" type="button" data-player-action="kick">Kick</button>
+            <button class="btn btn-danger" type="button" data-player-action="tempban">TempBan</button>
+            <button class="btn btn-danger" type="button" data-player-action="ban">Ban</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+    this.prepareMotionGroup(list, ':scope > *', 24);
+  }
+
+  renderHostingModeration() {
+    const bans = document.getElementById('hosting-ban-list');
+    const history = document.getElementById('hosting-moderation-history');
+    if (bans) {
+      if (!this.hostingBanList.length) {
+        bans.innerHTML = '<p class="hosting-empty-state">Keine Bans geladen.</p>';
+      } else {
+        bans.innerHTML = this.hostingBanList.map((player) => `
+          <div class="hosting-ban-item">
+            <span>${this.escapeHtml(player)}</span>
+            <button class="btn btn-secondary" type="button" data-player-name="${this.escapeHtml(player)}" data-player-action="unban">Entbannen</button>
+          </div>
+        `).join('');
+      }
+    }
+    if (history) {
+      if (!this.hostingModerationHistory.length) {
+        history.innerHTML = '<p class="hosting-empty-state">Kein Verlauf.</p>';
+      } else {
+        history.innerHTML = this.hostingModerationHistory.slice(0, 12).map((entry) => `
+          <div class="hosting-history-item">
+            <span>${this.escapeHtml(entry.action)} · ${this.escapeHtml(entry.target)}</span>
+            <span>${this.escapeHtml(entry.actor)} · ${this.escapeHtml(entry.time)}</span>
+          </div>
+        `).join('');
+      }
+    }
+  }
+
+  updateHostingBanListFromConsole(consoleOutput = '') {
+    const lines = String(consoleOutput || '').split(/\r?\n/u).reverse();
+    const banLine = lines.find((line) => /There are \d+ bans?:/iu.test(line));
+    if (!banLine) {
+      return;
+    }
+    const namesText = banLine.split(/bans?:/iu).pop() || '';
+    this.hostingBanList = namesText.split(',')
+      .map((name) => name.trim())
+      .filter((name) => /^[A-Za-z0-9_]{1,16}$/u.test(name));
+  }
+
+  async handleHostingPlayerAction(event) {
+    const button = event.target?.closest?.('[data-player-action]');
+    if (!button) {
+      return;
+    }
+    const card = button.closest('.hosting-player-card, .hosting-ban-item');
+    const playerName = button.getAttribute('data-player-name') || card?.getAttribute('data-player-name') || '';
+    const action = button.getAttribute('data-player-action') || '';
+    if (!playerName || !/^[A-Za-z0-9_]{1,16}$/u.test(playerName)) {
+      this.showNotification('Kein gültiger Spielername für diese Aktion.');
+      return;
+    }
+    await this.runHostingPlayerCommand(action, playerName);
+  }
+
+  async runHostingPlayerCommand(action, playerName) {
+    const quotedName = playerName;
+    const actor = this.user?.username || 'Launcher';
+    let command = '';
+    let label = action;
+    if (action === 'kick') {
+      const confirmed = await this.showConfirm({ title: 'Spieler kicken', message: `${playerName} wirklich vom Server kicken?`, confirmText: 'Kick' });
+      if (!confirmed) return;
+      command = `kick ${quotedName} Moderation durch ${actor}`;
+      label = 'Kick';
+    } else if (action === 'ban') {
+      const confirmed = await this.showConfirm({ title: 'Spieler bannen', message: `${playerName} wirklich dauerhaft bannen?`, confirmText: 'Ban' });
+      if (!confirmed) return;
+      command = `ban ${quotedName} Moderation durch ${actor}`;
+      label = 'Ban';
+    } else if (action === 'tempban') {
+      const confirmed = await this.showConfirm({ title: 'TempBan senden', message: `${playerName} mit einem TempBan-Befehl bannen? Funktioniert, wenn dein Server/Plugin tempban unterstützt.`, confirmText: 'TempBan' });
+      if (!confirmed) return;
+      command = `tempban ${quotedName} 30m Moderation durch ${actor}`;
+      label = 'TempBan';
+    } else if (action === 'op') {
+      command = `op ${quotedName}`;
+      label = 'OP geben';
+    } else if (action === 'deop') {
+      command = `deop ${quotedName}`;
+      label = 'OP entfernen';
+    } else if (action === 'whitelist-add') {
+      command = `whitelist add ${quotedName}`;
+      label = 'Whitelist hinzufügen';
+    } else if (action === 'whitelist-remove') {
+      command = `whitelist remove ${quotedName}`;
+      label = 'Whitelist entfernen';
+    } else if (action === 'message') {
+      const message = window.prompt(`Nachricht an ${playerName}:`, '');
+      if (!message) return;
+      command = `tell ${quotedName} ${message.slice(0, 120)}`;
+      label = 'Nachricht';
+    } else if (action === 'tp') {
+      const target = window.prompt(`${playerName} teleportieren zu Spieler/Koordinaten:`, '');
+      if (!target) return;
+      command = `tp ${quotedName} ${target.slice(0, 80)}`;
+      label = 'Teleport';
+    } else if (action === 'unban') {
+      command = `pardon ${quotedName}`;
+      label = 'Entbannen';
+    }
+    if (!command) {
+      return;
+    }
+    await this.executeHostedServerCommand(command, `${label}: ${playerName}`);
+    this.addHostingModerationHistory(label, playerName, actor);
+  }
+
+  addHostingModerationHistory(action, target, actor = 'Launcher') {
+    this.hostingModerationHistory.unshift({
+      action,
+      target,
+      actor,
+      time: new Date().toLocaleString()
+    });
+    this.renderHostingModeration();
+  }
+
+  async executeHostedServerCommand(command, successLabel = 'Befehl') {
+    if (typeof window.electronAPI?.sendHostedServerCommand !== 'function') {
+      this.showNotification('Konsolenbefehle sind in dieser Launcher-Version nicht verfügbar.');
+      return false;
+    }
+    if (!this.activeHostedServerId) {
+      this.showNotification('Bitte öffne zuerst einen Server.');
+      return false;
+    }
+    try {
+      const result = await window.electronAPI.sendHostedServerCommand(this.activeHostedServerId, command);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return false;
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(`${successLabel} gesendet.`);
+      return true;
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+      return false;
+    }
+  }
+
+  async requestHostingBanList() {
+    const ok = await this.executeHostedServerCommand('banlist', 'Ban-Liste');
+    if (ok) {
+      this.showNotification('Ban-Liste wurde in der Konsole aktualisiert.');
+    }
+  }
+
+  async unbanHostingPlayer() {
+    const input = document.getElementById('hosting-unban-input');
+    const playerName = input?.value.trim() || '';
+    if (!/^[A-Za-z0-9_]{1,16}$/u.test(playerName)) {
+      this.showNotification('Bitte gib einen gültigen Spielernamen ein.');
+      return;
+    }
+    await this.runHostingPlayerCommand('unban', playerName);
+    if (input) {
+      input.value = '';
+    }
+  }
+
+  updateHostedServerSoftwareOptions(options = {}) {
+    const editionSelect = document.getElementById('hosted-server-edition-select');
+    const softwareSelect = document.getElementById('hosted-server-software-select');
+    const portInput = document.getElementById('hosted-server-port-input');
+    if (!editionSelect || !softwareSelect) {
+      return;
+    }
+    let edition = editionSelect.value === 'bedrock' ? 'bedrock' : 'java';
+    let software = softwareSelect.value || 'vanilla';
+    if (software === 'bedrock') {
+      edition = 'bedrock';
+      editionSelect.value = 'bedrock';
+    }
+    if (edition === 'bedrock') {
+      software = 'bedrock';
+      softwareSelect.value = 'bedrock';
+    } else if (software === 'bedrock') {
+      software = 'vanilla';
+      softwareSelect.value = 'vanilla';
+    }
+    Array.from(softwareSelect.options || []).forEach((option) => {
+      const value = option.value;
+      option.disabled = edition === 'bedrock' ? value !== 'bedrock' : value === 'bedrock';
+    });
+    if (!options.preservePort && portInput && !portInput.matches(':focus')) {
+      const currentPort = Number(portInput.value || 0);
+      if (edition === 'bedrock' && (!currentPort || currentPort === 25565)) {
+        portInput.value = '19132';
+      }
+      if (edition === 'java' && (!currentPort || currentPort === 19132)) {
+        portInput.value = '25565';
+      }
+    }
+  }
+
+  renderHostedServerVersionOptions(selectedVersion = 'latest') {
+    const select = document.getElementById('hosted-server-version-input');
+    if (!select) {
+      return;
+    }
+    const currentValue = String(selectedVersion || select.value || 'latest').trim();
+    const versions = this.availableVersions || [];
+    const options = [
+      '<option value="latest">Latest Release</option>',
+      ...versions.map((version) => {
+        const minecraftVersion = String(version.minecraftVersion || version.name || this.getVersionDisplayName(version) || version.id || '').trim();
+        if (!minecraftVersion) {
+          return '';
+        }
+        return `<option value="${this.escapeHtml(minecraftVersion)}">${this.escapeHtml(minecraftVersion)}</option>`;
+      }).filter(Boolean)
+    ];
+    select.innerHTML = options.join('');
+    select.value = Array.from(select.options).some((option) => option.value === currentValue) ? currentValue : 'latest';
+  }
+
+  updateHostedServerEditorMode() {
+    const editor = document.getElementById('hosted-server-editor');
+    const hostingSection = document.getElementById('hosting');
+    const title = document.getElementById('hosted-server-editor-title');
+    const settingsTitle = document.getElementById('hosted-server-settings-title');
+    const statusText = document.getElementById('hosted-server-status');
+    const createButton = document.getElementById('hosted-server-final-create-btn');
+    const cancelButton = document.getElementById('hosted-server-cancel-create-btn');
+    const saveButton = document.getElementById('hosted-server-save-btn');
+    const startButton = document.getElementById('hosted-server-start-btn');
+    const restartButton = document.getElementById('hosted-server-restart-btn');
+    const deleteButton = document.getElementById('hosted-server-delete-btn');
+    const addressRow = document.querySelector('.server-address-section');
+    const hostNote = document.querySelector('.server-host-note');
+    const runtimePanel = document.getElementById('hosted-server-runtime');
+    const consolePanel = document.querySelector('.server-host-console-panel');
+    const isCreate = this.hostedServerFormMode === 'create';
+    const isEdit = this.hostedServerFormMode === 'edit';
+    const isOpen = isCreate || isEdit;
+
+    hostingSection?.classList.toggle('hosting-editor-open', isOpen);
+    editor?.classList.toggle('hidden', !isOpen);
+    editor?.classList.toggle('is-create-mode', isCreate);
+    editor?.classList.toggle('is-edit-mode', isEdit);
+    if (title) {
+      title.textContent = isCreate ? 'Server erstellen' : 'Server bearbeiten';
+    }
+    if (settingsTitle) {
+      settingsTitle.textContent = isCreate ? 'Server erstellen' : 'Einstellungen';
+    }
+    if (createButton) {
+      createButton.classList.toggle('hidden', !isCreate);
+      createButton.disabled = !isCreate;
+    }
+    if (cancelButton) {
+      cancelButton.classList.toggle('hidden', !isCreate);
+      cancelButton.disabled = !isCreate;
+    }
+    if (saveButton) {
+      saveButton.classList.toggle('hidden', !isEdit);
+      saveButton.disabled = !isEdit;
+    }
+    if (startButton) {
+      startButton.classList.toggle('hidden', !isEdit);
+    }
+    if (restartButton) {
+      restartButton.classList.toggle('hidden', !isEdit);
+    }
+    if (deleteButton) {
+      deleteButton.classList.toggle('hidden', !isEdit);
+    }
+    if (addressRow) {
+      addressRow.classList.toggle('hidden', !isEdit);
+    }
+    if (hostNote) {
+      hostNote.classList.toggle('hidden', !isEdit);
+    }
+    if (runtimePanel) {
+      runtimePanel.classList.toggle('hidden', !isEdit);
+    }
+    if (consolePanel) {
+      consolePanel.classList.toggle('hidden', !isEdit);
+    }
+
+    const createFields = new Set([
+      'hosted-server-name-input',
+      'hosted-server-edition-select',
+      'hosted-server-software-select',
+      'hosted-server-version-input',
+      'hosted-server-ram-input',
+      'hosted-server-port-input',
+      'hosted-server-max-players-input'
+    ]);
+    [
+      'hosted-server-name-input',
+      'hosted-server-edition-select',
+      'hosted-server-software-select',
+      'hosted-server-version-input',
+      'hosted-server-ram-input',
+      'hosted-server-port-input',
+      'hosted-server-max-players-input',
+      'hosted-server-difficulty-select',
+      'hosted-server-gamemode-select',
+      'hosted-server-motd-input',
+      'hosted-server-view-distance-input',
+      'hosted-server-simulation-distance-input',
+      'hosted-server-spawn-protection-input'
+    ].forEach((id) => {
+      this.setHostedServerFieldVisible(id, isEdit || (isCreate && createFields.has(id)));
+    });
+    [
+      'hosted-server-pvp-checkbox',
+      'hosted-server-whitelist-checkbox',
+      'hosted-server-online-mode-checkbox',
+      'hosted-server-command-block-checkbox'
+    ].forEach((id) => {
+      const field = document.getElementById(id);
+      field?.closest?.('.checkbox-row')?.classList.toggle('hidden', !isEdit);
+    });
+    const eulaRow = document.querySelector('.server-host-eula');
+    eulaRow?.classList.toggle('hidden', !isOpen);
+  }
+
+  setHostedServerFieldVisible(id, visible) {
+    const field = document.getElementById(id);
+    const label = document.querySelector(`label[for="${id}"]`);
+    field?.classList.toggle('hidden', !visible);
+    label?.classList.toggle('hidden', !visible);
+  }
+
+  resetHostedServerForm() {
+    const values = {
+      'hosted-server-name-input': '',
+      'hosted-server-edition-select': 'java',
+      'hosted-server-software-select': 'vanilla',
+      'hosted-server-ram-input': '2',
+      'hosted-server-port-input': '25565',
+      'hosted-server-max-players-input': '20',
+      'hosted-server-motd-input': '',
+      'hosted-server-view-distance-input': '10',
+      'hosted-server-simulation-distance-input': '10',
+      'hosted-server-spawn-protection-input': '16'
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const input = document.getElementById(id);
+      if (input) {
+        input.value = value;
+      }
+    });
+    this.renderHostedServerVersionOptions('latest');
+    const difficulty = document.getElementById('hosted-server-difficulty-select');
+    const gamemode = document.getElementById('hosted-server-gamemode-select');
+    const eula = document.getElementById('hosted-server-eula-checkbox');
+    if (difficulty) difficulty.value = 'normal';
+    if (gamemode) gamemode.value = 'survival';
+    const pvp = document.getElementById('hosted-server-pvp-checkbox');
+    const whitelist = document.getElementById('hosted-server-whitelist-checkbox');
+    const onlineMode = document.getElementById('hosted-server-online-mode-checkbox');
+    const commandBlock = document.getElementById('hosted-server-command-block-checkbox');
+    if (pvp) pvp.checked = true;
+    if (whitelist) whitelist.checked = false;
+    if (onlineMode) onlineMode.checked = true;
+    if (commandBlock) commandBlock.checked = false;
+    if (eula) eula.checked = false;
+    this.updateHostedServerSoftwareOptions({ preservePort: true });
+    this.hostedServerDraftDirty = false;
+  }
+
+  openHostedServerCreateForm() {
+    this.activeHostedServerId = '';
+    this.hostedServerFormMode = 'create';
+    this.resetHostedServerForm();
+    this.updateHostedServerEditorMode();
+    document.getElementById('hosted-server-name-input')?.focus();
+  }
+
+  closeHostedServerEditor() {
+    this.hostedServerFormMode = 'hidden';
+    this.hostedServerDraftDirty = false;
+    this.updateHostedServerEditorMode();
+  }
+
+  getHostedServerOptionsFromUI() {
+    return {
+      serverId: this.activeHostedServerId,
+      name: document.getElementById('hosted-server-name-input')?.value.trim() || '',
+      edition: document.getElementById('hosted-server-edition-select')?.value || 'java',
+      software: document.getElementById('hosted-server-software-select')?.value || 'vanilla',
+      minecraftVersion: document.getElementById('hosted-server-version-input')?.value.trim() || 'latest',
+      ramGb: Number(document.getElementById('hosted-server-ram-input')?.value || 2),
+      port: Number(document.getElementById('hosted-server-port-input')?.value || 25565),
+      maxPlayers: Number(document.getElementById('hosted-server-max-players-input')?.value || 20),
+      difficulty: document.getElementById('hosted-server-difficulty-select')?.value || 'normal',
+      gamemode: document.getElementById('hosted-server-gamemode-select')?.value || 'survival',
+      motd: document.getElementById('hosted-server-motd-input')?.value.trim() || '',
+      pvp: Boolean(document.getElementById('hosted-server-pvp-checkbox')?.checked),
+      whitelist: Boolean(document.getElementById('hosted-server-whitelist-checkbox')?.checked),
+      onlineMode: Boolean(document.getElementById('hosted-server-online-mode-checkbox')?.checked),
+      enableCommandBlock: Boolean(document.getElementById('hosted-server-command-block-checkbox')?.checked),
+      viewDistance: Number(document.getElementById('hosted-server-view-distance-input')?.value || 10),
+      simulationDistance: Number(document.getElementById('hosted-server-simulation-distance-input')?.value || 10),
+      spawnProtection: Number(document.getElementById('hosted-server-spawn-protection-input')?.value || 16),
+      ownerUsername: this.user?.username || '',
+      ownerUuid: this.user?.uuid || '',
+      acceptEula: Boolean(document.getElementById('hosted-server-eula-checkbox')?.checked)
+    };
+  }
+
+  renderHostedServerList(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosted-server-list');
+    if (!list) {
+      return;
+    }
+    const servers = status.servers || this.hostedServers || [];
+    if (!servers.length) {
+      list.innerHTML = '<p class="mods-empty">Du hast noch keine Server erstellt.</p>';
+      return;
+    }
+    const activeId = this.hostedServerFormMode === 'edit' ? (status.activeServerId || this.activeHostedServerId) : '';
+    const runningIds = new Set(Array.isArray(status.runningServerIds) ? status.runningServerIds : [status.runningServerId || '']);
+    list.innerHTML = servers.map((server) => {
+      const active = server.id === activeId;
+      const running = runningIds.has(server.id);
+      const defaultPort = server.edition === 'bedrock' ? 19132 : 25565;
+      const softwareLabel = server.softwareLabel || server.software || (server.edition === 'bedrock' ? 'Bedrock' : 'Vanilla');
+      const localAddress = `localhost:${server.port || defaultPort}`;
+      const visibleAddress = active && status.address ? status.address : (server.joinAddress || server.domain || localAddress);
+      return `
+        <article class="hosted-server-card${active ? ' active' : ''}" data-server-id="${this.escapeHtml(server.id)}">
+          <div>
+            <h4>${this.escapeHtml(server.name)}</h4>
+            <p>${running ? 'Online' : 'Offline'} · ${this.escapeHtml(visibleAddress)}</p>
+            <p>${this.escapeHtml(softwareLabel)} · ${this.escapeHtml(server.minecraftVersion || 'latest')} · Port ${this.escapeHtml(server.port || defaultPort)}</p>
+          </div>
+          <div class="server-actions">
+            <button class="btn btn-primary" type="button" data-host-action="select" data-server-id="${this.escapeHtml(server.id)}" ${active ? 'disabled' : ''}>Öffnen</button>
+            <button class="btn btn-secondary" type="button" data-host-action="delete" data-server-id="${this.escapeHtml(server.id)}" data-server-name="${this.escapeHtml(server.name)}" ${running ? 'disabled' : ''}>Löschen</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+    this.prepareMotionGroup(list, ':scope > *', 34);
+  }
+
+  renderHostedServerMods(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosted-server-mods-list');
+    if (!list) {
+      return;
+    }
+    const mods = status.mods || [];
+    if (!mods.length) {
+      list.innerHTML = '<p class="mods-empty">Noch keine Server-Mods. Füge Fabric-kompatible JAR-Dateien hinzu.</p>';
+      return;
+    }
+    list.innerHTML = mods.map((mod) => `
+      <article class="hosted-mod-card">
+        <div>
+          <h4>${this.escapeHtml(mod.fileName)}</h4>
+          <p>${this.escapeHtml(this.formatBytes(mod.size || 0))}</p>
+        </div>
+        <div class="server-actions">
+          <button class="btn btn-secondary" type="button" data-host-mod-action="delete" data-mod-file="${this.escapeHtml(mod.fileName)}">Entfernen</button>
+        </div>
+      </article>
+    `).join('');
+    this.prepareMotionGroup(list, ':scope > *', 34);
+  }
+
+  formatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) {
+      return `${value} B`;
+    }
+    if (value < 1024 * 1024) {
+      return `${(value / 1024).toFixed(1)} KB`;
+    }
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  formatDuration(milliseconds) {
+    const totalSeconds = Math.max(0, Math.floor((Number(milliseconds) || 0) / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours) {
+      return `${hours}h ${minutes}m`;
+    }
+    if (minutes) {
+      return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+  }
+
+  async createHostedServer() {
+    if (typeof window.electronAPI?.createHostedServer !== 'function') {
+      this.showNotification('Server-Hosting ist in dieser Launcher-Version nicht verfügbar.');
+      return;
+    }
+    const options = this.getHostedServerOptionsFromUI();
+    if (!options.name) {
+      this.showNotification('Bitte gib einen Servernamen ein, z. B. pizza.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.createHostedServer(options);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerFormMode = 'hidden';
+      this.hostedServerDraftDirty = false;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server erstellt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  scheduleHostedServerAutoSave() {
+    if (this.hostedServerFormMode !== 'edit' || !this.activeHostedServerId) {
+      return;
+    }
+    if (this.hostedServerAutoSaveTimer) {
+      window.clearTimeout(this.hostedServerAutoSaveTimer);
+    }
+    this.hostedServerAutoSaveTimer = window.setTimeout(() => {
+      this.hostedServerAutoSaveTimer = null;
+      this.saveHostedServer({ silent: true });
+    }, 650);
+  }
+
+  markHostedServerDirty() {
+    if (this.hostedServerFormMode !== 'edit') {
+      return;
+    }
+    this.hostedServerDraftDirty = true;
+    const saveButton = document.getElementById('hosted-server-save-btn');
+    if (saveButton) {
+      saveButton.textContent = 'Änderungen speichern';
+    }
+  }
+
+  discardHostedServerChanges() {
+    if (!this.hostedServerStatus) {
+      return;
+    }
+    document.activeElement?.blur?.();
+    this.hostedServerDraftDirty = false;
+    this.updateHostedServerStatus(this.hostedServerStatus);
+    this.showNotification('Änderungen verworfen.');
+  }
+
+  async saveHostedServer(options = {}) {
+    if (typeof window.electronAPI?.saveHostedServer !== 'function') {
+      if (!options.silent) {
+        this.showNotification('Speichern ist in dieser Launcher-Version nicht verfügbar.');
+      }
+      return;
+    }
+    if (!this.activeHostedServerId) {
+      if (!options.silent) {
+        this.showNotification('Bitte wähle zuerst einen Server aus.');
+      }
+      return;
+    }
+    const saveOptions = this.getHostedServerOptionsFromUI();
+    if (!saveOptions.name) {
+      if (!options.silent) {
+        this.showNotification('Bitte gib einen Servernamen ein.');
+      }
+      return;
+    }
+    try {
+      const result = await window.electronAPI.saveHostedServer(saveOptions);
+      if (!result.success) {
+        if (!options.silent) {
+          this.showNotification('Fehler: ' + result.error);
+        }
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerFormMode = 'edit';
+      this.hostedServerDraftDirty = false;
+      this.updateHostedServerStatus(result);
+      if (!options.silent) {
+        this.showNotification(result.message || 'Server gespeichert.');
+      }
+    } catch (error) {
+      if (!options.silent) {
+        this.showNotification('Fehler: ' + error.message);
+      }
+    }
+  }
+
+  async handleHostedServerListClick(event) {
+    const button = event.target?.closest?.('[data-host-action]');
+    const card = event.target?.closest?.('.hosted-server-card');
+    if (!button && !card) {
+      return;
+    }
+    const action = button?.getAttribute('data-host-action') || 'select';
+    const serverId = button?.getAttribute('data-server-id') || card?.getAttribute('data-server-id') || '';
+    if (action === 'select') {
+      const result = await window.electronAPI.selectHostedServer(serverId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerFormMode = 'edit';
+      this.hostedServerDraftDirty = false;
+      this.updateHostedServerStatus(result);
+      return;
+    }
+    if (action === 'delete') {
+      const serverName = button.getAttribute('data-server-name') || 'Server';
+      const confirmed = await this.showConfirm({
+        title: 'Server löschen',
+        message: `"${serverName}" wirklich komplett löschen? Der Serverordner mit Welt und Mods wird entfernt.`,
+        confirmText: 'Löschen'
+      });
+      if (!confirmed) {
+        return;
+      }
+      const result = await window.electronAPI.deleteHostedServer(serverId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerDraftDirty = false;
+      if (serverId === this.activeHostedServerId) {
+        this.hostedServerFormMode = 'hidden';
+        this.activeHostedServerId = result.activeServerId || '';
+      }
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server entfernt.');
+    }
+  }
+
+  async startHostedServer() {
+    if (typeof window.electronAPI?.startHostedServer !== 'function') {
+      this.showNotification('Server-Hosting ist in dieser Launcher-Version nicht verfügbar.');
+      return;
+    }
+    if (this.hostedServerFormMode !== 'edit' || !this.activeHostedServerId) {
+      this.showNotification('Bitte erstelle oder öffne zuerst einen Server.');
+      return;
+    }
+    const options = this.getHostedServerOptionsFromUI();
+    if (!options.acceptEula) {
+      this.showNotification('Bitte akzeptiere zuerst die Minecraft Server EULA.');
+      return;
+    }
+    const softwareLabel = options.edition === 'bedrock'
+      ? 'Bedrock-Server'
+      : (options.software === 'paper' ? 'Paper-Server' : 'Vanilla-Server');
+    this.showLoading(`${softwareLabel} startet...`, { progress: 18 });
+    try {
+      const result = await window.electronAPI.startHostedServer(options);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        this.updateHostedServerStatus({ running: false, error: result.error });
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerDraftDirty = false;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || `${softwareLabel} läuft.`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async stopHostedServer() {
+    if (typeof window.electronAPI?.stopHostedServer !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.stopHostedServer(this.activeHostedServerId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server gestoppt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async restartHostedServer() {
+    if (typeof window.electronAPI?.restartHostedServer !== 'function') {
+      this.showNotification('Neustart ist in dieser Launcher-Version nicht verfügbar.');
+      return;
+    }
+    if (this.hostedServerFormMode !== 'edit' || !this.activeHostedServerId) {
+      this.showNotification('Bitte öffne zuerst einen Server.');
+      return;
+    }
+    const options = this.getHostedServerOptionsFromUI();
+    if (!options.acceptEula) {
+      this.showNotification('Bitte akzeptiere zuerst die Minecraft Server EULA.');
+      return;
+    }
+    this.showLoading('Server wird neu gestartet...', { progress: 20 });
+    try {
+      const result = await window.electronAPI.restartHostedServer(options);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerDraftDirty = false;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server wurde neu gestartet.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async deleteActiveHostedServer() {
+    if (!this.activeHostedServerId) {
+      this.showNotification('Bitte öffne zuerst einen Server.');
+      return;
+    }
+    const activeServer = this.hostedServerStatus?.activeServer || {};
+    const serverName = activeServer.name || document.getElementById('hosted-server-name-input')?.value.trim() || 'Server';
+    const confirmed = await this.showConfirm({
+      title: 'Server löschen',
+      message: `"${serverName}" wirklich komplett löschen? Der Serverordner mit Welt und Mods wird entfernt.`,
+      confirmText: 'Löschen'
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.deleteHostedServer(this.activeHostedServerId);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.hostedServerDraftDirty = false;
+      this.hostedServerFormMode = 'hidden';
+      this.activeHostedServerId = result.activeServerId || '';
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server gelöscht.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async openHostedServerFolder() {
+    if (typeof window.electronAPI?.openHostedServerFolder !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.openHostedServerFolder();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.showNotification(`Server-Ordner geöffnet: ${result.path}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async copyHostedServerAddress() {
+    const address = this.hostedServerStatus?.address
+      || this.hostedServerStatus?.publicAddress
+      || this.hostedServerStatus?.lanAddress
+      || this.hostedServerStatus?.localAddress
+      || document.getElementById('hosted-server-address')?.textContent?.trim()
+      || '';
+    if (!address || address === 'Erstelle zuerst einen Servernamen.' || address === 'Portfreigabe erforderlich') {
+      this.showNotification('Keine Server-Adresse zum Kopieren.');
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(address);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = address;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      this.showNotification(`${address} kopiert.`);
+    } catch (error) {
+      this.showNotification('Kopieren fehlgeschlagen: ' + error.message);
+    }
+  }
+
+  async openHostedServerModsFolder() {
+    if (typeof window.electronAPI?.openHostedServerModsFolder !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.openHostedServerModsFolder();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.showNotification(`Mods-Ordner geöffnet: ${result.path}`);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async importHostedServerMods(event) {
+    const input = event.target;
+    const files = Array.from(input?.files || []);
+    const filePaths = files
+      .map((file) => window.electronAPI.getPathForFile(file))
+      .filter(Boolean);
+    if (!filePaths.length) {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.importHostedServerMods(filePaths);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Mods hinzugefügt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      if (input) {
+        input.value = '';
+      }
+    }
+  }
+
+  async handleHostedServerModsClick(event) {
+    const button = event.target?.closest?.('[data-host-mod-action]');
+    if (!button) {
+      return;
+    }
+    const fileName = button.getAttribute('data-mod-file') || '';
+    const confirmed = await this.showConfirm({
+      title: 'Server-Mod entfernen',
+      message: `"${fileName}" aus diesem Server entfernen?`,
+      confirmText: 'Entfernen'
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.removeHostedServerMod(fileName);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Mod entfernt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async sendHostedServerCommand() {
+    if (typeof window.electronAPI?.sendHostedServerCommand !== 'function') {
+      this.showNotification('Konsolenbefehle sind in dieser Launcher-Version nicht verfügbar.');
+      return;
+    }
+    if (!this.activeHostedServerId) {
+      this.showNotification('Bitte öffne zuerst einen Server.');
+      return;
+    }
+    const input = document.getElementById('hosted-server-command-input');
+    const command = input?.value.trim() || '';
+    if (!command) {
+      this.showNotification('Bitte gib einen Befehl ein.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.sendHostedServerCommand(this.activeHostedServerId, command);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      if (input) {
+        input.value = '';
+      }
+      this.hostedServerStatus = result;
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Befehl gesendet.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async saveHostedServerFavorite() {
+    const status = this.hostedServerStatus || {};
+    const activeServer = status.activeServer || {};
+    const directHost = status.address || status.publicAddress || status.lanAddress || status.localAddress || `localhost:${activeServer.port || 25565}`;
+    try {
+      const result = await window.electronAPI.addServerFavorite({
+        name: activeServer.name || document.getElementById('hosted-server-name-input')?.value.trim() || 'Mein Server',
+        host: directHost
+      });
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.serverFavorites = result.servers || [];
+      this.renderServerFavorites();
+      this.renderStartServerList();
+      this.showNotification('Lokaler Server wurde als Favorit gespeichert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  renderStartServerList() {
+    const list = document.getElementById('start-server-list');
+    if (!list) {
+      return;
+    }
+    if (!this.serverFavorites.length) {
+      list.innerHTML = '<p class="start-server-empty">Keine Server-Favoriten</p>';
+      this.selectedDirectServerId = '';
+      return;
+    }
+    list.innerHTML = this.serverFavorites.map((server) => `
+      <button class="start-server-tile" type="button" data-server-id="${this.escapeHtml(server.id)}" title="${this.escapeHtml(server.name)}" ${this.minecraftLaunchState !== 'idle' ? 'disabled aria-disabled="true"' : 'aria-disabled="false"'}>
+        <span class="start-server-name">${this.escapeHtml(server.name)}</span>
+      </button>
+    `).join('');
+    const nextValue = this.serverFavorites.some((server) => server.id === this.selectedDirectServerId)
+      ? this.selectedDirectServerId
+      : '';
+    this.selectedDirectServerId = nextValue;
+    this.prepareMotionGroup(list, ':scope > *', 28);
+  }
+
+  async handleStartServerClick(event) {
+    const button = event.target?.closest?.('.start-server-tile');
+    if (!button) {
+      return;
+    }
+    if (this.minecraftLaunchState !== 'idle' || button.disabled) {
+      event.preventDefault();
+      return;
+    }
+    const serverId = button.getAttribute('data-server-id') || '';
+    this.selectedDirectServerId = serverId;
+    await this.launchMinecraft({ directJoin: true, serverId });
+  }
+
+  renderServerFavorites() {
+    const list = document.getElementById('servers-list');
+    const status = document.getElementById('servers-status');
+    if (status) {
+      status.textContent = this.serverFavorites.length
+        ? `${this.serverFavorites.length} Favorit${this.serverFavorites.length === 1 ? '' : 'en'} gespeichert.`
+        : 'Noch keine Server-Favoriten gespeichert.';
+    }
+    if (!list) {
+      return;
+    }
+    if (!this.serverFavorites.length) {
+      list.innerHTML = '<p class="mods-empty">Speichere einen Server, um ihn direkt starten zu können.</p>';
+      return;
+    }
+    list.innerHTML = this.serverFavorites.map((server) => `
+      <article class="server-favorite-card">
+        <div>
+          <h4>${this.escapeHtml(server.name)}</h4>
+          <p>${this.escapeHtml(server.host)}:${this.escapeHtml(server.port || 25565)}</p>
+        </div>
+        <div class="server-actions">
+          <button class="btn btn-primary" type="button" data-server-action="join" data-server-id="${this.escapeHtml(server.id)}">Beitreten</button>
+          ${server.official ? '' : `<button class="btn btn-secondary" type="button" data-server-action="delete" data-server-id="${this.escapeHtml(server.id)}" data-server-name="${this.escapeHtml(server.name)}">Löschen</button>`}
+        </div>
+      </article>
+    `).join('');
+    this.prepareMotionGroup(list, ':scope > *', 34);
+  }
+
+  async addServerFavorite() {
+    const nameInput = document.getElementById('server-name-input');
+    const hostInput = document.getElementById('server-host-input');
+    const host = hostInput?.value.trim() || '';
+    if (!host) {
+      this.showNotification('Bitte gib eine Server-Adresse ein.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.addServerFavorite({
+        name: nameInput?.value.trim() || '',
+        host
+      });
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.serverFavorites = result.servers || [];
+      if (nameInput) {
+        nameInput.value = '';
+      }
+      if (hostInput) {
+        hostInput.value = '';
+      }
+      this.renderServerFavorites();
+      this.renderStartServerList();
+      this.showNotification(result.message || 'Server gespeichert.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  }
+
+  async handleServerListClick(event) {
+    const button = event.target?.closest?.('[data-server-action]');
+    if (!button) {
+      return;
+    }
+    const action = button.getAttribute('data-server-action');
+    const serverId = button.getAttribute('data-server-id') || '';
+    if (action === 'join') {
+      this.selectedDirectServerId = serverId;
+      await this.launchMinecraft({ directJoin: true, serverId });
+      return;
+    }
+    if (action === 'delete') {
+      const serverName = button.getAttribute('data-server-name') || 'Server';
+      const confirmed = await this.showConfirm({
+        title: 'Server löschen',
+        message: `"${serverName}" wirklich aus den Favoriten entfernen?`,
+        confirmText: 'Löschen'
+      });
+      if (!confirmed) {
+        return;
+      }
+      try {
+        const result = await window.electronAPI.removeServerFavorite(serverId);
+        if (!result.success) {
+          this.showNotification('Fehler: ' + result.error);
+          return;
+        }
+        this.serverFavorites = result.servers || [];
+        this.renderServerFavorites();
+        this.renderStartServerList();
+        this.showNotification(result.message || 'Server entfernt.');
+      } catch (error) {
+        this.showNotification('Fehler: ' + error.message);
+      }
+    }
+  }
+
+  async openAccountSwitcher() {
+    this.switchSection('accounts');
+    await this.loadAccounts();
+    const firstAccountAction = document.querySelector('#accounts-list [data-account-action="switch"]:not([disabled])')
+      || document.getElementById('add-microsoft-account-btn')
+      || document.getElementById('offline-account-name-input');
+    firstAccountAction?.focus?.();
+  }
+
+  async loadAccounts({ render = true } = {}) {
+    if (typeof window.electronAPI?.getAccounts !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.getAccounts();
+      if (!result.success) {
+        return;
+      }
+      this.accountsConfig = result;
+      if (render) {
+        this.renderAccounts();
+      }
+      this.updateLoginScreenAccountUI();
+    } catch (error) {
+      console.error('Accounts error:', error);
+    }
+  }
+
+  renderAccounts() {
+    const list = document.getElementById('accounts-list');
+    const status = document.getElementById('accounts-status');
+    const accounts = this.accountsConfig?.accounts || [];
+    const activeAccountId = this.accountsConfig?.activeAccountId || '';
+    if (status) {
+      status.textContent = accounts.length
+        ? `${accounts.length} account${accounts.length === 1 ? '' : 's'} saved.`
+        : 'No accounts saved yet.';
+    }
+    if (!list) {
+      return;
+    }
+    if (!accounts.length) {
+      list.innerHTML = '<p class="mods-empty">Add a Microsoft or offline account.</p>';
+      return;
+    }
+    list.innerHTML = accounts.map((account) => {
+      const active = account.id === activeAccountId;
+      const source = String(account.loginSource || account.userType || '').toLowerCase().includes('offline')
+        ? 'Offline'
+        : 'Microsoft';
+      const email = account.email || (source === 'Offline' ? 'No email (offline account)' : 'Email unavailable');
+      return `
+        <article class="account-switch-card${active ? ' active' : ''}">
+          <div class="account-identity">
+            <div class="account-identity-heading">
+              <h4>${this.escapeHtml(account.username)}</h4>
+              <span class="account-email" title="${this.escapeHtml(email)}">${this.escapeHtml(email)}</span>
+            </div>
+            <p class="account-meta">${this.escapeHtml(source)}${active ? ' | Active' : ''}</p>
+          </div>
+          <div class="account-actions">
+            <button class="btn btn-primary account-icon-button" type="button" data-account-action="switch" data-account-id="${this.escapeHtml(account.id)}" aria-label="${active ? 'Current account' : 'Use account'}" title="${active ? 'Current account' : 'Use account'}" ${active ? 'disabled' : ''}>
+              <svg class="account-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+            </button>
+            <button class="btn btn-secondary account-icon-button" type="button" data-account-action="delete" data-account-id="${this.escapeHtml(account.id)}" data-account-name="${this.escapeHtml(account.username)}" aria-label="Remove account" title="Remove account">
+              <svg class="account-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>
+            </button>
+          </div>
+        </article>
+      `;
+    }).join('');
+    this.prepareMotionGroup(list, ':scope > *', 34);
+  }
+
+  async addMicrosoftAccount() {
+    try {
+      const result = await window.electronAPI.login({ addAccount: true });
+      if (!result.success) {
+        this.showNotification('Sign-in failed: ' + result.error);
+        return;
+      }
+      this.user = setCurrentUser(result.user);
+      this.showMainScreen();
+      await this.loadGameData();
+      this.showNotification(result.warning || `${this.user.username} was added and activated.`);
+    } catch (error) {
+      this.showNotification('Error: ' + error.message);
+    }
+  }
+
+  async addOfflineAccount() {
+    const input = document.getElementById('offline-account-name-input');
+    const username = input?.value.trim() || '';
+    if (!username) {
+      this.showNotification('Please enter an offline player name.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.loginOffline(username);
+      if (!result.success) {
+        this.showNotification('Error: ' + result.error);
+        return;
+      }
+      this.user = setCurrentUser(result.user);
+      this.accountsConfig = {
+        activeAccountId: result.activeAccountId || '',
+        accounts: result.accounts || []
+      };
+      if (input) {
+        input.value = '';
+      }
+      this.renderAccounts();
+      this.updateUsernameDisplays();
+      this.showNotification(result.warning || `${this.user.username} was added and activated.`);
+    } catch (error) {
+      this.showNotification('Error: ' + error.message);
+    }
+  }
+
+  async handleAccountsListClick(event) {
+    const button = event.target?.closest?.('[data-account-action]');
+    if (!button) {
+      return;
+    }
+    const action = button.getAttribute('data-account-action');
+    const accountId = button.getAttribute('data-account-id') || '';
+    if (action === 'switch') {
+      this.showLoading('Switching account...');
+      try {
+        const result = await window.electronAPI.switchAccount(accountId);
+        if (!result.success) {
+          this.showNotification('Error: ' + result.error);
+          return;
+        }
+        this.user = setCurrentUser(result.user);
+        this.accountsConfig = {
+          activeAccountId: result.activeAccountId || '',
+          accounts: result.accounts || []
+        };
+        this.updateUsernameDisplays();
+        this.renderAccounts();
+        await this.loadSkinConfig();
+        await this.loadCapeConfig();
+        this.showNotification(result.message || `${this.user.username} is active.`);
+      } catch (error) {
+        this.showNotification('Error: ' + error.message);
+      } finally {
+        this.hideLoading();
+      }
+      return;
+    }
+    if (action === 'delete') {
+      const accountName = button.getAttribute('data-account-name') || 'Account';
+      const confirmed = await this.showConfirm({
+        title: 'Remove account',
+        message: `Remove "${accountName}" from the account list?`,
+        confirmText: 'Remove'
+      });
+      if (!confirmed) {
+        return;
+      }
+      try {
+        const result = await window.electronAPI.removeAccount(accountId);
+        if (!result.success) {
+          this.showNotification('Error: ' + result.error);
+          return;
+        }
+        this.accountsConfig = {
+          activeAccountId: result.activeAccountId || '',
+          accounts: result.accounts || []
+        };
+        if (result.removedActive) {
+          this.user = setCurrentUser(result.user || null);
+          if (this.user) {
+            this.showMainScreen();
+            this.updateUsernameDisplays();
+            await this.loadSkinConfig();
+            await this.loadCapeConfig();
+          } else {
+            this.showLoginScreen();
+          }
+        } else if (Object.prototype.hasOwnProperty.call(result, 'user') && result.user) {
+          this.user = setCurrentUser(result.user);
+          this.updateUsernameDisplays();
+        } else {
+          await this.loadUserInfo();
+        }
+        this.renderAccounts();
+        this.showNotification(result.message || 'Account removed.');
+      } catch (error) {
+        this.showNotification('Error: ' + error.message);
+      }
+    }
+  }
+
+  getActivePack() {
+    const activePackId = this.packsConfig?.activePackId || this.launcherStatus?.activePackId || '';
+    const packs = this.packsConfig?.packs || [];
+    const pack = packs.find((entry) => entry.id === activePackId);
+    if (pack) {
+      return pack;
+    }
+
+    if (!activePackId) {
+      return null;
+    }
+
+    return {
+      id: activePackId,
+      name: this.launcherStatus?.activePackName || activePackId
+    };
+  }
+
+  getCurrentContextLabel() {
+    const activePack = this.getActivePack();
+    return activePack ? `Profil ${activePack.name}` : 'Launcher-Standard';
+  }
+
+  getActiveContextVersionId() {
+    const activePack = this.getActivePack();
+    return String(activePack?.versionId || this.selectedVersionId || this.launcherStatus?.selectedMinecraftVersion || '').trim();
+  }
+
+  getStandardAvailableVersions() {
+    return (this.availableVersions || []).filter((version) => version?.standardSupported === true);
+  }
+
+  getSupportedMinecraftVersionsLabel() {
+    return (this.supportedMinecraftVersions || []).join(', ');
+  }
+
+  getContextAvailableVersions() {
+    return this.getActivePack()
+      ? (this.availableVersions || [])
+      : this.getStandardAvailableVersions();
+  }
+
+  getProfileAvailableVersions() {
+    return (this.availableVersions || []).filter((version) => version?.profileSupported !== false);
+  }
+
+  getModrinthVersionFilterId() {
+    const selectEl = document.getElementById('modrinth-version-filter');
+    return String(selectEl?.value || this.modrinthVersionFilterId || '').trim();
+  }
+
+  getModrinthVersionFilterDisplayName() {
+    const versionId = this.getModrinthVersionFilterId();
+    return versionId ? this.getVersionDisplayName(versionId) : '';
+  }
+
+  getActiveModrinthPackTargetVersionId() {
+    const versions = this.getProfileAvailableVersions();
+    const currentFilterId = this.getModrinthVersionFilterId();
+    if (versions.some((version) => version.id === currentFilterId)) {
+      return currentFilterId;
+    }
+
+    return '';
+  }
+
+  getActiveModrinthPackSearchTarget() {
+    const versionId = this.getActiveModrinthPackTargetVersionId();
+    return {
+      packId: '',
+      packName: '',
+      versionId,
+      minecraftVersion: this.getVersionDisplayName(versionId)
+    };
+  }
+
+  getActiveModrinthTarget() {
+    const activePack = this.getActivePack();
+    return {
+      packId: activePack?.id || '',
+      packName: activePack?.name || '',
+      versionId: this.getActiveContextVersionId()
+    };
+  }
+
+  updatePackContextUI() {
+    const activePack = this.getActivePack();
+    const versionLabel = this.getSelectedVersionDisplayName();
+    const versionText = versionLabel ? `Fabric ${versionLabel}` : 'keine Fabric-Version';
+    const typeConfig = this.getModrinthTypeConfig();
+
+    const modsTitleEl = document.getElementById('mods-section-title');
+    if (modsTitleEl) {
+      modsTitleEl.textContent = activePack
+        ? `Mods in ${activePack.name}`
+        : 'Mods für diese Version';
+    }
+
+    const modsContextEl = document.getElementById('mods-context-label');
+    if (modsContextEl) {
+      modsContextEl.textContent = activePack
+        ? `${activePack.name} nutzt ${versionText}. Alle prüfen korrigiert die verwalteten Mods in diesem Profil.`
+        : `Launcher-Standard nutzt ${versionText}. Alle prüfen korrigiert die verwalteten Mods im Standard-Mods-Ordner.`;
+    }
+
+    const modrinthContextEl = document.getElementById('modrinth-context-label');
+    if (modrinthContextEl) {
+      if (typeConfig.value === 'mod') {
+        modrinthContextEl.textContent = activePack
+          ? `Neue Mods werden direkt in ${activePack.name} installiert.`
+          : 'Neue Mods werden in den Launcher-Standard installiert.';
+      } else if (typeConfig.value === 'modpack') {
+        modrinthContextEl.textContent = 'Modpacks werden in ein vorhandenes oder neues Profil importiert.';
+      } else {
+        modrinthContextEl.textContent = typeConfig.value === 'shader'
+        ? 'Neue Shader werden im shaderpacks-Ordner des aktiven Profils gespeichert.'
+        : 'Nur passende Ressourcenpakete werden im resourcepacks-Ordner des aktiven Profils gespeichert.';
+      }
+    }
+
+    const packsStatusEl = document.getElementById('packs-status');

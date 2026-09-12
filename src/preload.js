@@ -3,6 +3,9 @@
 contextBridge.exposeInMainWorld('electronAPI', {
   // User Management
   getUserInfo: () => ipcRenderer.invoke('get-user-info'),
+  getMyAdminCapabilities: () => ipcRenderer.invoke('get-my-admin-capabilities'),
+  getAdminPlayers: () => ipcRenderer.invoke('get-admin-players'),
+  setAdminPlayerPermission: (uuid, permission, enabled) => ipcRenderer.invoke('set-admin-player-permission', uuid, permission, enabled === true),
   setAnonymousPresence: (active) => ipcRenderer.invoke('set-anonymous-presence', active === true),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
@@ -34,6 +37,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   configureSwisscomPortForwarding: (options) => ipcRenderer.invoke('configure-swisscom-port-forwarding', options),
   checkAppUpdates: () => ipcRenderer.invoke('check-app-updates'),
   installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
+  getAutomaticUpdatesEnabled: () => ipcRenderer.invoke('get-automatic-updates-enabled'),
+  setAutomaticUpdatesEnabled: (enabled) => ipcRenderer.invoke('set-automatic-updates-enabled', enabled === true),
   checkServiceHealth: () => ipcRenderer.invoke('check-service-health'),
 
   // Minecraft & Fabric
@@ -78,6 +83,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreHostedServerBackup: (fileName) => ipcRenderer.invoke('restore-hosted-server-backup', fileName),
   getPacks: () => ipcRenderer.invoke('get-packs'),
   createPack: (name, versionId) => ipcRenderer.invoke('create-pack', name, versionId),
+  duplicatePack: (packId) => ipcRenderer.invoke('duplicate-pack', packId),
   setActivePack: (packId) => ipcRenderer.invoke('set-active-pack', packId),
   deletePack: (packId) => ipcRenderer.invoke('delete-pack', packId),
   copyProfileSettings: (packId) => ipcRenderer.invoke('copy-profile-settings', packId),
@@ -87,13 +93,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMods: () => ipcRenderer.invoke('get-mods'),
   getModsWithoutSync: () => ipcRenderer.invoke('get-mods-without-sync'),
   getInstalledModProjectIds: (versionId = '') => ipcRenderer.invoke('get-installed-mod-project-ids', versionId),
-  searchModrinthMods: (query, versionId, projectType, offset = 0, limit = 100, forceRefresh = false) => ipcRenderer.invoke('search-modrinth-mods', query, versionId, projectType, offset, limit, forceRefresh),
+  searchModrinthMods: (query, versionId, projectType, offset = 0, limit = 12, forceRefresh = false) => ipcRenderer.invoke('search-modrinth-mods', query, versionId, projectType, offset, limit, forceRefresh),
+  getModrinthProjectVersions: (projectId, minecraftVersion, projectType) => ipcRenderer.invoke('get-modrinth-project-versions', projectId, minecraftVersion, projectType),
   installModrinthMod: (project, target) => ipcRenderer.invoke('install-modrinth-mod', project, target),
   onModFolderChanged: (callback) => ipcRenderer.on('mod-folder-changed', (_event, payload) => callback(payload)),
   removeMod: (modId) => ipcRenderer.invoke('remove-mod', modId),
   removeIncompatibleMods: () => ipcRenderer.invoke('remove-incompatible-mods'),
   refreshMod: (modId) => ipcRenderer.invoke('refresh-mod', modId),
   setModEnabled: (modId, enabled) => ipcRenderer.invoke('set-mod-enabled', modId, enabled),
+  setModAlias: (modId, alias) => ipcRenderer.invoke('set-mod-alias', modId, alias),
   importDroppedMods: (filePaths, options = {}) => ipcRenderer.invoke('import-dropped-mods', filePaths, options),
   getPathForFile: (file) => {
     if (webUtils?.getPathForFile) {
@@ -102,6 +110,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return file?.path || '';
   },
   getSkinConfig: () => ipcRenderer.invoke('get-skin-config'),
+  getCapeConfig: () => ipcRenderer.invoke('get-cape-config'),
+  saveCustomCape: (dataUrl, name, useAsElytra = false, capeId = '') => ipcRenderer.invoke('save-custom-cape', dataUrl, name, useAsElytra, capeId),
+  setActiveCape: (capeId = '') => ipcRenderer.invoke('set-active-cape', capeId),
+  deleteCustomCape: (capeId) => ipcRenderer.invoke('delete-custom-cape', capeId),
   chooseSkinFile: () => ipcRenderer.invoke('choose-skin-file'),
   clearSkinFile: () => ipcRenderer.invoke('clear-skin-file'),
   setActiveSkin: (skinId) => ipcRenderer.invoke('set-active-skin', skinId),
@@ -109,6 +121,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSkinVariant: (skinId, variant) => ipcRenderer.invoke('set-skin-variant', skinId, variant),
   searchOnlineSkins: (query) => ipcRenderer.invoke('search-online-skins', query),
   downloadOnlineSkin: (onlineSkin) => ipcRenderer.invoke('download-online-skin', onlineSkin),
+  getDatapacks: () => ipcRenderer.invoke('get-datapacks'),
+  installDatapack: (worldId = '') => ipcRenderer.invoke('install-datapack', worldId),
+  installModrinthDatapack: (project, worldId) => ipcRenderer.invoke('install-modrinth-datapack', project, worldId),
+  getModrinthDatapackWorlds: (project) => ipcRenderer.invoke('get-modrinth-datapack-worlds', project),
+  createWorldWithDatapack: (project, options) => ipcRenderer.invoke('create-world-with-datapack', project, options),
+  removeDatapack: (worldId, fileName) => ipcRenderer.invoke('remove-datapack', worldId, fileName),
+  openContentFolder: (contentType, worldId = '') => ipcRenderer.invoke('open-content-folder', contentType, worldId),
   loadModsFolder: () => ipcRenderer.invoke('load-mods-folder'),
   updateAllMods: () => ipcRenderer.invoke('update-all-mods'),
   cleanupNumberedAndDuplicateMods: () => ipcRenderer.invoke('cleanup-numbered-and-duplicate-mods'),
@@ -121,5 +140,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWindowStateChanged: (callback) => ipcRenderer.on('window-state-changed', (_event, state) => callback(state)),
   onWindowGroupStateChanged: (callback) => ipcRenderer.on('window-group-state-changed', (_event, state) => callback(state)),
   onLauncherAppUpdateState: (callback) => ipcRenderer.on('launcher-app-update-state', (_event, state) => callback(state)),
+  onAdminPermissionsChanged: (callback) => ipcRenderer.on('admin-permissions-changed', (_event, state) => callback(state)),
   onGameEvent: (channel, callback) => ipcRenderer.on(channel, callback)
 });

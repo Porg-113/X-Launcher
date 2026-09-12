@@ -1,0 +1,4567 @@
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const fileNameLength = buffer.readUInt16LE(cursor + 28);
+    const extraLength = buffer.readUInt16LE(cursor + 30);
+    const commentLength = buffer.readUInt16LE(cursor + 32);
+    const localHeaderOffset = buffer.readUInt32LE(cursor + 42);
+    const fileNameStart = cursor + 46;
+    const name = buffer.toString('utf8', fileNameStart, fileNameStart + fileNameLength).replace(/\\/g, '/');
+
+    entries.push({
+      name,
+      compressionMethod,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset
+    });
+
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return { buffer, entries };
+}
+
+function getZipCentralDirectoryEntries(zipPath) {
+  return getZipCentralDirectoryEntriesFromBuffer(fs.readFileSync(zipPath));
+}
+
+function readZipEntryBufferFromArchive(archive, entry) {
+  const buffer = archive?.buffer;
+  if (!buffer || !entry || entry.localHeaderOffset + 30 > buffer.length) {
+    throw new Error('ZIP-Eintrag konnte nicht gelesen werden.');
+  }
+
+  const localHeaderOffset = entry.localHeaderOffset;
+  if (buffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+    throw new Error(`ZIP-Eintrag ${entry.name || ''} hat keinen gültigen lokalen Header.`);
+  }
+
+  const localFileNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
+  const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
+  const dataStart = localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+  const dataEnd = dataStart + entry.compressedSize;
+  if (dataStart > buffer.length || dataEnd > buffer.length) {
+    throw new Error(`ZIP-Eintrag ${entry.name || ''} ist unvollständig.`);
+  }
+
+  const compressedData = buffer.subarray(dataStart, dataEnd);
+  if (entry.compressionMethod === 0) {
+    return Buffer.from(compressedData);
+  }
+  if (entry.compressionMethod === 8) {
+    return zlib.inflateRawSync(compressedData);
+  }
+
+  throw new Error(`ZIP-Kompressionsmethode ${entry.compressionMethod} wird nicht unterstützt.`);
+}
+
+function readZipTextEntryFromBuffer(buffer, entryName) {
+  const normalizedEntryName = String(entryName || '').replace(/\\/g, '/');
+  if (!buffer || !normalizedEntryName) {
+    return '';
+  }
+
+  try {
+    const archive = getZipCentralDirectoryEntriesFromBuffer(buffer);
+    const entry = archive.entries.find((candidate) => candidate.name === normalizedEntryName);
+    return entry ? readZipEntryBufferFromArchive(archive, entry).toString('utf8') : '';
+  } catch (_error) {
+    return '';
+  }
+}
+
+function bufferHasFabricModManifest(buffer) {
+  try {
+    const manifestText = readZipTextEntryFromBuffer(buffer, 'fabric.mod.json');
+    if (!manifestText) {
+      return false;
+    }
+
+    const manifest = JSON.parse(manifestText);
+    return Boolean(manifest && typeof manifest === 'object' && String(manifest.id || '').trim());
+  } catch (_error) {
+    return false;
+  }
+}
+
+function normalizeZipRelativePath(entryName) {
+  const normalized = String(entryName || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+  if (!normalized
+      || path.isAbsolute(normalized)
+      || normalized.split('/').some((segment) => !segment || segment === '..')) {
+    return '';
+  }
+
+  return normalized;
+}
+
+function isJarFileCorrupted(jarPath) {
+  try {
+    if (!fs.existsSync(jarPath)) {
+      return false;
+    }
+
+    const buffer = fs.readFileSync(jarPath);
+    if (buffer.length < 22) {
+      return true;
+    }
+
+    const minimumEndRecordSize = 22;
+    const searchStart = Math.max(0, buffer.length - 0xffff - minimumEndRecordSize);
+    for (let offset = buffer.length - minimumEndRecordSize; offset >= searchStart; offset -= 1) {
+      if (buffer.readUInt32LE(offset) === 0x06054b50) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch (_error) {
+    return true;
+  }
+}
+
+function readFabricModManifest(jarPath) {
+  try {
+    const manifestText = readZipTextEntry(jarPath, 'fabric.mod.json');
+    if (!manifestText) {
+      return null;
+    }
+
+    const manifest = JSON.parse(manifestText);
+    return manifest && typeof manifest === 'object' ? { manifest, manifestText } : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function formatFabricDependencyRequirement(requirement) {
+  if (typeof requirement === 'string') {
+    return requirement.trim();
+  }
+
+  if (Array.isArray(requirement)) {
+    return requirement.map(formatFabricDependencyRequirement).filter(Boolean).join(' oder ');
+  }
+
+  if (requirement && typeof requirement === 'object') {
+    return Object.values(requirement).map(formatFabricDependencyRequirement).filter(Boolean).join(' ');
+  }
+
+  return '';
+}
+
+function normalizeMinecraftRequirementVersionName(versionName) {
+  return String(versionName || '')
+    .trim()
+    .replace(/^v(?=\d)/iu, '')
+    .replace(/-$/u, '');
+}
+
+function compareMinecraftRequirementVersions(leftVersion, rightVersion) {
+  const normalizedLeftVersion = normalizeMinecraftRequirementVersionName(leftVersion);
+  const normalizedRightVersion = normalizeMinecraftRequirementVersionName(rightVersion);
+  const leftParts = getMinecraftVersionSortParts(normalizedLeftVersion);
+  const rightParts = getMinecraftVersionSortParts(normalizedRightVersion);
+  const partCount = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < partCount; index += 1) {
+    const diff = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (diff) {
+      return diff;
+    }
+  }
+
+  return normalizedLeftVersion.localeCompare(normalizedRightVersion, 'de', {
+    numeric: true,
+    sensitivity: 'base'
+  });
+}
+
+function getVersionRequirementPrefix(versionName, partCount) {
+  return normalizeMinecraftRequirementVersionName(versionName)
+    .split('.')
+    .slice(0, partCount)
+    .join('.');
+}
+
+function minecraftVersionMatchesWildcard(requirement, minecraftVersion) {
+  const requirementParts = String(requirement || '').trim().split('.');
+  const versionParts = String(minecraftVersion || '').trim().split('.');
+
+  return requirementParts.every((part, index) => {
+    const normalizedPart = part.toLowerCase();
+    return normalizedPart === '*' || normalizedPart === 'x' || normalizedPart === versionParts[index];
+  });
+}
+
+function minecraftVersionSatisfiesToken(token, minecraftVersion) {
+  const normalizedToken = String(token || '').trim();
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedToken || normalizedToken === '*' || normalizedToken.toLowerCase() === 'x') {
+    return true;
+  }
+
+  const mavenRangeMatch = normalizedToken.match(/^([\[(])\s*([^,\])]*?)\s*,\s*([^\])]*)\s*([\])])$/u);
+  if (mavenRangeMatch) {
+    const [, lowerMode, lowerVersion, upperVersion, upperMode] = mavenRangeMatch;
+    const lower = String(lowerVersion || '').trim();
+    const upper = String(upperVersion || '').trim();
+    if (lower) {
+      const lowerDiff = compareMinecraftRequirementVersions(normalizedMinecraftVersion, lower);
+      if (lowerMode === '[' ? lowerDiff < 0 : lowerDiff <= 0) {
+        return false;
+      }
+    }
+    if (upper) {
+      const upperDiff = compareMinecraftRequirementVersions(normalizedMinecraftVersion, upper);
+      if (upperMode === ']' ? upperDiff > 0 : upperDiff >= 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const tildeMatch = normalizedToken.match(/^~\s*v?(.+)$/u);
+  if (tildeMatch) {
+    const baseVersion = tildeMatch[1].trim();
+    const lowerDiff = compareMinecraftRequirementVersions(normalizedMinecraftVersion, baseVersion);
+    const requiredPrefix = getVersionRequirementPrefix(baseVersion, 2);
+    return lowerDiff >= 0
+      && (!requiredPrefix || getVersionRequirementPrefix(normalizedMinecraftVersion, 2) === requiredPrefix);
+  }
+
+  const caretMatch = normalizedToken.match(/^\^\s*v?(.+)$/u);
+  if (caretMatch) {
+    const baseVersion = caretMatch[1].trim();
+    const lowerDiff = compareMinecraftRequirementVersions(normalizedMinecraftVersion, baseVersion);
+    const requiredPrefix = getVersionRequirementPrefix(baseVersion, 1);
+    return lowerDiff >= 0
+      && (!requiredPrefix || getVersionRequirementPrefix(normalizedMinecraftVersion, 1) === requiredPrefix);
+  }
+
+  if (/[.*xX]/u.test(normalizedToken)) {
+    return minecraftVersionMatchesWildcard(normalizedToken.replace(/^=+/, ''), normalizedMinecraftVersion);
+  }
+
+  const comparatorMatch = normalizedToken.match(/^(>=|<=|>|<|=|==)?\s*v?(.+)$/u);
+  if (!comparatorMatch) {
+    return false;
+  }
+
+  const operator = comparatorMatch[1] || '=';
+  const requiredVersion = String(comparatorMatch[2] || '').trim();
+  const diff = compareMinecraftRequirementVersions(normalizedMinecraftVersion, requiredVersion);
+
+  if (operator === '>' || operator === '>=') {
+    return operator === '>' ? diff > 0 : diff >= 0;
+  }
+  if (operator === '<' || operator === '<=') {
+    return operator === '<' ? diff < 0 : diff <= 0;
+  }
+
+  return diff === 0;
+}
+
+function minecraftVersionSatisfiesRequirement(requirement, minecraftVersion) {
+  if (!requirement) {
+    return true;
+  }
+
+  if (Array.isArray(requirement)) {
+    return requirement.some((entry) => minecraftVersionSatisfiesRequirement(entry, minecraftVersion));
+  }
+
+  if (requirement && typeof requirement === 'object') {
+    const values = Object.values(requirement).filter(Boolean);
+    return values.length === 0
+      || values.some((entry) => minecraftVersionSatisfiesRequirement(entry, minecraftVersion));
+  }
+
+  const expression = String(requirement || '').trim();
+  if (!expression || expression === '*') {
+    return true;
+  }
+
+  // Fabric commonly serializes constraints as natural language, for example
+  // "1.11.2 or earlier". Normalize those forms before parsing operators.
+  const normalizedNaturalLanguage = expression
+    .replace(/\bor\s+earlier\b/giu, '<=')
+    .replace(/\bor\s+later\b/giu, '>=')
+    .replace(/\bor\s+newer\b/giu, '>=')
+    .replace(/\b(before|older\s+than)\b/giu, '<')
+    .replace(/\b(after|newer\s+than)\b/giu, '>')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+  return normalizedNaturalLanguage
+    .split(/\s*\|\|\s*/u)
+    .some((alternative) => {
+      const normalizedAlternative = alternative.trim();
+      if (/^[\[(].*[\])]$/u.test(normalizedAlternative)) {
+        return minecraftVersionSatisfiesToken(normalizedAlternative, minecraftVersion);
+      }
+
+      return normalizedAlternative
+        .replace(/,/gu, ' ')
+        .split(/\s+/u)
+        .filter(Boolean)
+        .every((token) => minecraftVersionSatisfiesToken(token, minecraftVersion));
+    });
+}
+
+function getJarMinecraftCompatibility(jarPath, minecraftVersion) {
+  const manifestInfo = readFabricModManifest(jarPath);
+  if (!manifestInfo?.manifest) {
+    return {
+      compatible: true,
+      requirement: '',
+      reasonType: '',
+      modName: path.basename(jarPath)
+    };
+  }
+
+  const manifest = manifestInfo.manifest;
+  const requiredMinecraft = manifest?.depends?.minecraft;
+  const brokenMinecraft = manifest?.breaks?.minecraft;
+  const modName = String(manifest.name || manifest.id || path.basename(jarPath)).trim();
+
+  if (requiredMinecraft && !minecraftVersionSatisfiesRequirement(requiredMinecraft, minecraftVersion)) {
+    return {
+      compatible: false,
+      requirement: formatFabricDependencyRequirement(requiredMinecraft),
+      reasonType: 'depends',
+      modName
+    };
+  }
+
+  if (brokenMinecraft && minecraftVersionSatisfiesRequirement(brokenMinecraft, minecraftVersion)) {
+    return {
+      compatible: false,
+      requirement: `nicht ${formatFabricDependencyRequirement(brokenMinecraft)}`,
+      reasonType: 'breaks',
+      modName
+    };
+  }
+
+  return {
+    compatible: true,
+    requirement: formatFabricDependencyRequirement(requiredMinecraft),
+    reasonType: '',
+    modName
+  };
+}
+
+function isJarCompatibleWithMinecraft(jarPath, minecraftVersion) {
+  return getJarMinecraftCompatibility(jarPath, minecraftVersion).compatible !== false;
+}
+
+function isGameVersionListDeclaredForMinecraft(gameVersions, minecraftVersion) {
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedMinecraftVersion || !Array.isArray(gameVersions)) {
+    return false;
+  }
+
+  const normalizedGameVersions = gameVersions
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+
+  return normalizedGameVersions.some((entry) => entry === normalizedMinecraftVersion)
+    || normalizedGameVersions.some((entry) => minecraftVersionSatisfiesRequirement(entry, normalizedMinecraftVersion));
+}
+
+function isManagedVersionDeclaredForMinecraft(versionEntry, minecraftVersion) {
+  const storedGameVersions = Array.isArray(versionEntry?.gameVersions)
+    ? versionEntry.gameVersions
+    : Array.isArray(versionEntry?.game_versions)
+      ? versionEntry.game_versions
+      : [];
+
+  return isGameVersionListDeclaredForMinecraft(storedGameVersions, minecraftVersion)
+    || textContainsExactMinecraftVersion([
+      versionEntry?.fileName,
+      versionEntry?.versionNumber,
+      versionEntry?.versionName
+    ].join(' '), minecraftVersion);
+}
+
+function getManagedJarMinecraftCompatibility(versionEntry, minecraftVersion) {
+  const libraryPath = String(versionEntry?.libraryPath || '').trim();
+  const jarCompatibility = getJarMinecraftCompatibility(libraryPath, minecraftVersion);
+  if (jarCompatibility.compatible !== false) {
+    return jarCompatibility;
+  }
+
+  if (jarCompatibility.reasonType === 'depends'
+      && isManagedVersionDeclaredForMinecraft(versionEntry, minecraftVersion)) {
+    return {
+      ...jarCompatibility,
+      compatible: true,
+      trustedModrinthGameVersions: true
+    };
+  }
+
+  return jarCompatibility;
+}
+
+function isManagedVersionJarCompatibleWithMinecraft(versionEntry, minecraftVersion) {
+  return getManagedJarMinecraftCompatibility(versionEntry, minecraftVersion).compatible !== false;
+}
+
+function collectStringValues(value, strings = []) {
+  if (typeof value === 'string') {
+    strings.push(value);
+    return strings;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectStringValues(item, strings);
+    }
+    return strings;
+  }
+
+  if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      strings.push(String(key));
+      collectStringValues(item, strings);
+    }
+  }
+
+  return strings;
+}
+
+function getLocalModFileNameSearchTerms(fileName) {
+  const parsedPath = path.parse(path.basename(String(fileName || '').trim()));
+  const baseName = String(parsedPath.name || '').trim();
+  if (!baseName) {
+    return [];
+  }
+
+  const withoutMinecraftTag = baseName.replace(/[-+_.](?:mc|minecraft)[-+_.]?\d+(?:\.\d+){1,3}.*$/iu, '');
+  const withoutLoaderSuffix = withoutMinecraftTag.replace(/[-+_.](?:fabric|forge|neoforge|quilt)(?:[-+_.].*)?$/iu, '');
+  const withoutVersionSuffix = withoutLoaderSuffix.replace(/[-+_.]v?\d+(?:\.\d+){1,4}(?:[-+_.].*)?$/iu, '');
+
+  return uniqueStrings([
+    withoutVersionSuffix,
+    withoutLoaderSuffix,
+    withoutMinecraftTag,
+    baseName,
+    withoutVersionSuffix.replace(/[-+_.]+/g, ' '),
+    withoutLoaderSuffix.replace(/[-+_.]+/g, ' ')
+  ]).filter((entry) => entry.length >= 2);
+}
+
+function getLocalModrinthProjectCandidates(manifest, manifestText = '', fileName = '') {
+  const candidates = [];
+  const addCandidate = (candidate) => {
+    const normalized = String(candidate || '')
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/^\/+|\/+$/g, '');
+    if (normalized && !candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+  };
+
+  const modrinthUrlPattern = /modrinth\.com\/(?:mod|plugin)\/([^/?#"'\\\s]+)/giu;
+  const searchableText = [
+    manifestText,
+    ...collectStringValues(manifest)
+  ].join('\n');
+  let match;
+  while ((match = modrinthUrlPattern.exec(searchableText)) !== null) {
+    addCandidate(match[1]);
+  }
+
+  const customModrinth = manifest?.custom?.modrinth;
+  if (customModrinth && typeof customModrinth === 'object') {
+    addCandidate(customModrinth.project_id || customModrinth.projectId || customModrinth.slug);
+  }
+
+  addCandidate(manifest?.id);
+  for (const term of getLocalModFileNameSearchTerms(fileName)) {
+    addCandidate(term);
+  }
+  return candidates;
+}
+
+function normalizeLocalModSearchText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function scoreLocalModrinthSearchHit(hit, manifest, candidates = []) {
+  const projectId = String(hit?.project_id || hit?.id || '').trim().toLowerCase();
+  const slug = String(hit?.slug || '').trim().toLowerCase();
+  const title = String(hit?.title || '').trim().toLowerCase();
+  const normalizedTitle = normalizeLocalModSearchText(title);
+  const normalizedSlug = normalizeLocalModSearchText(slug);
+  const normalizedProjectId = normalizeLocalModSearchText(projectId);
+  const normalizedCandidates = candidates
+    .map((candidate) => normalizeLocalModSearchText(candidate))
+    .filter(Boolean);
+  const manifestId = normalizeLocalModSearchText(manifest?.id);
+  const manifestName = normalizeLocalModSearchText(manifest?.name);
+
+  let score = 0;
+  for (const candidate of normalizedCandidates) {
+    if (candidate && (candidate === normalizedProjectId || candidate === normalizedSlug)) {
+      score += 100;
+    } else if (candidate && normalizedTitle === candidate) {
+      score += 80;
+    } else if (candidate && normalizedSlug && (normalizedSlug.includes(candidate) || candidate.includes(normalizedSlug))) {
+      score += 35;
+    } else if (candidate && normalizedTitle && (normalizedTitle.includes(candidate) || candidate.includes(normalizedTitle))) {
+      score += 25;
+    }
+  }
+
+  if (manifestId && (manifestId === normalizedSlug || manifestId === normalizedProjectId)) {
+    score += 80;
+  } else if (manifestId && normalizedSlug.includes(manifestId)) {
+    score += 30;
+  }
+
+  if (manifestName && manifestName === normalizedTitle) {
+    score += 80;
+  } else if (manifestName && (normalizedTitle.includes(manifestName) || manifestName.includes(normalizedTitle))) {
+    score += 30;
+  }
+
+  return score;
+}
+
+async function findModrinthProjectForLocalMod(manifest, manifestText = '', fileName = '') {
+  const candidates = getLocalModrinthProjectCandidates(manifest, manifestText, fileName);
+
+  for (const candidate of candidates) {
+    try {
+      const project = await fetchModrinthProject(candidate);
+      if (normalizeModrinthProjectType(project?.project_type || 'mod') === 'mod') {
+        return { project, candidates };
+      }
+    } catch (_error) {
+      // Try the next direct id/slug candidate.
+    }
+  }
+
+  const searchTerms = uniqueStrings([
+    ...candidates,
+    manifest?.name,
+    String(manifest?.id || '').replace(/[-_]+/g, ' '),
+    ...getLocalModFileNameSearchTerms(fileName)
+  ]).filter((entry) => entry.length >= 2);
+
+  for (const term of searchTerms) {
+    try {
+      const searchUrl = new URL(`${MODRINTH_API_BASE_URL}/search`);
+      searchUrl.searchParams.set('query', term);
+      searchUrl.searchParams.set('limit', '10');
+      searchUrl.searchParams.set('facets', JSON.stringify([
+        ['project_type:mod'],
+        ['categories:fabric']
+      ]));
+
+      const searchResponse = await fetchJson(searchUrl.toString(), {
+        headers: MODRINTH_API_HEADERS,
+        allowedHosts: new Set(['api.modrinth.com'])
+      });
+      const hits = Array.isArray(searchResponse?.hits) ? searchResponse.hits : [];
+      const normalizedTerm = term.trim().toLowerCase();
+      const exactHit = hits.find((hit) => {
+        const projectId = String(hit?.project_id || hit?.id || '').trim().toLowerCase();
+        const slug = String(hit?.slug || '').trim().toLowerCase();
+        const title = String(hit?.title || '').trim().toLowerCase();
+        return projectId === normalizedTerm || slug === normalizedTerm || title === normalizedTerm;
+      }) || null;
+      const rankedHits = hits
+        .map((hit) => ({
+          hit,
+          score: scoreLocalModrinthSearchHit(hit, manifest, candidates)
+        }))
+        .sort((left, right) => right.score - left.score);
+      const selectedHit = exactHit
+        || (rankedHits[0]?.score >= 60 ? rankedHits[0].hit : null)
+        || (hits.length === 1 ? hits[0] : null);
+      const projectId = String(selectedHit?.project_id || selectedHit?.id || selectedHit?.slug || '').trim();
+      if (!projectId) {
+        continue;
+      }
+
+      const project = await fetchModrinthProject(projectId);
+      if (normalizeModrinthProjectType(project?.project_type || 'mod') === 'mod') {
+        return { project, candidates };
+      }
+    } catch (_error) {
+      // Search is best-effort; unknown local jars are disabled instead of loaded.
+    }
+  }
+
+  return { project: null, candidates };
+}
+
+function findExistingManagedProjectIdForRemoteProject(state, remoteProject, candidates = []) {
+  const remoteId = String(remoteProject?.id || '').trim();
+  const remoteSlug = String(remoteProject?.slug || '').trim().toLowerCase();
+  const normalizedCandidates = new Set(
+    candidates.map((candidate) => String(candidate || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  for (const [projectId, project] of Object.entries(state.projects || {})) {
+    const normalizedProjectId = String(projectId || project?.projectId || '').trim().toLowerCase();
+    const normalizedSlug = String(project?.slug || '').trim().toLowerCase();
+
+    if ((remoteId && normalizedProjectId === remoteId.toLowerCase())
+        || (remoteSlug && normalizedSlug === remoteSlug)
+        || normalizedCandidates.has(normalizedProjectId)
+        || (normalizedSlug && normalizedCandidates.has(normalizedSlug))) {
+      return projectId;
+    }
+  }
+
+  return '';
+}
+
+function discardImportedLocalModFile(filePath, modContext) {
+  const isKnownModStoragePath = isPathInsideDirectory(modContext.modsDir, filePath)
+    || isPathInsideDirectory(getDisabledModsDir(modContext), filePath);
+  if (!filePath || !isKnownModStoragePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+
+  try {
+    fs.unlinkSync(filePath);
+    return filePath;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function isKeptLocalModFile(state, filePath, fileName = path.basename(filePath || '')) {
+  const keptEntries = normalizeKeptLocalModEntries(state?.keptLocalMods);
+  if (!keptEntries.length) {
+    return false;
+  }
+
+  const normalizedFileName = String(fileName || '').trim().toLowerCase();
+  let sha1 = '';
+  if (filePath && fs.existsSync(filePath)) {
+    try {
+      sha1 = getFileSha1(filePath).toLowerCase();
+    } catch (_error) {
+      sha1 = '';
+    }
+  }
+
+  return keptEntries.some((entry) => (
+    (entry.sha1 && sha1 && entry.sha1 === sha1)
+    || (entry.fileName && normalizedFileName && entry.fileName.toLowerCase() === normalizedFileName)
+  ));
+}
+
+function removeManagedProjectFilesFromState(state, modContext, projectId) {
+  const normalizedProjectId = String(projectId || '').trim();
+  if (!normalizedProjectId) {
+    return false;
+  }
+
+  let changed = false;
+  for (const entry of state.activeSync?.files || []) {
+    if (entry?.projectId !== normalizedProjectId || !entry.targetPath) {
+      continue;
+    }
+
+    if (isPathInsideDirectory(modContext.modsDir, entry.targetPath) && fs.existsSync(entry.targetPath)) {
+      try {
+        fs.unlinkSync(entry.targetPath);
+      } catch (_error) {
+        // Keep the exception even if stale cleanup fails.
+      }
+    }
+  }
+
+  if (state.projects?.[normalizedProjectId] && !isProtectedManagedProject(normalizedProjectId, state.projects[normalizedProjectId])) {
+    delete state.projects[normalizedProjectId];
+    changed = true;
+  }
+  const nextDisabledProjects = (state.disabledProjects || []).filter((entry) => entry !== normalizedProjectId);
+  const nextAutoDisabledProjects = (state.autoDisabledProjects || []).filter((entry) => entry !== normalizedProjectId);
+  const nextActiveFiles = (state.activeSync?.files || []).filter((entry) => entry?.projectId !== normalizedProjectId);
+  if (nextDisabledProjects.length !== (state.disabledProjects || []).length) {
+    state.disabledProjects = nextDisabledProjects;
+    changed = true;
+  }
+  if (nextAutoDisabledProjects.length !== (state.autoDisabledProjects || []).length) {
+    state.autoDisabledProjects = nextAutoDisabledProjects;
+    changed = true;
+  }
+  if (nextActiveFiles.length !== (state.activeSync?.files || []).length) {
+    state.activeSync = {
+      minecraftVersion: String(state.activeSync?.minecraftVersion || '').trim(),
+      files: nextActiveFiles
+    };
+    changed = true;
+  }
+  if (state.disabledProjectReasons?.[normalizedProjectId]) {
+    delete state.disabledProjectReasons[normalizedProjectId];
+    changed = true;
+  }
+
+  return changed;
+}
+
+async function rememberKeptLocalModException(modContext, filePath, sourceFileName = '') {
+  if (!filePath || !fs.existsSync(filePath) || !isModStoragePath(modContext, filePath)) {
+    return;
+  }
+
+  const fileName = path.basename(filePath);
+  let sha1 = '';
+  try {
+    sha1 = getFileSha1(filePath).toLowerCase();
+  } catch (_error) {
+    sha1 = '';
+  }
+
+  let projectId = '';
+  try {
+    const manifestInfo = readFabricModManifest(filePath);
+    if (manifestInfo?.manifest) {
+      const { project: remoteProject, candidates } = await findModrinthProjectForLocalMod(
+        manifestInfo.manifest,
+        manifestInfo.manifestText,
+        fileName
+      );
+      if (remoteProject) {
+        const stateForMatch = readModsState(modContext);
+        projectId = findExistingManagedProjectIdForRemoteProject(stateForMatch, remoteProject, candidates)
+          || String(remoteProject.id || remoteProject.slug || '').trim();
+      }
+    }
+  } catch (_error) {
+    projectId = '';
+  }
+
+  const state = readModsState(modContext);
+  state.keptLocalMods = normalizeKeptLocalModEntries([
+    ...(state.keptLocalMods || []),
+    {
+      fileName,
+      sha1,
+      projectId,
+      source: sourceFileName || fileName,
+      keptAt: new Date().toISOString()
+    }
+  ]);
+  if (projectId) {
+    state.keptLocalProjectIds = uniqueStrings([...(state.keptLocalProjectIds || []), projectId]);
+    state.ignoredDefaultProjects = uniqueStrings([...(state.ignoredDefaultProjects || []), projectId]);
+    removeManagedProjectFilesFromState(state, modContext, projectId);
+  }
+  writeModsState(state, modContext);
+}
+
+async function importStandardLocalModrinthMods(modContext, minecraftVersion) {
+  if (!minecraftVersion || !fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  let state = readModsState(modContext);
+  const warnings = [];
+  const activeManagedPaths = new Set(
+    (state.activeSync?.files || [])
+      .map((entry) => String(entry?.targetPath || '').trim())
+      .filter(Boolean)
+      .map((targetPath) => path.resolve(targetPath))
+  );
+  let changed = false;
+
+  const importDirs = uniqueStrings([
+    modContext.modsDir,
+    getDisabledModsDir(modContext)
+  ]).filter((directory) => fs.existsSync(directory));
+
+  for (const importDir of importDirs) {
+    for (const fileName of fs.readdirSync(importDir).filter((entry) => entry.toLowerCase().endsWith('.jar'))) {
+      const filePath = path.join(importDir, fileName);
+      const isActiveModsDir = getComparablePath(importDir) === getComparablePath(modContext.modsDir);
+      if (!isPathInsideDirectory(importDir, filePath) || (isActiveModsDir && activeManagedPaths.has(path.resolve(filePath)))) {
+        continue;
+      }
+      if (isKeptLocalModFile(state, filePath, fileName)) {
+        continue;
+      }
+
+      const manifestInfo = readFabricModManifest(filePath);
+      if (!manifestInfo?.manifest) {
+        continue;
+      }
+
+      const { project: remoteProject, candidates } = await findModrinthProjectForLocalMod(
+        manifestInfo.manifest,
+        manifestInfo.manifestText,
+        fileName
+      );
+
+      if (!remoteProject) {
+        if (isActiveModsDir) {
+          warnings.push(`${fileName}: Konnte nicht automatisch als Modrinth-Mod erkannt werden und bleibt aktiv, solange die lokale JAR zu Minecraft ${minecraftVersion} passt.`);
+        } else {
+          warnings.push(`${fileName}: Konnte nicht automatisch passend zur Minecraft-Version gefunden werden.`);
+        }
+        continue;
+      }
+
+      state = readModsState(modContext);
+      const projectId = String(remoteProject.id || remoteProject.slug || '').trim();
+      if (!projectId) {
+        continue;
+      }
+
+      const existingProjectId = findExistingManagedProjectIdForRemoteProject(state, remoteProject, candidates);
+      const targetProjectId = existingProjectId || projectId;
+      if ((state.keptLocalProjectIds || []).includes(targetProjectId)) {
+        continue;
+      }
+      const currentProject = state.projects[targetProjectId] || {};
+      state.projects[targetProjectId] = {
+        projectId: targetProjectId,
+        slug: String(remoteProject.slug || currentProject.slug || manifestInfo.manifest.id || '').trim(),
+        title: String(remoteProject.title || remoteProject.name || currentProject.title || manifestInfo.manifest.name || targetProjectId).trim(),
+        description: String(remoteProject.description || currentProject.description || manifestInfo.manifest.description || '').trim(),
+        iconUrl: String(remoteProject.icon_url || currentProject.iconUrl || '').trim(),
+        clientSide: String(remoteProject.client_side || currentProject.clientSide || '').trim(),
+        serverSide: String(remoteProject.server_side || currentProject.serverSide || '').trim(),
+        versions: currentProject.versions || {}
+      };
+
+      const archivedPath = discardImportedLocalModFile(filePath, modContext);
+      if (archivedPath) {
+        warnings.push(`${state.projects[targetProjectId].title}: Lokale JAR wurde übernommen und wird jetzt passend zur Minecraft-Version verwaltet.`);
+      } else if (fs.existsSync(filePath)) {
+        warnings.push(`${fileName}: Konnte nicht aus dem Mods-Ordner verschoben werden.`);
+      }
+
+      changed = true;
+      writeModsState(state, modContext);
+    }
+  }
+
+  if (changed) {
+    writeModsState(state, modContext);
+  }
+
+  return warnings;
+}
+
+async function repairLocalModFileWithModrinthBeforeDisable(filePath, modContext, minecraftVersion, options = {}) {
+  const fileName = path.basename(String(filePath || ''));
+  const warnings = Array.isArray(options.warnings) ? options.warnings : [];
+  const reason = String(options.reason || 'automatic-disable-preflight').trim();
+  const isKnownModStoragePath = isPathInsideDirectory(modContext.modsDir, filePath)
+    || isPathInsideDirectory(getDisabledModsDir(modContext), filePath);
+  if (!filePath || !fileName.toLowerCase().endsWith('.jar') || !isKnownModStoragePath || !fs.existsSync(filePath)) {
+    return { repaired: false, reason: 'file is not a safe local mod JAR' };
+  }
+
+  if (isJarFileCorrupted(filePath)) {
+    return { repaired: false, reason: 'local JAR is corrupted and cannot be identified safely' };
+  }
+
+  let remoteProject = null;
+  let candidates = [];
+  try {
+    const sha1 = getFileSha1(filePath);
+    const versionData = await fetchModrinthVersionByFileHash(sha1);
+    const projectId = String(versionData?.project_id || '').trim();
+    if (projectId) {
+      const project = await fetchModrinthProject(projectId, { forceRefresh: true });
+      if (normalizeModrinthProjectType(project?.project_type || 'mod') === 'mod') {
+        remoteProject = project;
+        candidates = [projectId, project?.slug].filter(Boolean);
+      }
+    }
+  } catch (_error) {
+    remoteProject = null;
+  }
+
+  const manifestInfo = readFabricModManifest(filePath);
+  if (!remoteProject && manifestInfo?.manifest) {
+    try {
+      const found = await findModrinthProjectForLocalMod(
+        manifestInfo.manifest,
+        manifestInfo.manifestText,
+        fileName
+      );
+      remoteProject = found.project || null;
+      candidates = found.candidates || [];
+    } catch (_error) {
+      remoteProject = null;
+    }
+  }
+
+  if (!remoteProject) {
+    logger.warn('Local mod was not disabled until Modrinth lookup was attempted', {
+      fileName,
+      minecraftVersion,
+      reason,
+      result: 'no Modrinth project found'
+    });
+    return { repaired: false, reason: 'no Modrinth project found' };
+  }
+
+  let state = readModsState(modContext);
+  const remoteProjectId = String(remoteProject.id || remoteProject.project_id || remoteProject.slug || '').trim();
+  const targetProjectId = findExistingManagedProjectIdForRemoteProject(state, remoteProject, candidates) || remoteProjectId;
+  if (!targetProjectId) {
+    return { repaired: false, reason: 'Modrinth project id could not be resolved' };
+  }
+
+  const currentProject = state.projects[targetProjectId] || {};
+  state.projects[targetProjectId] = {
+    projectId: targetProjectId,
+    slug: String(remoteProject.slug || currentProject.slug || manifestInfo?.manifest?.id || '').trim(),
+    title: String(remoteProject.title || remoteProject.name || currentProject.title || manifestInfo?.manifest?.name || targetProjectId).trim(),
+    description: String(remoteProject.description || currentProject.description || manifestInfo?.manifest?.description || '').trim(),
+    iconUrl: String(remoteProject.icon_url || currentProject.iconUrl || '').trim(),
+    clientSide: String(remoteProject.client_side || currentProject.clientSide || '').trim(),
+    serverSide: String(remoteProject.server_side || currentProject.serverSide || '').trim(),
+    versions: currentProject.versions || {}
+  };
+  state.disabledProjects = (state.disabledProjects || []).filter((entry) => entry !== targetProjectId);
+  state.autoDisabledProjects = (state.autoDisabledProjects || []).filter((entry) => entry !== targetProjectId);
+  if (state.disabledProjectReasons) {
+    delete state.disabledProjectReasons[targetProjectId];
+  }
+  writeModsState(state, modContext);
+
+  try {
+    const installResult = await installManagedProjectVersion(state.projects[targetProjectId], minecraftVersion, {
+      forceRefresh: true,
+      visitedProjects: new Set(),
+      modContext
+    });
+    const archivedPath = discardImportedLocalModFile(filePath, modContext);
+    warnings.push(`${state.projects[targetProjectId].title || targetProjectId}: Lokale Mod wurde vor dem Deaktivieren auf Modrinth gefunden und passend ersetzt.`);
+    warnings.push(...(installResult.warnings || []));
+    logger.info('Local mod repaired through Modrinth before disable', {
+      fileName,
+      projectId: targetProjectId,
+      minecraftVersion,
+      archivedPath,
+      reason
+    });
+    return {
+      repaired: true,
+      projectId: targetProjectId,
+      title: state.projects[targetProjectId].title || targetProjectId,
+      archivedPath
+    };
+  } catch (error) {
+    logger.warn('Local mod Modrinth repair failed before disable', {
+      fileName,
+      projectId: targetProjectId,
+      minecraftVersion,
+      reason,
+      error: serializeError(error)
+    });
+    return { repaired: false, reason: error.message };
+  }
+}
+
+function disableUnmanagedStandardModFile(filePath, modContext, details = {}) {
+  if (!filePath || !isPathInsideDirectory(modContext.modsDir, filePath) || !fs.existsSync(filePath)) {
+    return '';
+  }
+
+  const disabledPath = getDisabledModPath(filePath, modContext);
+  if (!isPathInsideDirectory(getDisabledModsDir(modContext), disabledPath)) {
+    return '';
+  }
+
+  try {
+    ensureDir(path.dirname(disabledPath));
+    recordModDisableEntry(modContext, {
+      fileName: path.basename(filePath),
+      filePath,
+      reason: details.reason || 'Technischer Mod-Konflikt oder nachgewiesene Inkompatibilität.',
+      technicalEvidence: details.technicalEvidence || ''
+    });
+    const movedPath = moveFileIfExists(filePath, disabledPath);
+    rememberDisabledFileReason(modContext, path.basename(movedPath || disabledPath), {
+      reason: details.reason || 'Technischer Mod-Konflikt oder nachgewiesene Inkompatibilität.',
+      technicalEvidence: details.technicalEvidence || '',
+      automated: true
+    });
+    return disabledPath;
+  } catch (_error) {
+    return '';
+  }
+}
+
+async function disableUnmanagedStandardModFiles(modContext, warnings = [], options = {}) {
+  if (!fs.existsSync(modContext.modsDir)) {
+    return warnings;
+  }
+
+  const strictUnmanaged = Boolean(options.strictUnmanaged);
+  const state = readModsState(modContext);
+  const activeManagedPaths = new Set(
+    (state.activeSync?.files || [])
+      .map((entry) => String(entry?.targetPath || '').trim())
+      .filter(Boolean)
+      .map((targetPath) => path.resolve(targetPath))
+  );
+
+  for (const fileName of fs.readdirSync(modContext.modsDir).filter((entry) => entry.toLowerCase().endsWith('.jar'))) {
+    const filePath = path.join(modContext.modsDir, fileName);
+    if (!isPathInsideDirectory(modContext.modsDir, filePath) || activeManagedPaths.has(path.resolve(filePath))) {
+      continue;
+    }
+
+    if (isRequiredModFileName(fileName)) {
+      continue;
+    }
+
+    const compatibility = getJarMinecraftCompatibility(filePath, modContext.minecraftVersion);
+    if (compatibility.compatible === false) {
+      const repairResult = await repairLocalModFileWithModrinthBeforeDisable(filePath, modContext, modContext.minecraftVersion, {
+        warnings,
+        reason: `local JAR requires ${compatibility.requirement || 'another Minecraft version'}`
+      });
+      if (repairResult.repaired) {
+        continue;
+      }
+
+      const requirement = compatibility.requirement || 'eine andere Minecraft-Version';
+      const disabledPath = disableUnmanagedStandardModFile(filePath, modContext, {
+        reason: `Minecraft-Version nicht kompatibel: verlangt ${requirement}.`,
+        technicalEvidence: `Modrinth-Reparatur wurde zuerst versucht und ist fehlgeschlagen: ${repairResult.reason || 'keine passende Version gefunden'}. fabric.mod.json depends.minecraft=${requirement}`
+      });
+      if (disabledPath) {
+        warnings.push(`${fileName}: Wurde ausgeschaltet, weil die JAR Minecraft ${requirement} verlangt.`);
+      } else if (fs.existsSync(filePath)) {
+        warnings.push(`${fileName}: Inkompatibel (${requirement}), konnte aber nicht sicher ausgeschaltet werden.`);
+      }
+      continue;
+    }
+
+    if (isKeptLocalModFile(state, filePath, fileName)) {
+      warnings.push(`${fileName}: Behaltene lokale Mod bleibt aktiv. Manuelle Ein-/Auswahl hat Vorrang.`);
+      continue;
+    }
+
+    if (strictUnmanaged && compatibility.compatible === false) {
+      const disabledPath = disableUnmanagedStandardModFile(filePath, modContext, {
+        reason: 'Nicht vom Launcher verwaltete Mod im Standardprofil.',
+        technicalEvidence: `Vorbeugend deaktiviert, damit Minecraft ${modContext.minecraftVersion || 'aktuell'} nicht durch unbekannte Mods crasht.`
+      });
+      if (disabledPath) {
+        warnings.push(`${fileName}: Nicht verwaltet und wurde im Standardprofil vorsorglich ausgeschaltet.`);
+      } else if (fs.existsSync(filePath)) {
+        warnings.push(`${fileName}: Nicht verwaltet, konnte aber nicht sicher ausgeschaltet werden.`);
+      }
+      continue;
+    }
+
+    warnings.push(`${fileName}: Manuelle Mod bleibt aktiv. Keine eindeutige Beschädigung oder Inkompatibilität nachgewiesen.`);
+  }
+
+  return warnings;
+}
+
+function getKnownConflictIdentityForFile(filePath, fileName) {
+  const manifestInfo = readFabricModManifest(filePath);
+  const manifest = manifestInfo?.manifest || {};
+  const id = String(manifest.id || '').trim();
+  const name = String(manifest.name || '').trim();
+  return {
+    projectId: '',
+    label: fileName,
+    haystack: [fileName, id, name].join(' ').toLowerCase()
+  };
+}
+
+function getActiveModConflictIdentities(modContext, state, activeFiles = []) {
+  const identities = [];
+  for (const entry of activeFiles || []) {
+    const project = state.projects?.[entry.projectId] || {};
+    identities.push({
+      projectId: String(entry.projectId || ''),
+      label: project.title || entry.fileName || entry.projectId,
+      haystack: [
+        entry.projectId,
+        entry.fileName,
+        project.slug,
+        project.title
+      ].join(' ').toLowerCase()
+    });
+  }
+
+  if (!fs.existsSync(modContext.modsDir)) {
+    return identities;
+  }
+
+  const activeManagedPaths = new Set(
+    (activeFiles || [])
+      .map((entry) => String(entry?.targetPath || '').trim())
+      .filter(Boolean)
+      .map((targetPath) => path.resolve(targetPath))
+  );
+  for (const fileName of fs.readdirSync(modContext.modsDir).filter((entry) => entry.toLowerCase().endsWith('.jar'))) {
+    const filePath = path.join(modContext.modsDir, fileName);
+    if (!isPathInsideDirectory(modContext.modsDir, filePath) || activeManagedPaths.has(path.resolve(filePath))) {
+      continue;
+    }
+    identities.push(getKnownConflictIdentityForFile(filePath, fileName));
+  }
+
+  return identities;
+}
+
+function modIdentityMatchesConflictSide(identity, side) {
+  const projectIds = new Set((side.projectIds || []).map((entry) => String(entry || '').trim()).filter(Boolean));
+  if (identity.projectId && projectIds.has(identity.projectId)) {
+    return true;
+  }
+
+  return (side.terms || [])
+    .map((term) => String(term || '').trim().toLowerCase())
+    .filter(Boolean)
+    .some((term) => identity.haystack.includes(term));
+}
+
+function detectKnownModConflictWarnings(modContext, state, activeFiles = []) {
+  const identities = getActiveModConflictIdentities(modContext, state, activeFiles);
+  const warnings = [];
+  for (const conflict of KNOWN_MOD_CONFLICTS) {
+    const leftMatches = identities.filter((identity) => modIdentityMatchesConflictSide(identity, conflict.left));
+    const rightMatches = identities.filter((identity) => modIdentityMatchesConflictSide(identity, conflict.right));
+    const hasDistinctMatches = leftMatches.some((left) => rightMatches.some((right) => (
+      left.projectId || left.label || left.haystack
+    ) !== (
+      right.projectId || right.label || right.haystack
+    )));
+    if (!leftMatches.length || !rightMatches.length || !hasDistinctMatches) {
+      continue;
+    }
+
+    warnings.push(`${conflict.title}: ${conflict.message}`);
+    logger.warn('Known mod conflict detected', {
+      conflictId: conflict.id,
+      left: leftMatches.map((entry) => entry.label),
+      right: rightMatches.map((entry) => entry.label),
+      minecraftVersion: modContext.minecraftVersion
+    });
+  }
+  return uniqueStrings(warnings);
+}
+
+function ensureBundledRequiredModsForContext(modContext = getActiveModContext(), minecraftVersion = modContext.minecraftVersion) {
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedMinecraftVersion) {
+    return [];
+  }
+
+  const state = readModsState(modContext);
+  const warnings = [];
+  let changed = false;
+  const disabledProjects = new Set(state.disabledProjects || []);
+
+  for (const requiredMod of REQUIRED_BUNDLED_MODS) {
+    if (!requiredMod.canDisable && disabledProjects.delete(requiredMod.projectId)) {
+      changed = true;
+    }
+  }
+  if (changed) {
+    state.disabledProjects = [...disabledProjects];
+  }
+
+  for (const requiredMod of REQUIRED_BUNDLED_MODS) {
+    if (!isRequiredBundledModCompatible(requiredMod, normalizedMinecraftVersion)) {
+      warnings.push(`${requiredMod.title}: Für ${normalizedMinecraftVersion} deaktiviert, weil kein passender Release-Build vorhanden ist.`);
+      continue;
+    }
+
+    const assetPath = getRequiredBundledModAssetPath(requiredMod, normalizedMinecraftVersion);
+    const fileName = getRequiredBundledModFileName(requiredMod, normalizedMinecraftVersion);
+
+    if (!fs.existsSync(assetPath)) {
+      warnings.push(`${requiredMod.title}: Pflichtmod-Datei fehlt (${fileName}).`);
+      continue;
+    }
+
+    const stats = fs.statSync(assetPath);
+    const currentProject = state.projects[requiredMod.projectId] || {};
+    const versions = currentProject.versions || {};
+    const currentVersion = versions[normalizedMinecraftVersion] || {};
+    const nextVersion = {
+      minecraftVersion: normalizedMinecraftVersion,
+      versionId: `bundled-${requiredMod.versionNumber}`,
+      versionNumber: requiredMod.versionNumber,
+      versionName: requiredMod.versionName,
+      versionType: 'release',
+      publishedAt: '',
+      fileName,
+      libraryPath: assetPath,
+      size: stats.size,
+      sha1: '',
+      sha512: '',
+      gameVersions: [normalizedMinecraftVersion],
+      matchScore: 3,
+      checkedMinecraftVersion: normalizedMinecraftVersion,
+      dependencies: [],
+      dependencyDetails: [],
+      syncedAt: currentVersion.syncedAt || new Date().toISOString()
+    };
+
+    state.projects[requiredMod.projectId] = {
+      projectId: requiredMod.projectId,
+      slug: requiredMod.slug,
+      title: requiredMod.title,
+      description: requiredMod.description,
+      iconUrl: String(requiredMod.iconUrl || '').trim(),
+      clientSide: 'required',
+      serverSide: 'optional',
+      versions: {
+        ...versions,
+        [normalizedMinecraftVersion]: nextVersion
+      }
+    };
+    changed = true;
+  }
+
+  if (changed) {
+    writeModsState(state, modContext);
+  }
+
+  return warnings;
+}
+
+function ensureDefaultManagedModsForContext(modContext = getActiveModContext(), minecraftVersion = modContext.minecraftVersion) {
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedMinecraftVersion) {
+    return;
+  }
+
+  const state = readModsState(modContext);
+  const ignoredDefaultProjects = new Set(state.ignoredDefaultProjects || []);
+  let changed = false;
+
+  for (const projectReference of DEFAULT_PACK_PROJECTS) {
+    const projectId = getModrinthProjectId(projectReference);
+    if (!projectId
+        || (modContext?.type === 'pack' && projectId !== FABRIC_API_PROJECT_ID)
+        || ignoredDefaultProjects.has(projectId)
+        || isManagedProjectHiddenForMinecraftVersion(projectId, normalizedMinecraftVersion)) {
+      continue;
+    }
+
+    const currentProject = state.projects[projectId] || {};
+    state.projects[projectId] = {
+      projectId,
+      slug: String(currentProject.slug || projectReference.slug || '').trim(),
+      title: String(currentProject.title || projectReference.title || projectId).trim(),
+      description: String(currentProject.description || '').trim(),
+      iconUrl: String(currentProject.iconUrl || '').trim(),
+      clientSide: String(currentProject.clientSide || 'required').trim(),
+      serverSide: String(currentProject.serverSide || 'optional').trim(),
+      versions: currentProject.versions || {}
+    };
+    changed = true;
+  }
+
+  if (changed) {
+    writeModsState(state, modContext);
+  }
+}
+
+async function resolveFabricDeclaredDefaultConflicts(modContext, warnings = []) {
+  const state = readModsState(modContext);
+  const records = [];
+  const recordedPaths = new Set();
+  for (const [projectId, project] of Object.entries(state.projects || {})) {
+    const versions = Object.values(project?.versions || {});
+    const preferredVersion = project?.versions?.[modContext.minecraftVersion];
+    const versionEntry = preferredVersion?.libraryPath && fs.existsSync(preferredVersion.libraryPath)
+      ? preferredVersion
+      : versions.find((entry) => entry?.libraryPath && fs.existsSync(entry.libraryPath));
+    if (!versionEntry?.libraryPath) {
+      continue;
+    }
+    const manifest = readFabricModManifest(versionEntry.libraryPath)?.manifest;
+    const modId = String(manifest?.id || '').trim();
+    if (!manifest || !modId) {
+      continue;
+    }
+    const activePath = (state.activeSync?.files || []).find((entry) => (
+      entry?.projectId === projectId
+      && entry.targetPath
+      && isPathInsideDirectory(modContext.modsDir, entry.targetPath)
+      && fs.existsSync(entry.targetPath)
+    ))?.targetPath || versionEntry.libraryPath;
+    records.push({
+      projectId,
+      project,
+      versionEntry,
+      manifest,
+      modId,
+      version: String(manifest.version || versionEntry.versionNumber || '').trim(),
+      filePath: activePath
+    });
+    recordedPaths.add(path.resolve(versionEntry.libraryPath).toLowerCase());
+  }
+
+  // State can lag behind a manually copied JAR, so inspect active files too.
+  for (const fileName of fs.existsSync(modContext.modsDir) ? fs.readdirSync(modContext.modsDir) : []) {
+    if (!fileName.toLowerCase().endsWith('.jar')) continue;
+    const filePath = path.join(modContext.modsDir, fileName);
+    const normalizedPath = path.resolve(filePath).toLowerCase();
+    if (recordedPaths.has(normalizedPath)) continue;
+    const manifest = readFabricModManifest(filePath)?.manifest;
+    const modId = String(manifest?.id || '').trim();
+    if (!manifest || !modId) continue;
+    const managed = (state.activeSync?.files || []).find((entry) => (
+      entry?.targetPath && path.resolve(entry.targetPath).toLowerCase() === normalizedPath
+    ));
+    const projectId = String(managed?.projectId || '').trim();
+    records.push({
+      projectId,
+      project: projectId ? state.projects?.[projectId] || {} : {},
+      versionEntry: {},
+      manifest,
+      modId,
+      version: String(manifest.version || '').trim(),
+      filePath
+    });
+  }
+
+  const byModId = new Map(records.map((record) => [record.modId.toLowerCase(), record]));
+  const conflictingProjectIds = new Map();
+  for (const breaker of records) {
+    for (const [brokenModId, requirement] of Object.entries(breaker.manifest?.breaks || {})) {
+      const normalizedBrokenModId = String(brokenModId || '').trim().toLowerCase();
+      if (normalizedBrokenModId === 'minecraft' || normalizedBrokenModId === 'fabricloader' || normalizedBrokenModId === 'java') {
+        continue;
+      }
+      const broken = byModId.get(normalizedBrokenModId);
+      if (!broken) {
+        continue;
+      }
+      const brokenIdentifiers = [
+        broken.projectId,
+        broken.project?.slug,
+        broken.modId
+      ].map((entry) => String(entry || '').trim().toLowerCase());
+      if (broken === breaker || (broken.projectId && broken.projectId === breaker.projectId)) {
+        continue;
+      }
+      if (broken.projectId && isRequiredDefaultManagedProject(broken.projectId)
+          && breaker.projectId && isRequiredDefaultManagedProject(breaker.projectId)) {
+        continue;
+      }
+      if (requirement && broken.version
+          && !minecraftVersionSatisfiesRequirement(requirement, broken.version)) {
+        continue;
+      }
+      conflictingProjectIds.set(broken.projectId, {
+        broken,
+        breaker,
+        requirement
+      });
+    }
+  }
+
+  if (!conflictingProjectIds.size) {
+    return warnings;
+  }
+
+  for (const [projectId, conflict] of conflictingProjectIds) {
+    const target = conflict.broken.projectId && isRequiredDefaultManagedProject(conflict.broken.projectId)
+      ? conflict.breaker
+      : conflict.broken;
+    const replacementProjectId = target.projectId
+      || KNOWN_FABRIC_MOD_ID_PROJECT_IDS[String(target.modId || '').trim().toLowerCase()]
+      || String(target.modId || '').trim();
+    if (replacementProjectId) {
+      try {
+        const replacement = await installManagedProjectVersion({
+          projectId: replacementProjectId,
+          slug: target.modId,
+          title: target.project?.title || target.modId
+        }, modContext.minecraftVersion, {
+          forceRefresh: true,
+          blockedVersionRequirement: conflict.requirement,
+          visitedProjects: new Set(),
+          modContext
+        });
+        const replacementVersion = readModsState(modContext).projects?.[replacementProjectId]?.versions?.[modContext.minecraftVersion];
+        if (replacementVersion?.versionId && replacementVersion.versionId !== target.versionEntry?.versionId) {
+          if (target.filePath && isPathInsideDirectory(modContext.modsDir, target.filePath) && fs.existsSync(target.filePath)) {
+            ensureDir(getDisabledModsDir(modContext));
+            moveFileIfExists(target.filePath, path.join(getDisabledModsDir(modContext), path.basename(target.filePath)));
+          }
+          warnings.push(
+            `${target.project?.title || target.modId} wurde automatisch von `
+            + `${target.version || 'der inkompatiblen Version'} auf ${replacementVersion.versionNumber || replacementVersion.versionId} ersetzt.`
+          );
+          continue;
+        }
+      } catch (error) {
+        logger.warn('Could not resolve declared Fabric mod conflict with a replacement version', {
+          projectId: replacementProjectId,
+          modId: target.modId,
+          blockedVersionRequirement: conflict.requirement,
+          error: serializeError(error)
+        });
+      }
+    }
+    const targetPath = target.filePath;
+    if (targetPath && isPathInsideDirectory(modContext.modsDir, targetPath) && fs.existsSync(targetPath)) {
+      try {
+        ensureDir(getDisabledModsDir(modContext));
+        moveFileIfExists(targetPath, path.join(getDisabledModsDir(modContext), path.basename(targetPath)));
+      } catch (error) {
+        warnings.push(`${path.basename(targetPath)} konnte nicht automatisch deaktiviert werden (${error.message}).`);
+        continue;
+      }
+    }
+    const disabledProjectId = target.projectId || projectId;
+    if (disabledProjectId) delete state.projects[disabledProjectId];
+    const matchingDefaultProjectIds = DEFAULT_PACK_PROJECTS
+      .filter((entry) => [entry?.projectId, entry?.slug]
+        .map((value) => String(value || '').trim().toLowerCase())
+        .includes(String(target.modId || '').trim().toLowerCase()))
+      .map((entry) => String(entry.projectId || '').trim())
+      .filter(Boolean);
+    state.ignoredDefaultProjects = uniqueStrings([
+      ...(state.ignoredDefaultProjects || []),
+      disabledProjectId,
+      ...matchingDefaultProjectIds
+    ]);
+    state.disabledProjects = (state.disabledProjects || []).filter((entry) => entry !== disabledProjectId);
+    state.autoDisabledProjects = (state.autoDisabledProjects || []).filter((entry) => entry !== disabledProjectId);
+    state.activeSync.files = (state.activeSync?.files || []).filter((entry) => entry?.projectId !== disabledProjectId);
+    warnings.push(
+      `${target.project?.title || target.modId} wurde vor dem Start deaktiviert, weil `
+      + `${conflict.breaker.project?.title || conflict.breaker.modId} diese Mod ausdrücklich als inkompatibel markiert.`
+    );
+  }
+  writeModsState(state, modContext);
+  return warnings;
+}
+
+function isDefaultManagedProjectIgnored(modContext, projectId) {
+  const normalizedProjectId = String(projectId || '').trim();
+  if (!normalizedProjectId) {
+    return false;
+  }
+  if (isRequiredDefaultManagedProject(normalizedProjectId)) {
+    return false;
+  }
+
+  const state = readModsState(modContext);
+  return (state.ignoredDefaultProjects || []).includes(normalizedProjectId);
+}
+
+function ensureModsState(modContext = getActiveModContext()) {
+  ensureDir(modContext.libraryDir);
+  if (!fs.existsSync(modContext.stateFile)) {
+    ROBUSTNESS.writeJsonFileAtomic(modContext.stateFile, getDefaultModsState(), {
+      label: 'mods-state',
+      backup: false,
+      metadata: {
+        createdDefault: true,
+        contextType: modContext.type,
+        minecraftVersion: modContext.minecraftVersion
+      }
+    });
+  }
+}
+
+function normalizeDisableReasonEntry(rawEntry = {}) {
+  return {
+    reason: String(rawEntry?.reason || '').trim(),
+    technicalEvidence: String(rawEntry?.technicalEvidence || '').trim(),
+    disabledAt: String(rawEntry?.disabledAt || rawEntry?.createdAt || '').trim(),
+    source: String(rawEntry?.source || '').trim()
+  };
+}
+
+function normalizeDisabledReasonMap(rawValue) {
+  const normalized = {};
+  const rawMap = rawValue && typeof rawValue === 'object' ? rawValue : {};
+  for (const [key, rawEntry] of Object.entries(rawMap)) {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) {
+      continue;
+    }
+
+    const entry = normalizeDisableReasonEntry(rawEntry);
+    if (entry.reason || entry.technicalEvidence) {
+      normalized[normalizedKey] = entry;
+    }
+  }
+  return normalized;
+}
+
+function normalizeKeptLocalModEntries(rawValue) {
+  return (Array.isArray(rawValue) ? rawValue : [])
+    .map((entry) => {
+      const fileName = String(entry?.fileName || '').trim();
+      const sha1 = String(entry?.sha1 || '').trim().toLowerCase();
+      const projectId = String(entry?.projectId || '').trim();
+      const source = String(entry?.source || '').trim();
+      const keptAt = String(entry?.keptAt || '').trim();
+      if (!fileName && !sha1 && !projectId) {
+        return null;
+      }
+
+      return {
+        fileName,
+        sha1,
+        projectId,
+        source,
+        keptAt
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeModsState(rawState) {
+  const projects = {};
+  const rawProjects = rawState && typeof rawState === 'object' && rawState.projects && typeof rawState.projects === 'object'
+    ? rawState.projects
+    : {};
+
+  for (const [projectKey, rawProject] of Object.entries(rawProjects)) {
+    const projectId = normalizeManagedProjectId(rawProject?.projectId || projectKey || '');
+    if (!projectId) {
+      continue;
+    }
+
+    const versions = {};
+    const rawVersions = rawProject?.versions && typeof rawProject.versions === 'object'
+      ? rawProject.versions
+      : {};
+
+    for (const [minecraftVersionKey, rawVersion] of Object.entries(rawVersions)) {
+      const minecraftVersion = String(rawVersion?.minecraftVersion || minecraftVersionKey || '').trim();
+      if (!minecraftVersion) {
+        continue;
+      }
+
+      versions[minecraftVersion] = {
+        minecraftVersion,
+        versionId: String(rawVersion?.versionId || '').trim(),
+        versionNumber: String(rawVersion?.versionNumber || '').trim(),
+        versionName: String(rawVersion?.versionName || '').trim(),
+        versionType: String(rawVersion?.versionType || '').trim(),
+        publishedAt: String(rawVersion?.publishedAt || '').trim(),
+        fileName: String(rawVersion?.fileName || '').trim(),
+        libraryPath: String(rawVersion?.libraryPath || '').trim(),
+        size: Number(rawVersion?.size || 0),
+        sha1: String(rawVersion?.sha1 || '').trim().toLowerCase(),
+        sha512: String(rawVersion?.sha512 || '').trim().toLowerCase(),
+        gameVersions: Array.isArray(rawVersion?.gameVersions)
+          ? rawVersion.gameVersions.map((entry) => String(entry || '').trim()).filter(Boolean)
+          : [],
+        loaders: Array.isArray(rawVersion?.loaders)
+          ? rawVersion.loaders.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)
+          : [],
+        matchScore: Number(rawVersion?.matchScore || 0),
+        checkedMinecraftVersion: String(rawVersion?.checkedMinecraftVersion || '').trim(),
+        dependencies: Array.isArray(rawVersion?.dependencies)
+          ? rawVersion.dependencies.map((entry) => String(entry || '').trim()).filter(Boolean)
+          : [],
+        dependencyDetails: Array.isArray(rawVersion?.dependencyDetails)
+          ? uniqueManagedDependencyReferences(rawVersion.dependencyDetails)
+          : [],
+        syncedAt: String(rawVersion?.syncedAt || '').trim()
+      };
+    }
+
+    projects[projectId] = {
+      projectId,
+      slug: String(rawProject?.slug || '').trim(),
+      title: String(rawProject?.title || '').trim(),
+      description: String(rawProject?.description || '').trim(),
+      iconUrl: String(rawProject?.iconUrl || '').trim(),
+      clientSide: String(rawProject?.clientSide || '').trim(),
+      serverSide: String(rawProject?.serverSide || '').trim(),
+      versions
+    };
+  }
+
+  const rawActiveSync = rawState && typeof rawState === 'object' && rawState.activeSync && typeof rawState.activeSync === 'object'
+    ? rawState.activeSync
+    : {};
+
+  return {
+    projects,
+    disabledProjects: uniqueStrings(
+      Array.isArray(rawState?.disabledProjects)
+        ? rawState.disabledProjects.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : []
+    ),
+    autoDisabledProjects: uniqueStrings(
+      Array.isArray(rawState?.autoDisabledProjects)
+        ? rawState.autoDisabledProjects.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : []
+    ),
+    disabledProjectReasons: normalizeDisabledReasonMap(rawState?.disabledProjectReasons),
+    disabledFileReasons: normalizeDisabledReasonMap(rawState?.disabledFileReasons),
+    ignoredDefaultProjects: uniqueStrings(
+      Array.isArray(rawState?.ignoredDefaultProjects)
+        ? rawState.ignoredDefaultProjects.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : []
+    ).filter((projectId) => !isRequiredDefaultManagedProject(projectId)),
+    keptLocalMods: normalizeKeptLocalModEntries(rawState?.keptLocalMods),
+    keptLocalProjectIds: uniqueStrings(
+      Array.isArray(rawState?.keptLocalProjectIds)
+        ? rawState.keptLocalProjectIds.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : []
+    ),
+    unavailableProjectChecks: Object.fromEntries(
+      Object.entries(rawState?.unavailableProjectChecks && typeof rawState.unavailableProjectChecks === 'object'
+        ? rawState.unavailableProjectChecks
+        : {})
+        .map(([key, entry]) => [
+          String(key || '').trim(),
+          {
+            projectId: String(entry?.projectId || '').trim(),
+            minecraftVersion: String(entry?.minecraftVersion || '').trim(),
+            loader: String(entry?.loader || '').trim(),
+            reason: String(entry?.reason || '').trim(),
+            checkedAt: String(entry?.checkedAt || '').trim()
+          }
+        ])
+        .filter(([key, entry]) => key && entry.projectId && entry.minecraftVersion)
+    ),
+    activeSync: {
+      minecraftVersion: String(rawActiveSync.minecraftVersion || '').trim(),
+      files: Array.isArray(rawActiveSync.files)
+        ? rawActiveSync.files
+          .map((entry) => {
+            const projectId = String(entry?.projectId || '').trim();
+            const fileName = String(entry?.fileName || '').trim();
+            const targetPath = String(entry?.targetPath || '').trim();
+            const libraryPath = String(entry?.libraryPath || '').trim();
+            const minecraftVersion = String(entry?.minecraftVersion || '').trim();
+            if (!projectId || !fileName || !targetPath) {
+              return null;
+            }
+
+            return {
+              projectId,
+              fileName,
+              targetPath,
+              libraryPath,
+              minecraftVersion
+            };
+          })
+          .filter(Boolean)
+        : []
+    }
+  };
+}
+
+function readModsState(modContext = getActiveModContext()) {
+  ensureModsState(modContext);
+  return ROBUSTNESS.readJsonFile(modContext.stateFile, getDefaultModsState(), {
+    label: 'mods-state',
+    normalize: normalizeModsState
+  });
+}
+
+function writeModsState(state, modContext = getActiveModContext()) {
+  ensureModsState(modContext);
+  const normalizedState = normalizeModsState(state);
+  ROBUSTNESS.writeJsonFileAtomic(modContext.stateFile, normalizedState, {
+    label: 'mods-state',
+    backup: false,
+    metadata: {
+      operation: 'writeModsState',
+      contextType: modContext.type,
+      minecraftVersion: modContext.minecraftVersion
+    }
+  });
+  return normalizedState;
+}
+
+function sanitizePathSegment(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
+    .replace(/\.+$/g, '')
+    .slice(0, 120);
+  return normalized || 'item';
+}
+
+function sanitizeJarFileName(fileName) {
+  const baseName = path.basename(String(fileName || '').trim() || 'mod.jar');
+  const normalized = baseName.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_');
+  return normalized.toLowerCase().endsWith('.jar') ? normalized : `${normalized}.jar`;
+}
+
+function isPathInsideDirectory(parentDir, candidatePath) {
+  const resolvedParent = path.resolve(parentDir);
+  const resolvedCandidate = path.resolve(candidatePath);
+  return resolvedCandidate === resolvedParent || resolvedCandidate.startsWith(`${resolvedParent}${path.sep}`);
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function getManagedLibraryPath(modContext, projectId, versionId, fileName) {
+  return path.join(
+    modContext.libraryDir,
+    sanitizePathSegment(projectId),
+    sanitizePathSegment(versionId),
+    sanitizeJarFileName(fileName)
+  );
+}
+
+function allocateManagedModFileName(fileName, projectId, reservedNames) {
+  const safeName = sanitizeJarFileName(fileName);
+  if (!reservedNames.has(safeName)) {
+    return safeName;
+  }
+
+  const parsedPath = path.parse(safeName);
+  const safeProjectId = sanitizePathSegment(projectId);
+  let counter = 1;
+  let candidate = `${parsedPath.name}__x_${safeProjectId}${parsedPath.ext}`;
+  while (reservedNames.has(candidate)) {
+    counter += 1;
+    candidate = `${parsedPath.name}__x_${safeProjectId}_${counter}${parsedPath.ext}`;
+  }
+  return candidate;
+}
+
+function getActiveManagedModFileName(versionEntry, projectId, minecraftVersion) {
+  const originalFileName = sanitizeJarFileName(versionEntry?.fileName || `${projectId}.jar`);
+  if (textContainsExactMinecraftVersion(originalFileName, minecraftVersion)) {
+    return originalFileName;
+  }
+
+  const parsedPath = path.parse(originalFileName);
+  const targetTag = `mc${sanitizePathSegment(minecraftVersion)}`;
+  const nameWithTargetVersion = parsedPath.name.replace(
+    /(^|[+._-])mc\d+(?:\.\d+){1,3}(?=$|[+._-])/iu,
+    `$1${targetTag}`
+  );
+  const targetName = nameWithTargetVersion === parsedPath.name
+    ? `${parsedPath.name}+${targetTag}`
+    : nameWithTargetVersion;
+  return sanitizeJarFileName(`${targetName}${parsedPath.ext || '.jar'}`);
+}
+
+function getCurrentMinecraftVersion(versionId = getEffectiveSelectedVersionId()) {
+  return String(getActiveModContext(versionId).minecraftVersion || '').trim();
+}
+
+async function getInstalledManagedModProjectIds(versionId = getEffectiveSelectedVersionId(), options = {}) {
+  const modContext = options.modContext || getActiveModContext(versionId);
+  const minecraftVersion = String(modContext.minecraftVersion || '').trim();
+  if (!minecraftVersion) {
+    return [];
+  }
+
+  if (options.sync !== false) {
+    await syncManagedModsForVersion(modContext.versionId || versionId, { modContext });
+  } else {
+    ensureModsState(modContext);
+  }
+
+  const state = readModsState(modContext);
+  return Object.keys(state.projects || {})
+    .map((projectId) => String(projectId || '').trim())
+    .filter((projectId) => projectId && !isManagedProjectHiddenForMinecraftVersion(projectId, minecraftVersion));
+}
+
+function getModrinthTargetChangeWarning(target, modContext) {
+  const requestedPackId = String(target?.packId || '').trim();
+  const requestedVersionId = String(target?.versionId || '').trim();
+  const activePackId = String(modContext?.packId || '').trim();
+  const activeVersionId = String(modContext?.versionId || '').trim();
+  const contextName = String(modContext?.name || 'dem aktiven Profil').trim();
+
+  if (requestedPackId && requestedPackId !== activePackId) {
+    return `Das aktive Profil wurde gewechselt; installiert wurde passend zu ${contextName}.`;
+  }
+
+  if (requestedVersionId && requestedVersionId !== activeVersionId) {
+    return `Die aktive Version wurde gewechselt; installiert wurde passend zu ${contextName}.`;
+  }
+
+  return '';
+}
+
+function getModrinthProjectId(project) {
+  if (!project) {
+    return '';
+  }
+
+  if (typeof project === 'string') {
+    return String(project).trim();
+  }
+
+  return String(project.projectId || project.project_id || project.id || '').trim();
+}
+
+function getModrinthProjectTitle(project) {
+  if (!project || typeof project !== 'object') {
+    return '';
+  }
+
+  return String(project.title || project.name || project.slug || project.projectId || project.project_id || '').trim();
+}
+
+async function fetchModrinthJson(pathOrUrl, options = {}) {
+  const url = String(pathOrUrl || '').startsWith('http')
+    ? String(pathOrUrl)
+    : `${MODRINTH_API_BASE_URL}${pathOrUrl}`;
+  assertTrustedHttpsUrl(url, new Set(['api.modrinth.com']));
+
+  const forceRefresh = Boolean(options.forceRefresh);
+  const cached = modrinthApiCache.get(url);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.promise;
+  }
+
+  const promise = fetchJson(url, {
+    headers: MODRINTH_API_HEADERS,
+    allowedHosts: new Set(['api.modrinth.com'])
+  }).catch((error) => {
+    modrinthApiCache.delete(url);
+    throw error;
+  });
+  modrinthApiCache.set(url, {
+    expiresAt: Date.now() + MODRINTH_API_CACHE_TTL_MS,
+    promise
+  });
+  return promise;
+}
+
+async function fetchModrinthProject(projectId, options = {}) {
+  return fetchModrinthJson(`/project/${encodeURIComponent(projectId)}`, options);
+}
+
+async function fetchModrinthVersion(versionId, options = {}) {
+  return fetchModrinthJson(`/version/${encodeURIComponent(versionId)}`, options);
+}
+
+async function fetchModrinthVersionByFileHash(fileHash) {
+  const normalizedHash = String(fileHash || '').trim();
+  if (!normalizedHash) {
+    throw new Error('Keine Datei-Prüfsumme angegeben.');
+  }
+
+  return fetchModrinthJson(`/version_file/${encodeURIComponent(normalizedHash)}?algorithm=sha1`);
+}
+
+function mapModrinthSearchHit(hit) {
+  return {
+    projectId: String(hit?.project_id || hit?.id || '').trim(),
+    slug: String(hit?.slug || '').trim(),
+    projectType: String(hit?.project_type || 'mod').trim(),
+    title: String(hit?.title || hit?.slug || '').trim(),
+    description: String(hit?.description || '').trim(),
+    author: String(hit?.author || '').trim(),
+    downloads: Number(hit?.downloads || 0),
+    iconUrl: String(hit?.icon_url || '').trim(),
+    categories: Array.isArray(hit?.display_categories) && hit.display_categories.length
+      ? hit.display_categories
+      : (Array.isArray(hit?.categories) ? hit.categories : []),
+    versions: Array.isArray(hit?.versions)
+      ? hit.versions
+      : (Array.isArray(hit?.game_versions) ? hit.game_versions : [])
+  };
+}
+
+function normalizeModrinthProjectType(projectType) {
+  const normalized = String(projectType || '').trim().toLowerCase();
+  if (normalized === 'shader' || normalized === 'resourcepack' || normalized === 'modpack' || normalized === 'datapack') {
+    return normalized;
+  }
+  return 'mod';
+}
+
+function getModrinthSearchFacets(projectType, minecraftVersion, options = {}) {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  const includeVersions = options.includeVersions !== false;
+  const includeFabricCategory = options.includeFabricCategory !== false;
+  const facets = [[`project_type:${normalizedProjectType}`]];
+
+  if ((normalizedProjectType === 'mod' || normalizedProjectType === 'modpack') && includeFabricCategory) {
+    facets.push(['categories:fabric']);
+  }
+
+  if (minecraftVersion && includeVersions) {
+    facets.push([`versions:${minecraftVersion}`]);
+  }
+
+  return facets;
+}
+
+function normalizeModrinthSlug(query) {
+  const slug = String(query || '').trim().toLowerCase();
+  if (!slug) {
+    return '';
+  }
+
+  return slug
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/(^-+|-+$)/g, '');
+}
+
+function getDirectModrinthProjectCandidates(query) {
+  const normalizedQuery = String(query || '').trim();
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  const candidates = new Set();
+  candidates.add(normalizedQuery);
+
+  const slugCandidate = normalizeModrinthSlug(normalizedQuery);
+  if (slugCandidate) {
+    candidates.add(slugCandidate);
+  }
+
+  if (normalizedQuery.includes(' ')) {
+    candidates.add(normalizeModrinthSlug(normalizedQuery.replace(/\s+/g, '-')));
+    candidates.add(normalizeModrinthSlug(normalizedQuery.replace(/\s+/g, '')));
+  }
+
+  const lastSegmentMatch = normalizedQuery.match(/([^/]+)$/);
+  if (lastSegmentMatch) {
+    candidates.add(normalizeModrinthSlug(lastSegmentMatch[1]));
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+function isFabricApiQuery(query) {
+  const normalized = String(query || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return ['fabric api', 'fabricapi', 'fabric-api'].includes(normalized);
+}
+
+function normalizeModrinthSearchLimit(limit) {
+  const parsed = Number.parseInt(limit, 10);
+  if (!Number.isFinite(parsed)) {
+    return MODRINTH_SEARCH_LIMIT;
+  }
+  return Math.min(MODRINTH_MAX_SEARCH_LIMIT, Math.max(MODRINTH_MIN_SEARCH_LIMIT, parsed));
+}
+
+function getModrinthCatalogDiskCache() {
+  if (modrinthCatalogDiskCache) {
+    return modrinthCatalogDiskCache;
+  }
+  const stored = ROBUSTNESS.readJsonFile(MODRINTH_CATALOG_CACHE_FILE, { version: 1, entries: {} }, {
+    label: 'modrinth-catalog-cache'
+  });
+  modrinthCatalogDiskCache = stored && typeof stored.entries === 'object'
+    ? stored
+    : { version: 1, entries: {} };
+  return modrinthCatalogDiskCache;
+}
+
+function persistModrinthCatalogResult(cacheKey, result) {
+  const cache = getModrinthCatalogDiskCache();
+  cache.entries[cacheKey] = { createdAt: Date.now(), result };
+  const newestEntries = Object.entries(cache.entries)
+    .sort((left, right) => Number(right[1]?.createdAt || 0) - Number(left[1]?.createdAt || 0))
+    .slice(0, 80);
+  cache.entries = Object.fromEntries(newestEntries);
+  ROBUSTNESS.writeJsonFileAtomic(MODRINTH_CATALOG_CACHE_FILE, cache, {
+    label: 'modrinth-catalog-cache'
+  });
+}
+
+async function searchModrinthMods(query, versionId = getEffectiveSelectedVersionId(), projectType = 'mod', offset = 0, limit = MODRINTH_SEARCH_LIMIT, signal = null, forceRefresh = false) {
+  const normalizedQuery = String(query || '').trim();
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+  const normalizedLimit = normalizeModrinthSearchLimit(limit);
+  const requestedVersionId = String(versionId || '').trim();
+  const modContext = normalizedProjectType === 'modpack'
+    ? null
+    : getActiveModContext(requestedVersionId);
+  const strictLatestProject = ['mod', 'shader', 'resourcepack', 'datapack'].includes(normalizedProjectType);
+  const minecraftVersion = normalizedProjectType === 'modpack'
+    ? String(getMinecraftVersionName(requestedVersionId) || '').trim()
+    : String(modContext.minecraftVersion || '').trim();
+  const searchMinecraftVersion = isLikelyMinecraftVersionName(minecraftVersion) ? minecraftVersion : '';
+  const targetVersionId = normalizedProjectType === 'modpack'
+    ? requestedVersionId
+    : modContext.versionId;
+  const cacheKey = [
+    normalizedProjectType,
+    targetVersionId,
+    searchMinecraftVersion,
+    normalizedQuery.toLowerCase(),
+    normalizedOffset,
+    normalizedLimit
+  ].join('|');
+  const cached = modrinthSearchCache.get(cacheKey);
+  if (!forceRefresh && cached && Date.now() - cached.createdAt < MODRINTH_SEARCH_CACHE_TTL_MS) {
+    return {
+      ...cached.result,
+      cached: true
+    };
+  }
+  if (!forceRefresh) {
+    const diskEntry = getModrinthCatalogDiskCache().entries[cacheKey];
+    if (diskEntry?.result?.success) {
+      modrinthSearchCache.set(cacheKey, diskEntry);
+      return {
+        ...diskEntry.result,
+        cached: true,
+        diskCache: true
+      };
+    }
+  }
+
+  const buildSearchResult = async (searchQuery, facets) => {
+    const searchUrl = new URL(`${MODRINTH_API_BASE_URL}/search`);
+    searchUrl.searchParams.set('query', String(searchQuery || '').trim());
+    searchUrl.searchParams.set('limit', String(normalizedLimit));
+    searchUrl.searchParams.set('offset', String(normalizedOffset));
+    searchUrl.searchParams.set('index', normalizedQuery ? 'relevance' : 'downloads');
+    searchUrl.searchParams.set('facets', JSON.stringify(facets));
+    const loaders = normalizedProjectType === 'modpack'
+      ? []
+      : getPreferredModrinthLoaders(normalizedProjectType);
+    if (loaders.length) {
+      searchUrl.searchParams.set('loaders', JSON.stringify(loaders));
+    }
+
+    const searchResponse = await fetchJson(searchUrl.toString(), {
+      headers: MODRINTH_API_HEADERS,
+      ...(signal ? { signal } : {}),
+      allowedHosts: new Set(['api.modrinth.com']),
+      retries: normalizedQuery ? 0 : 1,
+      timeoutMs: normalizedQuery ? 8000 : 12000
+    });
+
+    const hits = (searchResponse.hits || [])
+      .map(mapModrinthSearchHit)
+      .filter((entry) => entry.projectId)
+      .map((entry) => ({
+        ...entry,
+        targetVersionId,
+        targetMinecraftVersion: searchMinecraftVersion || minecraftVersion
+      }));
+
+    return {
+      results: hits,
+      totalHits: Number(searchResponse.total_hits || searchResponse.totalHits || hits.length)
+    };
+  };
+
+  const primaryFacets = getModrinthSearchFacets(normalizedProjectType, minecraftVersion, {
+    includeVersions: Boolean(searchMinecraftVersion)
+      && (normalizedProjectType !== 'modpack' || Boolean(searchMinecraftVersion))
+  });
+  let results = [];
+  let totalHits = 0;
+
+  if (normalizedProjectType === 'mod' && normalizedOffset === 0 && isFabricApiQuery(normalizedQuery)) {
+    try {
+      const projectData = await fetchModrinthProject(FABRIC_API_PROJECT_ID);
+      if (projectData && projectData.id) {
+        const mapped = mapModrinthSearchHit(projectData);
+        if (mapped.projectId) {
+          results = [{
+            ...mapped,
+            targetVersionId: modContext.versionId,
+            targetMinecraftVersion: searchMinecraftVersion || minecraftVersion
+          }];
+          totalHits = 1;
+        }
+      }
+    } catch (_error) {
+      // ignore direct Fabric API lookup failures
+    }
+  }
+
+  if (!results.length) {
+    const searchResult = await buildSearchResult(normalizedQuery, primaryFacets);
+    results = searchResult.results;
+    totalHits = searchResult.totalHits;
+  }
+
+  if (!strictLatestProject && normalizedProjectType !== 'modpack' && !results.length && normalizedQuery) {
+    const versionlessFacets = getModrinthSearchFacets(normalizedProjectType, minecraftVersion, {
+      includeVersions: false
+    });
+    const searchResult = await buildSearchResult(normalizedQuery, versionlessFacets);
+    results = searchResult.results;
+    totalHits = searchResult.totalHits;
+  }
+
+  if (!strictLatestProject && !results.length && normalizedQuery) {
+    const broadFacets = getModrinthSearchFacets(normalizedProjectType, minecraftVersion, {
+      includeVersions: normalizedProjectType === 'modpack' && Boolean(searchMinecraftVersion),
+      includeFabricCategory: false
+    });
+    const searchResult = await buildSearchResult(normalizedQuery, broadFacets);
+    results = searchResult.results;
+    totalHits = searchResult.totalHits;
+  }
+
+  if (!results.length && normalizedQuery) {
+    const exactQuery = `"${normalizedQuery}"`;
+    const searchResult = await buildSearchResult(exactQuery, primaryFacets);
+    results = searchResult.results;
+    totalHits = searchResult.totalHits;
+  }
+
+  if (normalizedOffset === 0 && !results.length && normalizedQuery) {
+    const slugCandidates = getDirectModrinthProjectCandidates(normalizedQuery);
+    for (const candidate of slugCandidates) {
+      try {
+        const projectData = await fetchModrinthProject(candidate);
+        if (projectData && projectData.id) {
+          const mapped = mapModrinthSearchHit(projectData);
+          if (mapped.projectId && normalizeModrinthProjectType(mapped.projectType) === normalizedProjectType) {
+            const matchesRequestedMinecraftVersion = !searchMinecraftVersion
+              || (Array.isArray(mapped.versions) && mapped.versions.map((entry) => String(entry || '').trim()).includes(searchMinecraftVersion));
+            if (matchesRequestedMinecraftVersion) {
+              results = [{
+                ...mapped,
+                targetVersionId,
+                targetMinecraftVersion: searchMinecraftVersion || minecraftVersion
+              }];
+              totalHits = 1;
+              break;
+            }
+          }
+        }
+      } catch (_error) {
+        // ignore direct project lookup failures
+      }
+    }
+  }
+
+  // Mods, shaders and resource packs are profile-bound. Never return a project that does not
+  // explicitly support the active profile's Minecraft version.
+  if (['mod', 'shader', 'resourcepack'].includes(normalizedProjectType) && searchMinecraftVersion) {
+    results = results.filter((entry) => isGameVersionListDeclaredForMinecraft(
+      Array.isArray(entry.versions) ? entry.versions : [],
+      searchMinecraftVersion
+    ));
+  }
+
+  let installedProjectIds = [];
+  if (normalizedProjectType === 'mod') {
+    try {
+      installedProjectIds = await getInstalledManagedModProjectIds(modContext.versionId, { modContext });
+    } catch (error) {
+      logger.warn('Managed mod sync during Modrinth search failed', {
+        versionId: modContext.versionId,
+        minecraftVersion: modContext.minecraftVersion,
+        error: serializeError(error)
+      });
+      installedProjectIds = await getInstalledManagedModProjectIds(modContext.versionId, {
+        modContext,
+        sync: false
+      });
+    }
+  } else if (normalizedProjectType === 'shader' || normalizedProjectType === 'resourcepack') {
+    installedProjectIds = getInstalledDownloadableModrinthProjectIds(normalizedProjectType, modContext);
+  }
+  const installedProjectIdSet = new Set(installedProjectIds);
+  results = results.map((entry) => ({
+    ...entry,
+    installed: installedProjectIdSet.has(entry.projectId)
+  }));
+
+  const finalResult = {
+    success: true,
+    targetVersionId,
+    minecraftVersion,
+    projectType: normalizedProjectType,
+    mode: normalizedQuery ? 'search' : 'top-downloads',
+    offset: normalizedOffset,
+    limit: normalizedLimit,
+    totalHits,
+    hasMore: totalHits > normalizedOffset + results.length,
+    installedProjectIds,
+    results
+  };
+
+  modrinthSearchCache.set(cacheKey, {
+    createdAt: Date.now(),
+    result: finalResult
+  });
+  persistModrinthCatalogResult(cacheKey, finalResult);
+  if (modrinthSearchCache.size > MODRINTH_SEARCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = modrinthSearchCache.keys().next().value;
+    modrinthSearchCache.delete(oldestKey);
+  }
+
+  return finalResult;
+}
+
+function getModrinthVersionPriority(versionEntry) {
+  const versionType = String(versionEntry?.version_type || '').trim().toLowerCase();
+  if (versionType === 'release') {
+    return 3;
+  }
+  if (versionType === 'beta') {
+    return 2;
+  }
+  if (versionType === 'alpha') {
+    return 1;
+  }
+  return 0;
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function textContainsExactMinecraftVersion(text, minecraftVersion) {
+  const normalizedText = String(text || '');
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedText || !normalizedMinecraftVersion) {
+    return false;
+  }
+
+  const versionPattern = escapeRegExp(normalizedMinecraftVersion);
+  return new RegExp(`(?:^|[^0-9A-Za-z])(?:mc)?${versionPattern}(?=$|[^0-9A-Za-z.]|\\.(?![0-9]))`, 'iu').test(normalizedText);
+}
+
+function getModrinthVersionSearchText(versionEntry, projectType = 'mod') {
+  const primaryFile = getPrimaryProjectFile(versionEntry, projectType);
+  const fileNames = Array.isArray(versionEntry?.files)
+    ? versionEntry.files.map((file) => String(file?.filename || '').trim()).filter(Boolean)
+    : [];
+
+  return [
+    versionEntry?.name,
+    versionEntry?.version_number,
+    primaryFile?.filename,
+    ...fileNames
+  ].join(' ');
+}
+
+function getModrinthVersionLoaders(versionEntry) {
+  return Array.isArray(versionEntry?.loaders)
+    ? versionEntry.loaders.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function getManagedVersionLoaders(versionEntry) {
+  return Array.isArray(versionEntry?.loaders)
+    ? versionEntry.loaders.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function textMentionsNonFabricLoader(text) {
+  const normalizedText = String(text || '').toLowerCase();
+  if (!normalizedText) {
+    return false;
+  }
+
+  const mentionsFabric = /(?:^|[^a-z0-9])fabric(?:$|[^a-z0-9])/iu.test(normalizedText);
+  if (mentionsFabric) {
+    return false;
+  }
+
+  return /(?:^|[^a-z0-9])(?:neo[-_ ]?forge|neoforge|forge|quilt)(?:$|[^a-z0-9])/iu.test(normalizedText);
+}
+
+function isProjectFileAllowedForPreferredLoader(fileEntry, projectType = 'mod') {
+  const preferredLoaders = getPreferredModrinthLoaders(projectType);
+  if (!preferredLoaders.includes('fabric')) {
+    return true;
+  }
+
+  return !textMentionsNonFabricLoader(fileEntry?.filename);
+}
+
+function isModrinthVersionAllowedForPreferredLoader(versionEntry, projectType = 'mod') {
+  const preferredLoaders = getPreferredModrinthLoaders(projectType);
+  if (!preferredLoaders.length) {
+    return true;
+  }
+
+  const versionLoaders = getModrinthVersionLoaders(versionEntry);
+  if (versionLoaders.length && !preferredLoaders.some((loader) => versionLoaders.includes(loader))) {
+    return false;
+  }
+
+  if (preferredLoaders.includes('fabric') && textMentionsNonFabricLoader([
+    versionEntry?.name,
+    versionEntry?.version_number,
+    getPrimaryProjectFile(versionEntry, projectType)?.filename
+  ].join(' '))) {
+    return false;
+  }
+
+  return true;
+}
+
+function isManagedVersionAllowedForPreferredLoader(versionEntry, projectType = 'mod') {
+  const preferredLoaders = getPreferredModrinthLoaders(projectType);
+  if (!preferredLoaders.length) {
+    return true;
+  }
+
+  const versionLoaders = getManagedVersionLoaders(versionEntry);
+  if (versionLoaders.length && !preferredLoaders.some((loader) => versionLoaders.includes(loader))) {
+    return false;
+  }
+
+  if (preferredLoaders.includes('fabric') && textMentionsNonFabricLoader([
+    versionEntry?.fileName,
+    versionEntry?.versionName,
+    versionEntry?.versionNumber
+  ].join(' '))) {
+    return false;
+  }
+
+  return true;
+}
+
+function getModrinthMinecraftVersionScore(versionEntry, minecraftVersion, projectType = 'mod') {
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  if (!normalizedMinecraftVersion) {
+    return 0;
+  }
+
+  if (textContainsExactMinecraftVersion(getModrinthVersionSearchText(versionEntry, projectType), normalizedMinecraftVersion)) {
+    return 5;
+  }
+
+  const gameVersions = Array.isArray(versionEntry?.game_versions)
+    ? versionEntry.game_versions.map((version) => String(version || '').trim())
+    : [];
+  if (gameVersions.includes(normalizedMinecraftVersion)) {
+    return 4;
+  }
+
+  return gameVersions.some((entry) => minecraftVersionSatisfiesRequirement(entry, normalizedMinecraftVersion)) ? 2 : 0;
+}
+
+function managedVersionLooksExactForMinecraft(versionEntry, minecraftVersion) {
+  return textContainsExactMinecraftVersion([
+    versionEntry?.fileName,
+    versionEntry?.versionNumber,
+    versionEntry?.versionName
+  ].join(' '), minecraftVersion);
+}
+
+function getManagedVersionIntegrityIssue(versionEntry) {
+  const libraryPath = String(versionEntry?.libraryPath || '').trim();
+  const integrity = verifyFileIntegrity(libraryPath, {
+    expectedSha1: String(versionEntry?.sha1 || '').trim(),
+    expectedSha512: String(versionEntry?.sha512 || '').trim(),
+    expectedSize: Number(versionEntry?.size || 0),
+    requireZipEndRecord: shouldRequireZipIntegrity(libraryPath)
+  });
+  return integrity.ok ? '' : formatIntegrityIssues(integrity);
+}
+
+function shouldRefreshCachedManagedVersion(projectId, projectState, versionEntry, minecraftVersion, modContext = getActiveModContext()) {
+  if (!versionEntry || !minecraftVersion) {
+    return false;
+  }
+
+  if (!isManagedVersionAllowedForPreferredLoader(versionEntry, getModrinthProjectType(projectState))) {
+    return true;
+  }
+
+  const libraryPath = String(versionEntry?.libraryPath || '').trim();
+  if (libraryPath && fs.existsSync(libraryPath) && getManagedVersionIntegrityIssue(versionEntry)) {
+    return true;
+  }
+
+  if (libraryPath && fs.existsSync(libraryPath) && !isManagedVersionJarCompatibleWithMinecraft(versionEntry, minecraftVersion)) {
+    return true;
+  }
+
+  if (Array.isArray(versionEntry?.dependencies)
+      && versionEntry.dependencies.length > 0
+      && (!Array.isArray(versionEntry?.dependencyDetails) || versionEntry.dependencyDetails.length === 0)) {
+    return true;
+  }
+
+  if (managedVersionLooksExactForMinecraft(versionEntry, minecraftVersion)) {
+    return false;
+  }
+
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  const checkedMinecraftVersion = String(versionEntry?.checkedMinecraftVersion || '').trim();
+  const matchScore = Number(versionEntry?.matchScore || 0);
+  const versionType = String(versionEntry?.versionType || '').trim().toLowerCase();
+  const syncedAt = getVersionTimestamp(versionEntry?.syncedAt);
+  const weakEntryIsFresh = syncedAt > 0 && (Date.now() - syncedAt) < WEAK_MANAGED_VERSION_REFRESH_INTERVAL_MS;
+  if (checkedMinecraftVersion === normalizedMinecraftVersion) {
+    if (matchScore >= 5 && (versionType === 'release' || weakEntryIsFresh)) {
+      return false;
+    }
+
+    if (matchScore >= 2 && weakEntryIsFresh) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getModrinthProjectType(projectReference) {
+  if (!projectReference || typeof projectReference !== 'object') {
+    return 'mod';
+  }
+
+  return normalizeModrinthProjectType(projectReference.projectType || projectReference.project_type);
+}
+
+function isSupportedModrinthDownloadFile(fileEntry, projectType = 'mod') {
+  if (!fileEntry?.url) {
+    return false;
+  }
+
+  const fileName = String(fileEntry.filename || '').toLowerCase();
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  if (normalizedProjectType === 'mod') {
+    return fileName.endsWith('.jar');
+  }
+  if (normalizedProjectType === 'modpack') {
+    return fileName.endsWith('.mrpack');
+  }
+
+  return fileName.endsWith('.zip');
+}
+
+function getPrimaryProjectFile(versionEntry, projectType = 'mod') {
+  const files = Array.isArray(versionEntry?.files) ? versionEntry.files : [];
+  return files.find((file) => file.primary && isSupportedModrinthDownloadFile(file, projectType) && isProjectFileAllowedForPreferredLoader(file, projectType))
+    || files.find((file) => isSupportedModrinthDownloadFile(file, projectType) && isProjectFileAllowedForPreferredLoader(file, projectType))
+    || null;
+}
+
+function getPreferredModrinthLoaders(projectType) {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  if (normalizedProjectType === 'mod') {
+    return ['fabric'];
+  }
+  if (normalizedProjectType === 'modpack') {
+    return ['fabric'];
+  }
+  // Resource packs are deliberately loader- and version-independent because
+  // Modrinth projects do not always use the same loader tag for pack files.
+  if (normalizedProjectType === 'resourcepack') {
+    return [];
+  }
+  return [];
+}
+
+function getInstalledFabricApiVersion(minecraftVersion) {
+  if (isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+    return null;
+  }
+
+  const modContext = getActiveModContext();
+  const state = readModsState(modContext);
+  const fabricApiProject = state.projects[FABRIC_API_PROJECT_ID];
+  if (!fabricApiProject) {
+    return null;
+  }
+  const versionEntry = fabricApiProject.versions[minecraftVersion];
+  return versionEntry ? versionEntry.versionNumber : null;
+}
+
+async function ensureFabricApiForMod(modContext, minecraftVersion, options = {}) {
+  if (isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+    return {
+      skipped: true,
+      reason: `Fabric API wird für Minecraft ${minecraftVersion} nicht geladen.`
+    };
+  }
+
+  const state = readModsState(modContext);
+  const fabricApiProject = state.projects[FABRIC_API_PROJECT_ID];
+  const forceRefresh = Boolean(options.forceRefresh);
+
+  const existingFabricApiVersion = fabricApiProject?.versions?.[minecraftVersion];
+  const existingFabricApiPath = String(existingFabricApiVersion?.libraryPath || '').trim();
+  const hasBrokenExistingApi = !existingFabricApiPath
+    || !fs.existsSync(existingFabricApiPath)
+    || !isJarCompatibleWithMinecraft(existingFabricApiPath, minecraftVersion);
+
+  const needsInstall = !fabricApiProject || !existingFabricApiVersion || hasBrokenExistingApi;
+  if (!needsInstall && !forceRefresh) {
+    return;
+  }
+
+  if (hasBrokenExistingApi && existingFabricApiPath && fs.existsSync(existingFabricApiPath) && isPathInsideDirectory(modContext.libraryDir, existingFabricApiPath)) {
+    try {
+      fs.unlinkSync(existingFabricApiPath);
+    } catch (_error) {
+      // ignore cleanup failures, reinstall will still attempt to restore the Fabric API
+    }
+  }
+
+  if (hasBrokenExistingApi && existingFabricApiVersion && fabricApiProject?.versions) {
+    delete fabricApiProject.versions[minecraftVersion];
+    writeModsState(state, modContext);
+  }
+
+  try {
+    await installManagedProjectVersion({ projectId: FABRIC_API_PROJECT_ID }, minecraftVersion, {
+      forceRefresh: true,
+      visitedProjects: new Set(),
+      modContext
+    });
+    if (needsInstall) {
+      console.log(`Fabric API wurde für Minecraft ${minecraftVersion} installiert`);
+    } else {
+      console.log(`Fabric API wurde für Minecraft ${minecraftVersion} aktualisiert`);
+    }
+    return {
+      skipped: false
+    };
+  } catch (error) {
+    console.warn(`Fabric API konnte nicht installiert oder aktualisiert werden: ${error.message}`);
+    throw new Error(`Fabric API ist erforderlich für diese Mod, konnte aber nicht installiert oder aktualisiert werden: ${error.message}`);
+  }
+}
+
+function filterModrinthVersionsByMinecraft(versions, minecraftVersion, projectType) {
+  if (!Array.isArray(versions) || !minecraftVersion) {
+    return versions || [];
+  }
+
+  const normalizedMinecraftVersion = String(minecraftVersion || '').trim();
+  return versions.filter((versionEntry) => {
+    const gameVersions = Array.isArray(versionEntry?.game_versions)
+      ? versionEntry.game_versions.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+
+    if (isGameVersionListDeclaredForMinecraft(gameVersions, normalizedMinecraftVersion)) {
+      return true;
+    }
+
+    if (textContainsExactMinecraftVersion(getModrinthVersionSearchText(versionEntry, projectType), normalizedMinecraftVersion)) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+function isModrinthVersionDeclaredForMinecraft(versionEntry, minecraftVersion, projectType = 'mod') {
+  return filterModrinthVersionsByMinecraft([versionEntry], minecraftVersion, projectType).length > 0;
+}
+
+function filterModrinthVersionsByPreferredLoader(versions, projectType = 'mod') {
+  if (!Array.isArray(versions)) {
+    return [];
+  }
+
+  return versions.filter((versionEntry) => isModrinthVersionAllowedForPreferredLoader(versionEntry, projectType));
+}
+
+async function getModrinthMinecraftVersionSuggestionText(projectId, minecraftVersion, projectType = 'mod') {
+  try {
+    const normalizedProjectType = normalizeModrinthProjectType(projectType);
+    const loaders = getPreferredModrinthLoaders(normalizedProjectType);
+    const url = new URL(`${MODRINTH_API_BASE_URL}/project/${encodeURIComponent(projectId)}/version`);
+    if (loaders.length) {
+      url.searchParams.set('loaders', JSON.stringify(loaders));
+    }
+    const versions = await fetchJson(url.toString(), {
+      headers: MODRINTH_API_HEADERS,
+      allowedHosts: new Set(['api.modrinth.com'])
+    });
+    const suggestions = uniqueStrings((Array.isArray(versions) ? versions : [])
+      .flatMap((versionEntry) => Array.isArray(versionEntry?.game_versions) ? versionEntry.game_versions : [])
+      .map((entry) => String(entry || '').trim())
+      .filter((entry) => entry && entry !== minecraftVersion)
+      .filter((entry) => normalizedProjectType !== 'mod' || isSupportedMinecraftVersion(entry) || isProfileMinecraftVersion(entry)))
+      .slice(0, 5);
+
+    return suggestions.length
+      ? ` Kompatible Minecraft-Versionen laut Modrinth: ${suggestions.join(', ')}.`
+      : '';
+  } catch (error) {
+    logger.debug('Could not build Modrinth version suggestions', {
+      projectId,
+      minecraftVersion,
+      projectType,
+      error: serializeError(error)
+    });
+    return '';
+  }
+}
+
+async function getCompatibleModrinthProjectVersions(projectId, minecraftVersion, options = {}) {
+  const projectType = normalizeModrinthProjectType(options.projectType);
+  const loaders = getPreferredModrinthLoaders(projectType);
+  const strictMinecraftVersion = Boolean(options.strictMinecraftVersion);
+  const forceRefresh = Boolean(options.forceRefresh);
+  const selectedLoader = loaders.join(', ') || 'any';
+  const url = `/project/${encodeURIComponent(projectId)}/version`;
+  let versions = [];
+
+  try {
+    versions = await fetchModrinthJson(url, { forceRefresh });
+  } catch (error) {
+    logger.warn('Modrinth compatibility version list fetch failed', {
+      projectId,
+      minecraftVersion,
+      selectedLoader,
+      projectType,
+      forceRefresh,
+      error: serializeError(error)
+    });
+    return [];
+  }
+
+  logger.info('Modrinth compatibility check started', {
+    projectId,
+    minecraftVersion,
+    selectedLoader,
+    projectType,
+    totalVersions: Array.isArray(versions) ? versions.length : 0,
+    forceRefresh
+  });
+
+  const acceptedVersions = [];
+  for (const versionEntry of Array.isArray(versions) ? versions : []) {
+    const versionId = String(versionEntry?.id || '').trim();
+    const versionNumber = String(versionEntry?.version_number || versionEntry?.name || '').trim();
+    const versionLoaders = getModrinthVersionLoaders(versionEntry);
+    const gameVersions = Array.isArray(versionEntry?.game_versions)
+      ? versionEntry.game_versions.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    const primaryFile = getPrimaryProjectFile(versionEntry, projectType);
+    const declaredForMinecraft = isModrinthVersionDeclaredForMinecraft(versionEntry, minecraftVersion, projectType);
+    const loaderAllowed = isModrinthVersionAllowedForPreferredLoader(versionEntry, projectType);
+    const hasFile = Boolean(primaryFile);
+    const accepted = loaderAllowed && hasFile && (declaredForMinecraft || !strictMinecraftVersion);
+    const rejectReasons = [];
+
+    if (!loaderAllowed) {
+      rejectReasons.push(`loader mismatch: selected ${selectedLoader}, version loaders ${versionLoaders.join(', ') || 'unknown'}`);
+    }
+    if (!hasFile) {
+      rejectReasons.push('no supported downloadable file');
+    }
+    if (!declaredForMinecraft && strictMinecraftVersion) {
+      rejectReasons.push(`Minecraft ${minecraftVersion} is not declared by Modrinth metadata`);
+    }
+
+    logger.info('Modrinth compatibility version checked', {
+      projectId,
+      minecraftVersion,
+      selectedLoader,
+      versionId,
+      versionNumber,
+      versionLoaders,
+      gameVersions,
+      fileName: primaryFile?.filename || '',
+      accepted,
+      reason: accepted ? 'accepted by metadata' : rejectReasons.join('; ')
+    });
+
+    if (accepted) {
+      acceptedVersions.push(versionEntry);
+    }
+  }
+
+  logger.info('Modrinth compatibility check completed', {
+    projectId,
+    minecraftVersion,
+    selectedLoader,
+    acceptedVersions: acceptedVersions.map((entry) => ({
+      id: String(entry?.id || '').trim(),
+      versionNumber: String(entry?.version_number || entry?.name || '').trim()
+    }))
+  });
+
+  return acceptedVersions
+    .sort((left, right) => {
+      const exactDiff = getModrinthMinecraftVersionScore(right, minecraftVersion, projectType)
+        - getModrinthMinecraftVersionScore(left, minecraftVersion, projectType);
+      if (exactDiff !== 0) {
+        return exactDiff;
+      }
+
+      const priorityDiff = getModrinthVersionPriority(right) - getModrinthVersionPriority(left);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+
+      const dateDiff = getVersionTimestamp(right.date_published) - getVersionTimestamp(left.date_published);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+
+      if (Boolean(right.featured) !== Boolean(left.featured)) {
+        return right.featured ? 1 : -1;
+      }
+
+      return 0;
+    });
+}
+
+async function getCompatibleModrinthProjectVersion(projectId, minecraftVersion, options = {}) {
+  return (await getCompatibleModrinthProjectVersions(projectId, minecraftVersion, options))[0] || null;
+}
+
+async function getRequiredDependencies(versionEntry) {
+  const dependencies = [];
+  const seen = new Set();
+
+  const pushDependency = (projectId, versionId = '', fileName = '', extra = {}) => {
+    const normalizedDependency = normalizeManagedDependencyReference({
+      ...extra,
+      projectId,
+      versionId,
+      fileName
+    });
+    if (!normalizedDependency) {
+      return;
+    }
+
+    const key = getManagedDependencySignature(normalizedDependency);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    dependencies.push(normalizedDependency);
+  };
+
+  for (const dependency of versionEntry?.dependencies || []) {
+    if (dependency?.dependency_type !== 'required') {
+      continue;
+    }
+
+    const directProjectId = String(dependency.project_id || '').trim();
+    if (directProjectId) {
+      pushDependency(directProjectId, dependency.version_id, dependency.file_name);
+      continue;
+    }
+
+    const versionId = String(dependency.version_id || '').trim();
+    if (!versionId) {
+      continue;
+    }
+
+    try {
+      const versionData = await fetchModrinthVersion(versionId);
+      const projectId = String(versionData?.project_id || '').trim();
+      if (projectId) {
+        pushDependency(projectId, versionId, dependency.file_name);
+      }
+    } catch (_error) {
+      // ignore dependency lookup failures here and surface them during install
+    }
+  }
+
+  return dependencies;
+}
+
+async function getRequiredDependencyProjectIds(versionEntry) {
+  return uniqueStrings((await getRequiredDependencies(versionEntry)).map((dependency) => dependency.projectId));
+}
+
+function normalizeManagedDependencyReference(dependency) {
+  if (!dependency || typeof dependency !== 'object') {
+    return null;
+  }
+
+  const projectId = String(dependency.projectId || dependency.project_id || '').trim();
+  if (!projectId) {
+    return null;
+  }
+
+  return {
+    projectId,
+    versionId: String(dependency.versionId || dependency.version_id || dependency.requiredVersionId || '').trim(),
+    versionRequirement: dependency.versionRequirement || dependency.requiredVersionRequirement || '',
+    blockedVersionRequirement: dependency.blockedVersionRequirement || '',
+    fileName: String(dependency.fileName || dependency.file_name || '').trim(),
+    source: String(dependency.source || '').trim()
+  };
+}
+
+function getManagedDependencySignature(dependency) {
+  const normalizedDependency = normalizeManagedDependencyReference(dependency);
+  if (!normalizedDependency) {
+    return '';
+  }
+
+  return [
+    normalizedDependency.projectId,
+    normalizedDependency.versionId,
+    formatFabricDependencyRequirement(normalizedDependency.versionRequirement),
+    formatFabricDependencyRequirement(normalizedDependency.blockedVersionRequirement),
+    normalizedDependency.fileName,
+    normalizedDependency.source
+  ].join(':');
+}
+
+function uniqueManagedDependencyReferences(dependencies) {
+  const result = [];
+  const seen = new Set();
+
+  for (const dependency of Array.isArray(dependencies) ? dependencies : []) {
+    const normalizedDependency = normalizeManagedDependencyReference(dependency);
+    if (!normalizedDependency) {
+      continue;
+    }
+
+    const signature = getManagedDependencySignature(normalizedDependency);
+    if (!signature || seen.has(signature)) {
+      continue;
+    }
+    seen.add(signature);
+    result.push(normalizedDependency);
+  }
+
+  return result;
+}
+
+function getDependencyVersionCandidates(versionEntry) {
+  const sourceText = [
+    versionEntry?.versionNumber,
+    versionEntry?.version_number,
+    versionEntry?.versionName,
+    versionEntry?.name,
+    versionEntry?.fileName,
+    getPrimaryProjectFile(versionEntry, 'mod')?.filename
+  ].join(' ');
+
+  const candidates = [];
+  for (const match of sourceText.matchAll(/\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9_.-]+)?/gu)) {
+    candidates.push(match[0].replace(/\+.*$/u, '').replace(/-fabric$/iu, '').replace(/^mc(?=\d)/iu, ''));
+  }
+  return uniqueStrings(candidates);
+}
+
+function modrinthVersionSatisfiesDependencyRequirement(versionEntry, requirement) {
+  const requirementText = formatFabricDependencyRequirement(requirement);
+  if (!requirementText || requirementText === '*') {
+    return true;
+  }
+
+  return getDependencyVersionCandidates(versionEntry)
+    .some((candidate) => minecraftVersionSatisfiesRequirement(requirementText, candidate));
+}
+
+function modrinthVersionAvoidsBlockedRequirement(versionEntry, blockedRequirement) {
+  const requirementText = formatFabricDependencyRequirement(blockedRequirement);
+  if (!requirementText) {
+    return true;
+  }
+
+  return !getDependencyVersionCandidates(versionEntry)
+    .some((candidate) => minecraftVersionSatisfiesRequirement(requirementText, candidate));
+}
+
+function getKnownManagedDependencyConstraints(jarPath) {
+  const manifestInfo = readFabricModManifest(jarPath);
+  const manifest = manifestInfo?.manifest;
+  if (!manifest || typeof manifest !== 'object') {
+    return [];
+  }
+
+  const constraints = [];
+  const addConstraints = (source, type) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      return;
+    }
+
+    for (const [fabricModId, requirement] of Object.entries(source)) {
+      const projectId = KNOWN_FABRIC_MOD_ID_PROJECT_IDS[String(fabricModId || '').trim().toLowerCase()];
+      if (!projectId) {
+        continue;
+      }
+
+      constraints.push({
+        projectId,
+        type,
+        requirement
+      });
+    }
+  };
+
+  addConstraints(manifest.depends, 'depends');
+  addConstraints(manifest.breaks, 'breaks');
+  return constraints;
+}
+
+async function ensureModrinthProjectInfo(projectId, projectReference = null, modContext = getActiveModContext()) {
+  const stateProject = readModsState(modContext).projects[projectId];
+  const candidate = projectReference && typeof projectReference === 'object' ? projectReference : {};
+  const localInfo = {
+    id: projectId,
+    slug: String(candidate.slug || stateProject?.slug || '').trim(),
+    title: String(candidate.title || candidate.name || stateProject?.title || projectId).trim(),
+    description: String(candidate.description || stateProject?.description || '').trim(),
+    icon_url: String(candidate.iconUrl || candidate.icon_url || stateProject?.iconUrl || '').trim(),
+    client_side: String(candidate.clientSide || candidate.client_side || stateProject?.clientSide || '').trim(),
+    server_side: String(candidate.serverSide || candidate.server_side || stateProject?.serverSide || '').trim()
+  };
+
+  const shouldFetchRemote = !localInfo.slug
+    || !localInfo.title
+    || !localInfo.icon_url
+    || !localInfo.client_side
+    || !localInfo.server_side;
+  if (!shouldFetchRemote) {
+    return localInfo;
+  }
+
+  try {
+    const remoteInfo = await fetchModrinthProject(projectId);
+    return {
+      id: projectId,
+      slug: String(remoteInfo?.slug || localInfo.slug || '').trim(),
+      title: String(remoteInfo?.title || remoteInfo?.name || localInfo.title || projectId).trim(),
+      description: String(remoteInfo?.description || localInfo.description || '').trim(),
+      icon_url: String(remoteInfo?.icon_url || remoteInfo?.iconUrl || localInfo.icon_url || '').trim(),
+      client_side: String(remoteInfo?.client_side || remoteInfo?.clientSide || localInfo.client_side || '').trim(),
+      server_side: String(remoteInfo?.server_side || remoteInfo?.serverSide || localInfo.server_side || '').trim()
+    };
+  } catch (_error) {
+    return localInfo;
+  }
+}
+
+async function enrichManagedProjectMetadata(projectId, modContext = getActiveModContext()) {
+  const normalizedProjectId = String(projectId || '').trim();
+  if (!normalizedProjectId) {
+    return null;
+  }
+
+  const state = readModsState(modContext);
+  const currentProject = state.projects?.[normalizedProjectId];
+  if (!currentProject) {
+    return null;
+  }
+
+  const projectInfo = await ensureModrinthProjectInfo(normalizedProjectId, currentProject, modContext);
+  const updatedProject = {
+    ...currentProject,
+    projectId: normalizedProjectId,
+    slug: String(projectInfo.slug || currentProject.slug || '').trim(),
+    title: String(projectInfo.title || currentProject.title || normalizedProjectId).trim(),
+    description: String(projectInfo.description || currentProject.description || '').trim(),
+    iconUrl: String(projectInfo.icon_url || projectInfo.iconUrl || currentProject.iconUrl || '').trim(),
+    clientSide: String(projectInfo.client_side || projectInfo.clientSide || currentProject.clientSide || '').trim(),
+    serverSide: String(projectInfo.server_side || projectInfo.serverSide || currentProject.serverSide || '').trim(),
+    versions: currentProject.versions || {}
+  };
+
+  const hasChanged = updatedProject.slug !== (currentProject.slug || '')
+    || updatedProject.title !== (currentProject.title || '')
+    || updatedProject.description !== (currentProject.description || '')
+    || updatedProject.iconUrl !== (currentProject.iconUrl || '')
+    || updatedProject.clientSide !== (currentProject.clientSide || '')
+    || updatedProject.serverSide !== (currentProject.serverSide || '');
+
+  if (hasChanged) {
+    state.projects[normalizedProjectId] = updatedProject;
+    writeModsState(state, modContext);
+  }
+
+  return updatedProject;
+}
+
+async function addAutoDisabledManagedProject(projectReference, modContext = getActiveModContext()) {
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) {
+    return null;
+  }
+
+  const projectInfo = await ensureModrinthProjectInfo(projectId, projectReference, modContext);
+  const state = readModsState(modContext);
+  const currentProject = state.projects[projectId] || {
+    projectId,
+    versions: {}
+  };
+
+  const project = {
+    projectId,
+    slug: String(projectInfo.slug || currentProject.slug || '').trim(),
+    title: String(projectInfo.title || currentProject.title || getModrinthProjectTitle(projectReference) || projectId).trim(),
+    description: String(projectInfo.description || currentProject.description || '').trim(),
+    iconUrl: String(projectInfo.icon_url || projectInfo.iconUrl || currentProject.iconUrl || '').trim(),
+    clientSide: String(projectInfo.client_side || projectInfo.clientSide || currentProject.clientSide || '').trim(),
+    serverSide: String(projectInfo.server_side || projectInfo.serverSide || currentProject.serverSide || '').trim(),
+    versions: currentProject.versions || {}
+  };
+
+  state.projects[projectId] = project;
+  const disabledProjects = new Set(state.disabledProjects || []);
+  const autoDisabledProjects = new Set(state.autoDisabledProjects || []);
+  const wasAutoDisabled = markManagedProjectAutoDisabled(
+    autoDisabledProjects,
+    projectId,
+    project,
+    disabledProjects
+  );
+  if (wasAutoDisabled) {
+    state.disabledProjectReasons = state.disabledProjectReasons || {};
+    state.disabledProjectReasons[projectId] = createDisableReason({
+      reason: `Keine kompatible Modrinth-Version für Minecraft ${modContext.minecraftVersion || 'die aktive Version'} gefunden.`,
+      technicalEvidence: 'Installation wurde nur als deaktivierter State gespeichert, weil keine passende Version ermittelt werden konnte.',
+      automated: true
+    });
+    recordModDisableEntry(modContext, {
+      projectId,
+      reason: `Keine kompatible Modrinth-Version für Minecraft ${modContext.minecraftVersion || 'die aktive Version'} gefunden.`,
+      technicalEvidence: 'Installation wurde nur als deaktivierter State gespeichert, weil keine passende Version ermittelt werden konnte.'
+    });
+  }
+  state.autoDisabledProjects = [...autoDisabledProjects].filter((entry) => !disabledProjects.has(entry));
+  writeModsState(state, modContext);
+
+  return {
+    projectId,
+    title: project.title || projectId,
+    wasAutoDisabled
+  };
+}
+
+function isMissingCompatibleModrinthVersionError(error) {
+  const message = String(error?.message || error || '');
+  return /Keine (?:exakt passende(?: Modrinth-Version)?|passende Modrinth-Version|kompatible|passende Fabric-Version|intern kompatible (?:Fabric-)?JAR(?:-Datei)?)/iu.test(message);
+}
+
+function sanitizeDownloadedFileName(fileName, fallbackExtension = '.zip') {
+  const parsedPath = path.parse(path.basename(String(fileName || '').trim() || `download${fallbackExtension}`));
+  const safeBaseName = parsedPath.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_').trim() || 'download';
+  const safeExtension = (parsedPath.ext || fallbackExtension || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '')
+    .trim()
+    || fallbackExtension;
+  return `${safeBaseName}${safeExtension.startsWith('.') ? safeExtension : `.${safeExtension}`}`;
+}
+
+async function installManagedProjectVersion(projectReference, minecraftVersion, options = {}) {
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) {
+    throw new Error('Modrinth-Projekt konnte nicht gelesen werden.');
+  }
+
+  if (isManagedProjectHiddenForMinecraftVersion(projectId, minecraftVersion)) {
+    throw new Error(`Fabric API wird für Minecraft ${minecraftVersion} ausgeblendet.`);
+  }
+
+  const projectType = getModrinthProjectType(projectReference);
+  const modContext = options.modContext || getActiveModContext();
+  const forceRefresh = Boolean(options.forceRefresh);
+  const requiredVersionId = String(options.requiredVersionId || projectReference?.versionId || projectReference?.version_id || '').trim();
+  const requiredVersionRequirement = options.requiredVersionRequirement || projectReference?.versionRequirement || '';
+  const blockedVersionRequirement = options.blockedVersionRequirement || projectReference?.blockedVersionRequirement || '';
+  const skippedVersionIds = new Set(
+    (Array.isArray(options.skipVersionIds) ? options.skipVersionIds : [])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+  );
+  const visitedProjects = options.visitedProjects instanceof Set ? options.visitedProjects : new Set();
+  if (visitedProjects.has(projectId)) {
+    return {
+      projectId,
+      title: getModrinthProjectTitle(projectReference) || projectId,
+      warnings: []
+    };
+  }
+  visitedProjects.add(projectId);
+
+  const warnings = [];
+  let state = readModsState(modContext);
+
+  if (projectType === 'mod' && projectId !== FABRIC_API_PROJECT_ID && minecraftVersion) {
+    try {
+      const fabricApiResult = await ensureFabricApiForMod(modContext, minecraftVersion);
+      if (fabricApiResult?.skipped && !isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+        warnings.push(fabricApiResult.reason);
+      }
+    } catch (error) {
+      warnings.push(`Fabric API Installation/Update fehlgeschlagen: ${error.message}`);
+    }
+  }
+
+  const existingProject = state.projects[projectId];
+  const existingVersion = existingProject?.versions?.[minecraftVersion];
+  const getExistingVersionUsability = () => {
+    if (!existingVersion?.libraryPath || !fs.existsSync(existingVersion.libraryPath)) {
+      return { usable: false, reason: 'no local library file' };
+    }
+    if (requiredVersionId && existingVersion.versionId !== requiredVersionId) {
+      return { usable: false, reason: `required version ${requiredVersionId} does not match local ${existingVersion.versionId || 'unknown'}` };
+    }
+    if (requiredVersionRequirement && !modrinthVersionSatisfiesDependencyRequirement(existingVersion, requiredVersionRequirement)) {
+      return { usable: false, reason: `local version does not satisfy dependency requirement ${formatFabricDependencyRequirement(requiredVersionRequirement)}` };
+    }
+    if (blockedVersionRequirement && !modrinthVersionAvoidsBlockedRequirement(existingVersion, blockedVersionRequirement)) {
+      return { usable: false, reason: `local version is blocked by ${formatFabricDependencyRequirement(blockedVersionRequirement)}` };
+    }
+    if (!isManagedVersionAllowedForPreferredLoader(existingVersion, projectType)) {
+      return { usable: false, reason: 'local version loader does not match selected loader' };
+    }
+
+    const compatibility = getManagedJarMinecraftCompatibility(existingVersion, minecraftVersion);
+    if (compatibility.compatible === false) {
+      return { usable: false, reason: `local JAR requires ${compatibility.requirement || 'another Minecraft version'}` };
+    }
+    return { usable: true, reason: 'local version is compatible' };
+  };
+  const returnExistingVersion = (reason) => {
+    const dependencyDetails = uniqueManagedDependencyReferences(existingVersion?.dependencyDetails || []);
+    const dependencyProjectIds = uniqueStrings([
+      ...(Array.isArray(existingVersion?.dependencies) ? existingVersion.dependencies : []),
+      ...dependencyDetails.map((dependency) => dependency.projectId)
+    ]);
+    logger.info('Managed mod compatibility selected installed local version', {
+      projectId,
+      title: existingProject?.title || getModrinthProjectTitle(projectReference) || projectId,
+      minecraftVersion,
+      selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+      installedVersionId: existingVersion?.versionId || '',
+      installedVersionNumber: existingVersion?.versionNumber || '',
+      installedFileName: existingVersion?.fileName || '',
+      reason
+    });
+    return {
+      projectId,
+      title: existingProject?.title || getModrinthProjectTitle(projectReference) || projectId,
+      dependencyProjectIds,
+      dependencyRequirements: dependencyDetails,
+      warnings: []
+    };
+  };
+  logger.info('Managed mod compatibility install check started', {
+    projectId,
+    title: existingProject?.title || getModrinthProjectTitle(projectReference) || projectId,
+    minecraftVersion,
+    selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+    installedVersionId: existingVersion?.versionId || '',
+    installedVersionNumber: existingVersion?.versionNumber || '',
+    installedFileName: existingVersion?.fileName || '',
+    forceRefresh
+  });
+  // Bei forceRefresh immer neu installieren, um sicherzustellen dass die beste Version verwendet wird
+  if (forceRefresh) {
+    const existingUsability = getExistingVersionUsability();
+    logger.info('Managed mod force refresh will verify latest compatible Fabric version', {
+      projectId,
+      minecraftVersion,
+      existingUsable: existingUsability.usable,
+      reason: existingUsability.reason
+    });
+    // Überspringe Kompatibilitätsprüfung bei forceRefresh
+  } else if (existingVersion?.libraryPath && fs.existsSync(existingVersion.libraryPath)) {
+    if (requiredVersionId && existingVersion.versionId !== requiredVersionId) {
+      warnings.push(`${existingProject?.title || projectId}: Abhängigkeit verlangt Modrinth-Version ${requiredVersionId}; gespeicherte Version ${existingVersion.versionId || 'unbekannt'} wird ersetzt.`);
+    } else if (requiredVersionRequirement && !modrinthVersionSatisfiesDependencyRequirement(existingVersion, requiredVersionRequirement)) {
+      warnings.push(`${existingProject?.title || projectId}: gespeicherte Version erfüllt die verlangte Mod-Abhängigkeit ${formatFabricDependencyRequirement(requiredVersionRequirement)} nicht und wird ersetzt.`);
+    } else if (blockedVersionRequirement && !modrinthVersionAvoidsBlockedRequirement(existingVersion, blockedVersionRequirement)) {
+      warnings.push(`${existingProject?.title || projectId}: gespeicherte Version fällt in einen inkompatiblen Bereich (${formatFabricDependencyRequirement(blockedVersionRequirement)}) und wird ersetzt.`);
+    } else if (!isManagedVersionAllowedForPreferredLoader(existingVersion, projectType)) {
+      warnings.push(`${existingProject?.title || projectId}: gespeicherte Version ist nicht für Fabric und wird ersetzt.`);
+    } else {
+      const existingCompatibility = getManagedJarMinecraftCompatibility(existingVersion, minecraftVersion);
+      if (existingCompatibility.compatible !== false) {
+        const hasKnownDependencies = (Array.isArray(existingVersion.dependencies) && existingVersion.dependencies.length > 0)
+          || (Array.isArray(existingVersion.dependencyDetails) && existingVersion.dependencyDetails.length > 0);
+        if (!hasKnownDependencies) {
+          return returnExistingVersion('existing local version is compatible');
+        }
+        warnings.push(`${existingProject?.title || projectId}: vorhandene Version bleibt aktiv, Abhängigkeiten werden geprüft.`);
+      } else {
+        warnings.push(`${existingProject?.title || existingCompatibility.modName || projectId}: vorhandene JAR verlangt Minecraft ${existingCompatibility.requirement || 'eine andere Version'}.`);
+      }
+    }
+  }
+
+  const projectInfo = await ensureModrinthProjectInfo(projectId, projectReference, modContext);
+  const requireDeclaredMinecraftVersion = projectType === 'mod';
+  let compatibleVersions = [];
+  if (requiredVersionId) {
+    const requiredVersion = await fetchModrinthVersion(requiredVersionId, { forceRefresh });
+    const requiredProjectId = String(requiredVersion?.project_id || '').trim();
+    if (requiredProjectId && requiredProjectId !== projectId) {
+      throw new Error(`Modrinth-Abhängigkeit ${requiredVersionId} gehört zu ${requiredProjectId}, erwartet wurde ${projectId}.`);
+    }
+    compatibleVersions = [requiredVersion];
+  } else {
+    compatibleVersions = await getCompatibleModrinthProjectVersions(projectId, minecraftVersion, {
+      projectType,
+      strictMinecraftVersion: requireDeclaredMinecraftVersion,
+      forceRefresh
+    });
+  }
+  if (requiredVersionRequirement) {
+    const requirementText = formatFabricDependencyRequirement(requiredVersionRequirement);
+    compatibleVersions = compatibleVersions.filter((entry) => modrinthVersionSatisfiesDependencyRequirement(entry, requiredVersionRequirement));
+    if (!compatibleVersions.length) {
+      const existingUsability = getExistingVersionUsability();
+      if (existingUsability.usable) {
+        return returnExistingVersion(`dependency requirement candidates exhausted: ${existingUsability.reason}`);
+      }
+      throw new Error(`${projectInfo.title || projectId}: Keine Modrinth-Version erfüllt die verlangte Mod-Abhängigkeit ${requirementText || String(requiredVersionRequirement)} für Minecraft ${minecraftVersion}.`);
+    }
+  }
+  if (blockedVersionRequirement) {
+    const blockedText = formatFabricDependencyRequirement(blockedVersionRequirement);
+    compatibleVersions = compatibleVersions.filter((entry) => modrinthVersionAvoidsBlockedRequirement(entry, blockedVersionRequirement));
+    if (!compatibleVersions.length) {
+      const existingUsability = getExistingVersionUsability();
+      if (existingUsability.usable) {
+        return returnExistingVersion(`blocked dependency range exhausted remote candidates: ${existingUsability.reason}`);
+      }
+      throw new Error(`${projectInfo.title || projectId}: Alle passenden Modrinth-Versionen fallen in einen inkompatiblen Bereich (${blockedText || String(blockedVersionRequirement)}).`);
+    }
+  }
+  compatibleVersions = compatibleVersions.filter((entry) => !skippedVersionIds.has(String(entry?.id || '').trim()));
+  if (!compatibleVersions.length) {
+    const existingUsability = getExistingVersionUsability();
+    if (existingUsability.usable) {
+      return returnExistingVersion(`all remote candidates exhausted: ${existingUsability.reason}`);
+    }
+    const suggestion = await getModrinthMinecraftVersionSuggestionText(projectId, minecraftVersion, projectType);
+    throw new Error(`Keine exakt passende Modrinth-Version für Minecraft ${minecraftVersion} gefunden.${suggestion}`);
+  }
+
+  let compatibleVersion = null;
+  let primaryFile = null;
+  let libraryPath = '';
+  let matchScore = 0;
+  const candidateWarningStartIndex = warnings.length;
+
+  for (const candidateVersion of compatibleVersions) {
+    if (!isModrinthVersionAllowedForPreferredLoader(candidateVersion, projectType)) {
+      warnings.push(`${projectInfo.title || projectId}: Modrinth-Version ${candidateVersion.version_number || candidateVersion.name || candidateVersion.id} ist nicht für Fabric und wurde übersprungen.`);
+      continue;
+    }
+
+    const candidatePrimaryFile = getPrimaryProjectFile(candidateVersion, projectType);
+    if (!candidatePrimaryFile) {
+      continue;
+    }
+
+    const declaredForMinecraft = isModrinthVersionDeclaredForMinecraft(candidateVersion, minecraftVersion, projectType);
+    if (requireDeclaredMinecraftVersion && !declaredForMinecraft) {
+      warnings.push(`${projectInfo.title || projectId}: Modrinth-Version ${candidateVersion.version_number || candidateVersion.name || candidateVersion.id} nennt Minecraft ${minecraftVersion} nicht und wurde übersprungen.`);
+      continue;
+    }
+
+    const candidateLibraryPath = getManagedLibraryPath(modContext, projectId, candidateVersion.id, candidatePrimaryFile.filename);
+    await downloadFile(candidatePrimaryFile.url, candidateLibraryPath, {
+      force: false,
+      expectedSha1: String(candidatePrimaryFile.hashes?.sha1 || '').trim(),
+      expectedSha512: String(candidatePrimaryFile.hashes?.sha512 || '').trim(),
+      expectedSize: Number(candidatePrimaryFile.size || 0),
+      allowedHosts: TRUSTED_MODRINTH_DOWNLOAD_HOSTS,
+      backupExisting: false
+    });
+    const jarCompatibility = getJarMinecraftCompatibility(candidateLibraryPath, minecraftVersion);
+    const canTrustModrinthGameVersions = jarCompatibility.compatible === false
+      && jarCompatibility.reasonType === 'depends'
+      && declaredForMinecraft;
+    if (jarCompatibility.compatible === false && !canTrustModrinthGameVersions) {
+      logger.info('Modrinth compatibility candidate rejected after JAR check', {
+        projectId,
+        minecraftVersion,
+        selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+        versionId: String(candidateVersion.id || '').trim(),
+        versionNumber: String(candidateVersion.version_number || candidateVersion.name || '').trim(),
+        fileName: candidatePrimaryFile.filename,
+        reason: `JAR requires ${jarCompatibility.requirement || 'another Minecraft version'}`
+      });
+      warnings.push(`${jarCompatibility.modName || projectInfo.title || projectId}: Modrinth-Version ${candidateVersion.version_number || candidateVersion.name || candidateVersion.id} verlangt Minecraft ${jarCompatibility.requirement || 'eine andere Version'} und wurde übersprungen.`);
+      try {
+        if (fs.existsSync(candidateLibraryPath) && isPathInsideDirectory(modContext.libraryDir, candidateLibraryPath)) {
+          fs.unlinkSync(candidateLibraryPath);
+        }
+      } catch (_error) {
+        // stale incompatible cache files are ignored by the next sync
+      }
+      continue;
+    }
+
+    if (!declaredForMinecraft && !String(jarCompatibility.requirement || '').trim()) {
+      logger.info('Modrinth compatibility candidate rejected after JAR check', {
+        projectId,
+        minecraftVersion,
+        selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+        versionId: String(candidateVersion.id || '').trim(),
+        versionNumber: String(candidateVersion.version_number || candidateVersion.name || '').trim(),
+        fileName: candidatePrimaryFile.filename,
+        reason: `Minecraft ${minecraftVersion} was not declared and the JAR did not provide a usable requirement`
+      });
+      warnings.push(`${projectInfo.title || projectId}: Modrinth-Version ${candidateVersion.version_number || candidateVersion.name || candidateVersion.id} nennt Minecraft ${minecraftVersion} nicht und wurde übersprungen.`);
+      try {
+        if (fs.existsSync(candidateLibraryPath) && isPathInsideDirectory(modContext.libraryDir, candidateLibraryPath)) {
+          fs.unlinkSync(candidateLibraryPath);
+        }
+      } catch (_error) {
+        // stale uncertain cache files are ignored by the next sync
+      }
+      continue;
+    }
+
+    compatibleVersion = candidateVersion;
+    primaryFile = candidatePrimaryFile;
+    libraryPath = candidateLibraryPath;
+    matchScore = getModrinthMinecraftVersionScore(compatibleVersion, minecraftVersion, projectType);
+    logger.info('Modrinth compatibility candidate accepted after JAR check', {
+      projectId,
+      minecraftVersion,
+      selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+      versionId: String(candidateVersion.id || '').trim(),
+      versionNumber: String(candidateVersion.version_number || candidateVersion.name || '').trim(),
+      fileName: candidatePrimaryFile.filename,
+      reason: canTrustModrinthGameVersions
+        ? 'accepted because Modrinth game_versions match and local manifest only had a dependency range'
+        : 'accepted by Modrinth metadata and local JAR compatibility'
+    });
+    warnings.splice(candidateWarningStartIndex);
+    break;
+  }
+
+  if (!compatibleVersion || !primaryFile || !libraryPath) {
+    const existingUsability = getExistingVersionUsability();
+    if (existingUsability.usable) {
+      return returnExistingVersion(`remote candidates rejected after JAR checks: ${existingUsability.reason}`);
+    }
+    const suggestion = await getModrinthMinecraftVersionSuggestionText(projectId, minecraftVersion, projectType);
+    throw new Error(`Keine intern kompatible JAR-Datei für Minecraft ${minecraftVersion} gefunden.${suggestion}`);
+  }
+
+  const manifestManagedDependencyConstraints = getKnownManagedDependencyConstraints(libraryPath)
+    .filter((constraint) => constraint.projectId && constraint.projectId !== projectId)
+    .map((constraint) => normalizeManagedDependencyReference({
+      projectId: constraint.projectId,
+      versionRequirement: constraint.type === 'depends' ? constraint.requirement : '',
+      blockedVersionRequirement: constraint.type === 'breaks' ? constraint.requirement : '',
+      source: 'fabric.mod.json'
+    }))
+    .filter(Boolean);
+  const manifestRequiredDependencies = manifestManagedDependencyConstraints
+    .filter((dependency) => dependency.versionRequirement && !dependency.blockedVersionRequirement);
+  const manifestConflictConstraints = manifestManagedDependencyConstraints
+    .filter((dependency) => dependency.blockedVersionRequirement);
+  const requiredDependencies = uniqueManagedDependencyReferences([
+    ...(await getRequiredDependencies(compatibleVersion)),
+    ...manifestRequiredDependencies
+  ]);
+  const dependencyDetails = uniqueManagedDependencyReferences([
+    ...requiredDependencies,
+    ...manifestConflictConstraints
+  ]);
+  const dependencyProjectIds = uniqueStrings(requiredDependencies.map((dependency) => dependency.projectId));
+
+  // Stelle sicher, dass Fabric API installiert ist, wenn die Mod sie benötigt
+  const needsFabricApi = dependencyProjectIds.includes(FABRIC_API_PROJECT_ID) ||
+    (compatibleVersion.dependencies || []).some(dep => dep.project_id === FABRIC_API_PROJECT_ID);
+
+  if (needsFabricApi) {
+    try {
+      const fabricApiResult = await ensureFabricApiForMod(modContext, minecraftVersion);
+      if (fabricApiResult?.skipped && !isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+        warnings.push(fabricApiResult.reason);
+      }
+    } catch (error) {
+      warnings.push(`Fabric API Installation fehlgeschlagen: ${error.message}`);
+      // Fortfahren ohne Fabric API - die Mod könnte trotzdem funktionieren
+    }
+  }
+
+  const installedDependencyProjectIds = [];
+  const installedDependencyRequirements = [...dependencyDetails];
+  for (const dependency of requiredDependencies) {
+    const dependencyProjectId = dependency.projectId;
+    if (dependencyProjectId === FABRIC_API_PROJECT_ID
+        && (isDefaultManagedProjectIgnored(modContext, FABRIC_API_PROJECT_ID)
+          || isFabricApiHiddenForMinecraftVersion(minecraftVersion))) {
+      continue;
+    }
+
+    try {
+      const dependencyResult = await installManagedProjectVersion({
+        projectId: dependencyProjectId,
+        versionId: dependency.versionId,
+        versionRequirement: dependency.versionRequirement,
+        blockedVersionRequirement: dependency.blockedVersionRequirement
+      }, minecraftVersion, {
+        forceRefresh,
+        requiredVersionId: dependency.versionId,
+        requiredVersionRequirement: dependency.versionRequirement,
+        blockedVersionRequirement: dependency.blockedVersionRequirement,
+        visitedProjects,
+        modContext
+      });
+      installedDependencyProjectIds.push(dependencyProjectId, ...(dependencyResult.dependencyProjectIds || []));
+      installedDependencyRequirements.push(...(dependencyResult.dependencyRequirements || []));
+      warnings.push(...(dependencyResult.warnings || []));
+    } catch (error) {
+      const requirementText = formatFabricDependencyRequirement(dependency.versionRequirement);
+      const blockedText = formatFabricDependencyRequirement(dependency.blockedVersionRequirement);
+      const failedVersionId = String(compatibleVersion?.id || '').trim();
+      const remainingVersions = compatibleVersions
+        .map((entry) => String(entry?.id || '').trim())
+        .filter((versionId) => versionId && versionId !== failedVersionId);
+      if (failedVersionId && remainingVersions.length > 0) {
+        logger.warn('Managed mod candidate skipped because a required dependency failed', {
+          projectId,
+          minecraftVersion,
+          failedVersionId,
+          dependencyProjectId,
+          error: serializeError(error)
+        });
+        const retryVisitedProjects = new Set(visitedProjects);
+        retryVisitedProjects.delete(projectId);
+        return installManagedProjectVersion(projectReference, minecraftVersion, {
+          ...options,
+          forceRefresh: true,
+          skipVersionIds: uniqueStrings([...skippedVersionIds, failedVersionId]),
+          visitedProjects: retryVisitedProjects,
+          modContext
+        });
+      }
+      throw new Error(`Required dependency ${dependencyProjectId}${dependency.versionId ? ` (${dependency.versionId})` : ''}${requirementText ? ` (${requirementText})` : ''}${blockedText ? ` (not ${blockedText})` : ''}: ${error.message}`);
+      warnings.push(`Abhängigkeit ${dependencyProjectId}${dependency.versionId ? ` (${dependency.versionId})` : ''}${requirementText ? ` (${requirementText})` : ''}${blockedText ? ` (nicht ${blockedText})` : ''}: ${error.message}`);
+    }
+  }
+
+  state = readModsState(modContext);
+  const currentProject = state.projects[projectId] || {
+    projectId,
+    versions: {}
+  };
+  if ((state.ignoredDefaultProjects || []).includes(projectId)) {
+    state.ignoredDefaultProjects = (state.ignoredDefaultProjects || []).filter((entry) => entry !== projectId);
+  }
+
+  state.projects[projectId] = {
+    projectId,
+    slug: String(projectInfo.slug || currentProject.slug || '').trim(),
+    title: String(projectInfo.title || currentProject.title || projectId).trim(),
+    description: String(projectInfo.description || currentProject.description || '').trim(),
+    iconUrl: String(projectInfo.icon_url || projectInfo.iconUrl || currentProject.iconUrl || '').trim(),
+    clientSide: String(projectInfo.client_side || projectInfo.clientSide || currentProject.clientSide || '').trim(),
+    serverSide: String(projectInfo.server_side || projectInfo.serverSide || currentProject.serverSide || '').trim(),
+    versions: {
+      ...(currentProject.versions || {}),
+      [minecraftVersion]: {
+        minecraftVersion,
+        versionId: String(compatibleVersion.id || '').trim(),
+        versionNumber: String(compatibleVersion.version_number || '').trim(),
+        versionName: String(compatibleVersion.name || '').trim(),
+        versionType: String(compatibleVersion.version_type || '').trim(),
+        publishedAt: String(compatibleVersion.date_published || '').trim(),
+        fileName: sanitizeJarFileName(primaryFile.filename),
+        libraryPath,
+        size: Number(primaryFile.size || 0),
+        sha1: String(primaryFile.hashes?.sha1 || '').trim(),
+        sha512: String(primaryFile.hashes?.sha512 || '').trim(),
+        gameVersions: Array.isArray(compatibleVersion.game_versions)
+          ? compatibleVersion.game_versions.map((entry) => String(entry || '').trim()).filter(Boolean)
+          : [],
+        loaders: getModrinthVersionLoaders(compatibleVersion),
+        matchScore,
+        checkedMinecraftVersion: minecraftVersion,
+        dependencies: dependencyProjectIds,
+        dependencyDetails,
+        syncedAt: new Date().toISOString()
+      }
+    }
+  };
+
+  writeModsState(state, modContext);
+  logger.info('Managed mod compatibility final version selected', {
+    projectId,
+    title: state.projects[projectId].title || projectId,
+    minecraftVersion,
+    selectedLoader: getPreferredModrinthLoaders(projectType).join(', ') || 'any',
+    installedVersionId: existingVersion?.versionId || '',
+    selectedVersionId: String(compatibleVersion.id || '').trim(),
+    selectedVersionNumber: String(compatibleVersion.version_number || '').trim(),
+    selectedFileName: sanitizeJarFileName(primaryFile.filename)
+  });
+  if (existingVersion?.versionId !== String(compatibleVersion.id || '').trim()
+      || existingVersion?.fileName !== sanitizeJarFileName(primaryFile.filename)) {
+    logger.info('Managed mod version changed automatically', {
+      projectId,
+      title: state.projects[projectId].title || projectId,
+      minecraftVersion,
+      previousVersionId: existingVersion?.versionId || '',
+      nextVersionId: String(compatibleVersion.id || '').trim(),
+      previousFileName: existingVersion?.fileName || '',
+      nextFileName: sanitizeJarFileName(primaryFile.filename),
+      context: getDownloadableModrinthContextKey(modContext)
+    });
+  }
+
+  return {
+    projectId,
+    title: state.projects[projectId].title || projectId,
+    dependencyProjectIds: uniqueStrings(installedDependencyProjectIds),
+    dependencyRequirements: uniqueManagedDependencyReferences(installedDependencyRequirements),
+    warnings
+  };
+}
+
+async function syncManagedModsForVersion(versionId = getEffectiveSelectedVersionId(), options = {}) {
+  const modContext = options.modContext || getActiveModContext(versionId);
+  const minecraftVersion = modContext.minecraftVersion;
+  if (!minecraftVersion) {
+    return {
+      synced: 0,
+      totalProjects: 0,
+      warnings: []
+    };
+  }
+
+  ensureDir(modContext.modsDir);
+  ensureDir(modContext.resourcepacksDir || RESOURCEPACKS_DIR);
+  ensureDir(modContext.shaderpacksDir || SHADERPACKS_DIR);
+  cleanupProfileDuplicateFiles(modContext);
+  cleanupUntrackedResourcePackFiles(modContext);
+  ensureModsState(modContext);
+  const declaredConflictWarnings = await resolveFabricDeclaredDefaultConflicts(modContext, []);
+  quarantineLegacyDisabledMods(modContext);
+  const corruptedWarnings = quarantineCorruptedModFiles(modContext);
+  const incompatibleXClientWarnings = disableIncompatibleXClientFiles(modContext, minecraftVersion);
+  removeRemovedBundledModsFromContext(modContext);
+  ensureDefaultManagedModsForContext(modContext, minecraftVersion);
+  const bundledWarnings = ensureBundledRequiredModsForContext(modContext, minecraftVersion);
+  const importedLocalWarnings = await importStandardLocalModrinthMods(modContext, minecraftVersion);
+  const disabledUnmanagedWarnings = await disableUnmanagedStandardModFiles(modContext, []);
+
+  let state = readModsState(modContext);
+  if (restoreUnavailableAutoDisabledProjectsForRetry(state)) {
+    writeModsState(state, modContext);
+    state = readModsState(modContext);
+  }
+  const nextDisabledProjects = (state.disabledProjects || [])
+    .filter((projectId) => !isManagedProjectDisableLocked(projectId, state.projects?.[projectId]));
+  const nextAutoDisabledProjects = (state.autoDisabledProjects || [])
+    .filter((projectId) => !isProtectedManagedProject(projectId, state.projects?.[projectId]));
+  if (nextDisabledProjects.length !== (state.disabledProjects || []).length
+      || nextAutoDisabledProjects.length !== (state.autoDisabledProjects || []).length) {
+    state.disabledProjects = nextDisabledProjects;
+    state.autoDisabledProjects = nextAutoDisabledProjects;
+    writeModsState(state, modContext);
+    state = readModsState(modContext);
+  }
+
+  const previousFiles = Array.isArray(state.activeSync?.files) ? state.activeSync.files : [];
+  const previousFilesByProject = new Map();
+  for (const entry of previousFiles) {
+    if (!entry?.projectId) {
+      continue;
+    }
+
+    const projectFiles = previousFilesByProject.get(entry.projectId) || [];
+    projectFiles.push(entry);
+    previousFilesByProject.set(entry.projectId, projectFiles);
+  }
+  const previousManagedNames = new Set(previousFiles.map((entry) => entry.fileName).filter(Boolean));
+  const warnings = [
+    ...declaredConflictWarnings,
+    ...corruptedWarnings,
+    ...incompatibleXClientWarnings,
+    ...bundledWarnings,
+    ...importedLocalWarnings,
+    ...disabledUnmanagedWarnings
+  ];
+  const disabledProjects = new Set(state.disabledProjects || []);
+  const autoDisabledProjects = new Set(state.autoDisabledProjects || []);
+  const disabledProjectReasonUpdates = new Map();
+  const disabledProjectReasonClears = new Set();
+  const reservedNames = new Set(
+    (fs.existsSync(modContext.modsDir) ? fs.readdirSync(modContext.modsDir) : [])
+      .filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+      .filter((fileName) => !previousManagedNames.has(fileName))
+  );
+
+  for (const fileName of fs.existsSync(modContext.modsDir) ? fs.readdirSync(modContext.modsDir) : []) {
+    if (!fileName.toLowerCase().endsWith('.jar') || !isRequiredModFileName(fileName)) {
+      continue;
+    }
+
+    const requiredModPath = path.join(modContext.modsDir, fileName);
+    if (!isPathInsideDirectory(modContext.modsDir, requiredModPath)) {
+      continue;
+    }
+
+    try {
+      fs.unlinkSync(requiredModPath);
+      reservedNames.delete(fileName);
+    } catch (_error) {
+      warnings.push(`${fileName}: Alte Pflichtmod-Datei konnte nicht ersetzt werden.`);
+    }
+  }
+
+  const refreshProjects = options.refreshProjects instanceof Set ? options.refreshProjects : null;
+  const forceRefreshAll = Boolean(options.refreshAll);
+  const refreshDisabledProjects = Boolean(options.refreshDisabledProjects);
+  const pendingProjectIds = Object.keys(state.projects || {}).sort((a, b) => {
+    // Priorisiere Fabric API
+    if (a === FABRIC_API_PROJECT_ID) return -1;
+    if (b === FABRIC_API_PROJECT_ID) return 1;
+    return 0;
+  });
+  const seenProjectIds = new Set();
+  let activeFiles = [];
+  const dependencyInstallConstraints = new Map();
+  const mergeDependencyInstallConstraints = (dependencyRequirements = [], sourceTitle = '') => {
+    for (const dependency of uniqueManagedDependencyReferences(dependencyRequirements)) {
+      const dependencyProjectId = dependency.projectId;
+      if (!dependencyProjectId || dependencyProjectId === FABRIC_API_PROJECT_ID && isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+        continue;
+      }
+
+      const currentConstraint = dependencyInstallConstraints.get(dependencyProjectId) || {};
+      const nextConstraint = { ...currentConstraint };
+      if (dependency.versionId) {
+        if (currentConstraint.requiredVersionId && currentConstraint.requiredVersionId !== dependency.versionId) {
+          warnings.push(`${sourceTitle || dependencyProjectId}: Widersprüchliche exakte Abhängigkeit für ${dependencyProjectId}: ${currentConstraint.requiredVersionId} und ${dependency.versionId}. Die zuletzt gefundene Vorgabe wird verwendet.`);
+        }
+        nextConstraint.requiredVersionId = dependency.versionId;
+      }
+      if (dependency.versionRequirement) {
+        nextConstraint.requiredVersionRequirement = dependency.versionRequirement;
+      }
+      if (dependency.blockedVersionRequirement) {
+        nextConstraint.blockedVersionRequirement = dependency.blockedVersionRequirement;
+      }
+      dependencyInstallConstraints.set(dependencyProjectId, nextConstraint);
+    }
+  };
+  const getDependencyInstallOptions = (projectId) => {
+    const constraint = dependencyInstallConstraints.get(projectId) || {};
+    return {
+      requiredVersionId: constraint.requiredVersionId || '',
+      requiredVersionRequirement: constraint.requiredVersionRequirement || '',
+      blockedVersionRequirement: constraint.blockedVersionRequirement || ''
+    };
+  };
+  const shouldRefreshForDependencyConstraint = (projectId, versionEntry) => {
+    if (!versionEntry) {
+      return false;
+    }
+
+    const constraint = dependencyInstallConstraints.get(projectId);
+    if (!constraint) {
+      return false;
+    }
+
+    if (constraint.requiredVersionId && versionEntry.versionId !== constraint.requiredVersionId) {
+      return true;
+    }
+    if (constraint.requiredVersionRequirement
+        && !modrinthVersionSatisfiesDependencyRequirement(versionEntry, constraint.requiredVersionRequirement)) {
+      return true;
+    }
+    if (constraint.blockedVersionRequirement
+        && !modrinthVersionAvoidsBlockedRequirement(versionEntry, constraint.blockedVersionRequirement)) {
+      return true;
+    }
+    return false;
+  };
+  for (const projectState of Object.values(state.projects || {})) {
+    const projectId = String(projectState?.projectId || '').trim();
+    if (!projectId || disabledProjects.has(projectId)) {
+      continue;
+    }
+
+    const versionEntry = projectState?.versions?.[minecraftVersion];
+    if (versionEntry?.dependencyDetails?.length) {
+      mergeDependencyInstallConstraints(versionEntry.dependencyDetails, projectState.title || projectId);
+    }
+  }
+  const requeueDependencyProjects = (dependencyProjectIds = []) => {
+    for (const dependencyProjectId of uniqueStrings(dependencyProjectIds)) {
+      if (!dependencyProjectId || dependencyProjectId === FABRIC_API_PROJECT_ID && isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+        continue;
+      }
+
+      const existingActiveIndexes = [];
+      activeFiles.forEach((entry, index) => {
+        if (entry.projectId === dependencyProjectId) {
+          existingActiveIndexes.push(index);
+          if (entry.fileName) {
+            reservedNames.delete(entry.fileName);
+          }
+          if (entry.targetPath && isPathInsideDirectory(modContext.modsDir, entry.targetPath) && fs.existsSync(entry.targetPath)) {
+            try {
+              fs.unlinkSync(entry.targetPath);
+            } catch (_error) {
+              warnings.push(`${entry.fileName || path.basename(entry.targetPath)}: Alte abhängige Mod-Datei konnte nicht vor der Versionsanpassung entfernt werden.`);
+            }
+          }
+        }
+      });
+      for (const index of existingActiveIndexes.reverse()) {
+        activeFiles.splice(index, 1);
+      }
+
+      if (seenProjectIds.has(dependencyProjectId)) {
+        seenProjectIds.delete(dependencyProjectId);
+      }
+      if (!pendingProjectIds.includes(dependencyProjectId)) {
+        pendingProjectIds.unshift(dependencyProjectId);
+      }
+    }
+  };
+
+  while (pendingProjectIds.length > 0) {
+    const projectId = pendingProjectIds.shift();
+    if (!projectId || seenProjectIds.has(projectId)) {
+      continue;
+    }
+    seenProjectIds.add(projectId);
+
+    let projectState = readModsState(modContext).projects[projectId];
+    state = readModsState(modContext);
+    if ((state.keptLocalProjectIds || []).includes(projectId)) {
+      if (removeManagedProjectFilesFromState(state, modContext, projectId)) {
+        writeModsState(state, modContext);
+      }
+      continue;
+    }
+    if (isManagedProjectHiddenForMinecraftVersion(projectId, minecraftVersion)) {
+      disabledProjects.delete(projectId);
+      autoDisabledProjects.delete(projectId);
+      continue;
+    }
+
+    if ((state.disabledProjects || []).includes(projectId)) {
+      if (refreshDisabledProjects && projectState && !isBundledRequiredProject(projectId, projectState)) {
+        const disabledVersionEntry = projectState?.versions?.[minecraftVersion];
+        if (forceRefreshAll || !disabledVersionEntry?.libraryPath || !fs.existsSync(disabledVersionEntry.libraryPath)) {
+          try {
+            const installResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+              forceRefresh: forceRefreshAll,
+              ...getDependencyInstallOptions(projectId),
+              visitedProjects: new Set(),
+              modContext
+            });
+            mergeDependencyInstallConstraints(installResult.dependencyRequirements || [], installResult.title || projectState?.title || projectId);
+            warnings.push(...(installResult.warnings || []));
+          } catch (error) {
+            warnings.push(`${projectState?.title || projectId}: ${error.message}`);
+          }
+        }
+      }
+      continue;
+    }
+    const requiredBundledMod = getRequiredBundledMod(projectId, projectState);
+    if (LEGACY_BUNDLED_PROJECT_IDS.has(String(projectId || '').trim())) {
+      continue;
+    }
+    if (requiredBundledMod && !isRequiredBundledModCompatible(requiredBundledMod, minecraftVersion)) {
+      warnings.push(`${projectState?.title || projectId}: Für ${minecraftVersion} ist keine kompatible gebündelte Version verfügbar.`);
+      autoDisabledProjects.delete(projectId);
+      continue;
+    }
+
+    let versionEntry = projectState?.versions?.[minecraftVersion];
+    const isBundled = isBundledRequiredProject(projectId, projectState);
+    const shouldRefreshProject = (forceRefreshAll
+        || Boolean(refreshProjects?.has(projectId))
+        || shouldRefreshCachedManagedVersion(projectId, projectState, versionEntry, minecraftVersion, modContext)
+        || shouldRefreshForDependencyConstraint(projectId, versionEntry))
+      && (!isBundled || forceRefreshAll);
+    const shouldRefreshMetadata = Boolean(projectState)
+      && (
+        !String(projectState.iconUrl || '').trim()
+        || !String(projectState.slug || '').trim()
+        || !String(projectState.title || '').trim()
+      );
+
+    if (shouldRefreshMetadata) {
+      try {
+        await enrichManagedProjectMetadata(projectId, modContext);
+      } catch (_error) {
+        // keep sync stable even if metadata refresh fails
+      }
+
+      projectState = readModsState(modContext).projects[projectId];
+      versionEntry = projectState?.versions?.[minecraftVersion];
+    }
+
+    const projectType = getModrinthProjectType(projectState);
+    const unavailableCheckIsFresh = isUnavailableManagedProjectCheckFresh(state, projectId, minecraftVersion, projectType);
+    if (!forceRefreshAll && unavailableCheckIsFresh && (!versionEntry?.libraryPath || !fs.existsSync(versionEntry.libraryPath))) {
+      const unavailableEntry = getUnavailableManagedProjectCheck(state, projectId, minecraftVersion, projectType);
+      autoDisabledProjects.add(projectId);
+      disabledProjectReasonUpdates.set(projectId, createDisableReason({
+        reason: `No compatible version for Minecraft ${minecraftVersion} was found.`,
+        technicalEvidence: `Cached Modrinth result from ${unavailableEntry?.checkedAt || 'unknown'}: ${unavailableEntry?.reason || 'no compatible version'}.`,
+        automated: true,
+        source: 'managed-version-sync'
+      }));
+      warnings.push(`${projectState?.title || projectId}: Keine passende Version für ${minecraftVersion} gefunden (kürzlich bereits auf Modrinth geprüft).`);
+      continue;
+    }
+
+    let missingExactVersion = false;
+    let missingExactVersionReason = '';
+    if (shouldRefreshProject || !versionEntry?.libraryPath || !fs.existsSync(versionEntry.libraryPath)) {
+      try {
+        const installResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+          forceRefresh: shouldRefreshProject,
+          ...getDependencyInstallOptions(projectId),
+          visitedProjects: new Set(),
+          modContext
+        });
+        mergeDependencyInstallConstraints(installResult.dependencyRequirements || [], installResult.title || projectState?.title || projectId);
+        requeueDependencyProjects(installResult.dependencyProjectIds || []);
+        warnings.push(...(installResult.warnings || []));
+        state = readModsState(modContext);
+        clearUnavailableManagedProjectCheck(state, projectId, minecraftVersion, projectType);
+        writeModsState(state, modContext);
+      } catch (error) {
+        missingExactVersion = isMissingCompatibleModrinthVersionError(error);
+        if (missingExactVersion) {
+          missingExactVersionReason = error.message;
+        }
+        if (missingExactVersion && !shouldRefreshProject) {
+          try {
+            const repairResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+              forceRefresh: true,
+              ...getDependencyInstallOptions(projectId),
+              visitedProjects: new Set(),
+              modContext
+            });
+            missingExactVersion = false;
+            mergeDependencyInstallConstraints(repairResult.dependencyRequirements || [], repairResult.title || projectState?.title || projectId);
+            requeueDependencyProjects(repairResult.dependencyProjectIds || []);
+            warnings.push(...(repairResult.warnings || []));
+            state = readModsState(modContext);
+            clearUnavailableManagedProjectCheck(state, projectId, minecraftVersion, projectType);
+            writeModsState(state, modContext);
+          } catch (repairError) {
+            if (isMissingCompatibleModrinthVersionError(repairError)) {
+              missingExactVersionReason = repairError.message;
+            }
+            warnings.push(`${projectState?.title || projectId}: Cache-Refresh konnte keine passende Fabric-Version finden (${repairError.message}).`);
+          }
+        }
+        warnings.push(`${projectState?.title || projectId}: ${error.message}`);
+      }
+
+      projectState = readModsState(modContext).projects[projectId];
+      versionEntry = projectState?.versions?.[minecraftVersion];
+      if (missingExactVersion) {
+        versionEntry = null;
+      }
+      for (const extraProjectId of Object.keys(readModsState(modContext).projects || {})) {
+        if (!seenProjectIds.has(extraProjectId) && !pendingProjectIds.includes(extraProjectId)) {
+          pendingProjectIds.push(extraProjectId);
+        }
+      }
+    }
+
+    const integrityIssue = versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath)
+      ? getManagedVersionIntegrityIssue(versionEntry)
+      : '';
+    if (integrityIssue) {
+      warnings.push(`${projectState?.title || projectId}: Lokale Library-JAR ist beschädigt (${integrityIssue}) und wird neu geladen.`);
+      try {
+        const installResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+          forceRefresh: true,
+          ...getDependencyInstallOptions(projectId),
+          visitedProjects: new Set(),
+          modContext
+        });
+        mergeDependencyInstallConstraints(installResult.dependencyRequirements || [], installResult.title || projectState?.title || projectId);
+        requeueDependencyProjects(installResult.dependencyProjectIds || []);
+        warnings.push(...(installResult.warnings || []));
+      } catch (error) {
+        warnings.push(`${projectState?.title || projectId}: Reparaturdownload fehlgeschlagen: ${error.message}`);
+      }
+      projectState = readModsState(modContext).projects[projectId];
+      versionEntry = projectState?.versions?.[minecraftVersion];
+      const repairedIntegrityIssue = versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath)
+        ? getManagedVersionIntegrityIssue(versionEntry)
+        : 'Datei fehlt.';
+      if (repairedIntegrityIssue) {
+        warnings.push(`${projectState?.title || projectId}: Wird nicht geladen, weil die Library-JAR weiterhin ungültig ist (${repairedIntegrityIssue}).`);
+        versionEntry = null;
+      }
+    }
+
+    if (versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath) && !isManagedVersionAllowedForPreferredLoader(versionEntry, getModrinthProjectType(projectState))) {
+      warnings.push(`${projectState?.title || projectId}: Falscher Loader, wird neu installiert.`);
+      try {
+        const installResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+          forceRefresh: true,
+          ...getDependencyInstallOptions(projectId),
+          visitedProjects: new Set(),
+          modContext
+        });
+        mergeDependencyInstallConstraints(installResult.dependencyRequirements || [], installResult.title || projectState?.title || projectId);
+        requeueDependencyProjects(installResult.dependencyProjectIds || []);
+        warnings.push(...(installResult.warnings || []));
+      } catch (error) {
+        warnings.push(`${projectState?.title || projectId}: Neuinstallation fehlgeschlagen: ${error.message}`);
+      }
+      projectState = readModsState(modContext).projects[projectId];
+      versionEntry = projectState?.versions?.[minecraftVersion];
+      if (versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath) && !isManagedVersionAllowedForPreferredLoader(versionEntry, getModrinthProjectType(projectState))) {
+        warnings.push(`${projectState?.title || projectId}: Keine passende Fabric-Version gefunden.`);
+        versionEntry = null;
+      }
+    }
+
+    if (versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath) && !isManagedVersionJarCompatibleWithMinecraft(versionEntry, minecraftVersion)) {
+      const jarCompatibility = getManagedJarMinecraftCompatibility(versionEntry, minecraftVersion);
+      warnings.push(`${projectState?.title || jarCompatibility.modName || projectId}: Falsche Minecraft-Version, wird neu installiert.`);
+      try {
+        const installResult = await installManagedProjectVersion(projectState || { projectId }, minecraftVersion, {
+          forceRefresh: true,
+          ...getDependencyInstallOptions(projectId),
+          visitedProjects: new Set(),
+          modContext
+        });
+        mergeDependencyInstallConstraints(installResult.dependencyRequirements || [], installResult.title || projectState?.title || projectId);
+        requeueDependencyProjects(installResult.dependencyProjectIds || []);
+        warnings.push(...(installResult.warnings || []));
+      } catch (error) {
+        warnings.push(`${projectState?.title || projectId}: Neuinstallation fehlgeschlagen: ${error.message}`);
+      }
+      projectState = readModsState(modContext).projects[projectId];
+      versionEntry = projectState?.versions?.[minecraftVersion];
+      const repairedCompatibility = versionEntry?.libraryPath && fs.existsSync(versionEntry.libraryPath)
+        ? getManagedJarMinecraftCompatibility(versionEntry, minecraftVersion)
+        : { compatible: false };
+      if (repairedCompatibility.compatible === false) {
+        warnings.push(`${projectState?.title || repairedCompatibility.modName || projectId}: Keine passende Version für ${minecraftVersion} gefunden.`);
+        versionEntry = null;
+      }
+    }
+
+    if (!versionEntry?.libraryPath || !fs.existsSync(versionEntry.libraryPath)) {
+      const retainedFile = (previousFilesByProject.get(projectId) || [])
+        .find((entry) => entry?.targetPath
+          && entry.minecraftVersion === minecraftVersion
+          && isPathInsideDirectory(modContext.modsDir, entry.targetPath)
+          && fs.existsSync(entry.targetPath)
+          && isJarCompatibleWithMinecraft(entry.targetPath, minecraftVersion));
+      if (retainedFile) {
+        const retainedFileName = String(retainedFile.fileName || path.basename(retainedFile.targetPath) || '').trim();
+        warnings.push(`${projectState?.title || projectId}: Keine kompatible Version für ${minecraftVersion} verfügbar. ${retainedFileName || 'Die vorhandene Datei'} bleibt aktiv.`);
+        reservedNames.add(retainedFileName || path.basename(retainedFile.targetPath));
+        activeFiles.push({
+          ...retainedFile,
+          fileName: retainedFileName || path.basename(retainedFile.targetPath),
+          minecraftVersion: retainedFile.minecraftVersion || minecraftVersion
+        });
+        autoDisabledProjects.delete(projectId);
+        disabledProjectReasonClears.add(projectId);
+        continue;
+      }
+
+      autoDisabledProjects.add(projectId);
+      state = readModsState(modContext);
+      rememberUnavailableManagedProjectCheck(
+        state,
+        projectId,
+        minecraftVersion,
+        missingExactVersionReason || 'Automatic Modrinth compatibility sync could not find an installable version.',
+        projectType
+      );
+      writeModsState(state, modContext);
+      disabledProjectReasonUpdates.set(projectId, createDisableReason({
+        reason: `No compatible version for Minecraft ${minecraftVersion} was found.`,
+        technicalEvidence: 'Automatic Modrinth compatibility sync could not find an installable version.',
+        automated: true,
+        source: 'managed-version-sync'
+      }));
+      warnings.push(`${projectState?.title || projectId}: Keine passende Version für ${minecraftVersion} gefunden.`);
+      continue;
+    }
+
+    autoDisabledProjects.delete(projectId);
+    disabledProjectReasonClears.add(projectId);
+
+    const activeFileName = getActiveManagedModFileName(versionEntry, projectId, minecraftVersion);
+    const targetFileName = allocateManagedModFileName(activeFileName, projectId, reservedNames);
+    const targetPath = path.join(modContext.modsDir, targetFileName);
+    try {
+      fs.copyFileSync(versionEntry.libraryPath, targetPath);
+    } catch (error) {
+      warnings.push(`${projectState?.title || projectId}: Konnte nicht in den Mods-Ordner kopiert werden (${error.message}).`);
+      logger.warn('Managed mod copy failed during sync', {
+        projectId,
+        sourcePath: versionEntry.libraryPath,
+        targetPath,
+        error: serializeError(error)
+      });
+      continue;
+    }
+    reservedNames.add(targetFileName);
+    activeFiles.push({
+      projectId,
+      fileName: targetFileName,
+      targetPath,
+      libraryPath: versionEntry.libraryPath,
+      minecraftVersion
+    });
+  }
+
+  state = readModsState(modContext);
+  const duplicateModIdCleanup = removeDuplicateManagedFabricModIds(
+    activeFiles,
+    modContext,
+    state,
+    warnings,
+    disabledProjectReasonUpdates
+  );
+  activeFiles = duplicateModIdCleanup.activeFiles;
+  for (const removedProjectId of duplicateModIdCleanup.removedProjectIds) {
+    autoDisabledProjects.add(removedProjectId);
+  }
+
+  state = readModsState(modContext);
+  const activeManagedPaths = new Set(
+    activeFiles
+      .map((entry) => String(entry?.targetPath || '').trim())
+      .filter(Boolean)
+      .map((targetPath) => path.resolve(targetPath))
+  );
+  for (const entry of previousFiles) {
+    if (!entry?.targetPath || !isPathInsideDirectory(modContext.modsDir, entry.targetPath)) {
+      continue;
+    }
+
+    if (activeManagedPaths.has(path.resolve(entry.targetPath))) {
+      continue;
+    }
+
+    if (fs.existsSync(entry.targetPath)) {
+      try {
+        fs.unlinkSync(entry.targetPath);
+      } catch (_error) {
+        // ignore single-file cleanup failures and continue with the new sync state
+      }
+    }
+  }
+
+  warnings.push(...detectKnownModConflictWarnings(modContext, state, activeFiles));
+
+  state.activeSync = {
+    minecraftVersion,
+    files: activeFiles
+  };
+  state.autoDisabledProjects = [...autoDisabledProjects].filter((projectId) => !disabledProjects.has(projectId));
+  state.disabledProjectReasons = {
+    ...(state.disabledProjectReasons || {})
+  };
+  for (const projectId of disabledProjectReasonClears) {
+    if (!autoDisabledProjects.has(projectId) && !disabledProjects.has(projectId)) {
+      delete state.disabledProjectReasons[projectId];
+    }
+  }
+  for (const [projectId, reasonEntry] of disabledProjectReasonUpdates.entries()) {
+    state.disabledProjectReasons[projectId] = reasonEntry;
+  }
+  writeModsState(state, modContext);
+
+  return {
+    synced: activeFiles.length,
+    totalProjects: Object.keys(readModsState(modContext).projects || {}).length,
+    files: activeFiles,
+    autoDisabledProjects: uniqueStrings([...autoDisabledProjects].filter((projectId) => !disabledProjects.has(projectId))),
+    disabledProjects: uniqueStrings([...disabledProjects, ...autoDisabledProjects]),
+    warnings: uniqueStrings(warnings)
+  };
+}
+
+function formatManagedModsWarning(warnings) {
+  const items = uniqueStrings(warnings);
+  if (!items.length) {
+    return '';
+  }
+
+  const preview = items[0];
+  return items.length > 1
+    ? `${preview} | +${items.length - 1} weitere`
+    : preview;
+}
+
+function formatManagedModsLaunchMessage(syncResult) {
+  const warningText = formatManagedModsWarning(syncResult?.warnings || []);
+  return warningText ? ` Hinweis Mods: ${warningText}` : '';
+}
+
+function assertLaunchRequiredModsSynced(syncResult, minecraftVersion) {
+  const autoDisabledProjects = uniqueStrings(syncResult?.autoDisabledProjects || []);
+  if (autoDisabledProjects.length) {
+    const warningText = formatManagedModsWarning(syncResult?.warnings || []);
+    throw new Error(`Minecraft kann nicht gestartet werden, weil ${autoDisabledProjects.length} verwaltete Mod${autoDisabledProjects.length === 1 ? '' : 's'} nach der automatischen Reparatur keine kompatible Fabric-Version für ${minecraftVersion} hat.${warningText ? ` Details: ${warningText}` : ''}`);
+  }
+
+  if (isFabricApiHiddenForMinecraftVersion(minecraftVersion)) {
+    return;
+  }
+
+  const activeFiles = Array.isArray(syncResult?.files) ? syncResult.files : [];
+  const disabledProjects = new Set(syncResult?.disabledProjects || []);
+  const hasFabricApi = activeFiles.some((entry) => entry.projectId === FABRIC_API_PROJECT_ID);
+
+  if (!hasFabricApi && !disabledProjects.has(FABRIC_API_PROJECT_ID)) {
+    throw new Error(`Minecraft kann nicht gestartet werden, weil Fabric API für ${minecraftVersion} nach der automatischen Reparatur nicht aktiv ist.`);
+  }
+
+  if (!hasFabricApi && !disabledProjects.has(FABRIC_API_PROJECT_ID)) {
+    syncResult.warnings = uniqueStrings([
+      ...(syncResult.warnings || []),
+      `Fabric API wurde für ${minecraftVersion} nicht installiert; Start wird trotzdem versucht.`
+    ]);
+  }
+}
+
+function removeDuplicateManagedFabricModIds(activeFiles, modContext, state, warnings = [], disabledProjectReasonUpdates = new Map()) {
+  const entriesByModId = new Map();
+  const removedProjectIds = new Set();
+  const keptFiles = [];
+
+  for (const activeFile of activeFiles || []) {
+    const targetPath = String(activeFile?.targetPath || '').trim();
+    if (!targetPath || !fs.existsSync(targetPath) || !isPathInsideDirectory(modContext.modsDir, targetPath)) {
+      keptFiles.push(activeFile);
+      continue;
+    }
+
+    const manifestInfo = readFabricModManifest(targetPath);
+    const modId = String(manifestInfo?.manifest?.id || '').trim().toLowerCase();
+    if (!modId) {
+      keptFiles.push(activeFile);
+      continue;
+    }
+
+    const project = state.projects?.[activeFile.projectId];
+    const candidate = {
+      activeFile,
+      modId,
+      protected: isProtectedManagedProject(activeFile.projectId, project) || isRequiredModFileName(activeFile.fileName),
+      title: project?.title || activeFile.fileName || activeFile.projectId
+    };
+    const existing = entriesByModId.get(modId);
+    if (!existing) {
+      entriesByModId.set(modId, candidate);
+      keptFiles.push(activeFile);
+      continue;
+    }
+
+    const keepCandidate = existing.protected && !candidate.protected ? existing : candidate;
+    const removeCandidate = keepCandidate === existing ? candidate : existing;
+    if (keepCandidate === candidate) {
+      const existingIndex = keptFiles.findIndex((entry) => entry === existing.activeFile);
+      if (existingIndex >= 0) {
+        keptFiles.splice(existingIndex, 1, candidate.activeFile);
+      } else {
+        keptFiles.push(candidate.activeFile);
+      }
+      entriesByModId.set(modId, candidate);
+    }
+
+    if (removeCandidate.activeFile?.targetPath && fs.existsSync(removeCandidate.activeFile.targetPath)) {
+      try {
+        fs.unlinkSync(removeCandidate.activeFile.targetPath);
+      } catch (_error) {
+        warnings.push(`${removeCandidate.title}: Doppelte Mod-ID ${modId} erkannt, konnte aber nicht entfernt werden.`);
+        continue;
+      }
+    }
+
+    removedProjectIds.add(removeCandidate.activeFile.projectId);
+    disabledProjectReasonUpdates.set(removeCandidate.activeFile.projectId, createDisableReason({
+      reason: `Doppelte Fabric-Mod-ID ${modId}.`,
+      technicalEvidence: `${removeCandidate.title} kollidiert mit ${keepCandidate.title}.`,
+      automated: true
+    }));
+    warnings.push(`${removeCandidate.title}: Doppelte Mod-ID ${modId} erkannt und deaktiviert; ${keepCandidate.title} bleibt aktiv.`);
+  }
+
+  return {
+    activeFiles: keptFiles.filter((entry) => !removedProjectIds.has(entry.projectId)),
+    removedProjectIds
+  };
+}
+
+function getDefaultDownloadableModrinthState() {
+  return {
+    downloads: {
+      shader: {},
+      resourcepack: {}
+    }
+  };
+}
+
+function normalizeDownloadableModrinthState(rawState) {
+  const normalizedState = getDefaultDownloadableModrinthState();
+  const rawDownloads = rawState?.downloads && typeof rawState.downloads === 'object'
+    ? rawState.downloads
+    : {};
+
+  for (const projectType of ['shader', 'resourcepack']) {
+    const rawBucket = rawDownloads[projectType] && typeof rawDownloads[projectType] === 'object'
+      ? rawDownloads[projectType]
+      : {};
+
+    for (const [projectKey, rawEntry] of Object.entries(rawBucket)) {
+      const rawProjectKey = String(projectKey || '').trim();
+      const contextKey = String(rawEntry?.contextKey || '').trim()
+        || (rawProjectKey.startsWith('pack:') ? rawProjectKey.split(':').slice(0, 2).join(':') : '')
+        || (rawProjectKey.startsWith('global:') ? 'global' : '');
+      const projectId = String(rawEntry?.projectId || (contextKey ? rawProjectKey.split(':').pop() : rawProjectKey) || '').trim();
+      if (!projectId) {
+        continue;
+      }
+
+      const stateKey = contextKey ? `${contextKey}:${projectId}` : projectId;
+      normalizedState.downloads[projectType][stateKey] = {
+        projectId,
+        contextKey,
+        projectType,
+        slug: String(rawEntry?.slug || '').trim(),
+        title: String(rawEntry?.title || '').trim(),
+        description: String(rawEntry?.description || '').trim(),
+        iconUrl: String(rawEntry?.iconUrl || '').trim(),
+        minecraftVersion: String(rawEntry?.minecraftVersion || '').trim(),
+        versionId: String(rawEntry?.versionId || '').trim(),
+        versionNumber: String(rawEntry?.versionNumber || '').trim(),
+        versionName: String(rawEntry?.versionName || '').trim(),
+        fileName: String(rawEntry?.fileName || '').trim(),
+        path: String(rawEntry?.path || '').trim(),
+        sha1: String(rawEntry?.sha1 || '').trim().toLowerCase(),
+        sha512: String(rawEntry?.sha512 || '').trim().toLowerCase(),
+        size: Number(rawEntry?.size || 0),
+        installedAt: String(rawEntry?.installedAt || '').trim()
+      };
+    }
+  }
+
+  return normalizedState;
+}
+
+function readDownloadableModrinthState() {
+  ensureDir(CONFIG_DIR);
+  if (!fs.existsSync(DOWNLOADABLE_MODRINTH_STATE_FILE)) {
+    ROBUSTNESS.writeJsonFileAtomic(DOWNLOADABLE_MODRINTH_STATE_FILE, getDefaultDownloadableModrinthState(), {
+      label: 'modrinth-downloads-state',
+      backup: false,
+      metadata: { createdDefault: true }
+    });
+  }
+
+  return ROBUSTNESS.readJsonFile(DOWNLOADABLE_MODRINTH_STATE_FILE, getDefaultDownloadableModrinthState(), {
+    label: 'modrinth-downloads-state',
+    normalize: normalizeDownloadableModrinthState
+  });
+}
+
+function writeDownloadableModrinthState(state) {
+  ensureDir(CONFIG_DIR);
+  ROBUSTNESS.writeJsonFileAtomic(DOWNLOADABLE_MODRINTH_STATE_FILE, normalizeDownloadableModrinthState(state), {
+    label: 'modrinth-downloads-state',
+    metadata: { operation: 'writeDownloadableModrinthState' }
+  });
+}
+
+function getDownloadableModrinthBucket(state, projectType) {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  if (normalizedProjectType !== 'shader' && normalizedProjectType !== 'resourcepack') {
+    return null;
+  }
+
+  state.downloads = state.downloads && typeof state.downloads === 'object'
+    ? state.downloads
+    : {};
+  state.downloads[normalizedProjectType] = state.downloads[normalizedProjectType] && typeof state.downloads[normalizedProjectType] === 'object'
+    ? state.downloads[normalizedProjectType]
+    : {};
+  return state.downloads[normalizedProjectType];
+}
+
+function getDownloadableModrinthContextKey(modContext = getActiveModContext()) {
+  return modContext?.type === 'pack' && modContext.packId
+    ? `pack:${modContext.packId}`
+    : 'global';
+}
+
+function createDownloadableModrinthStateKey(projectId, modContext = getActiveModContext()) {
+  const normalizedProjectId = String(projectId || '').trim();
+  return `${getDownloadableModrinthContextKey(modContext)}:${normalizedProjectId}`;
+}
+
+function getDownloadableModrinthEntryProjectId(stateKey, entry) {
+  return String(entry?.projectId || '').trim() || String(stateKey || '').split(':').pop();
+}
+
+function downloadableModrinthEntryMatchesContext(stateKey, entry, modContext = getActiveModContext()) {
+  const contextKey = getDownloadableModrinthContextKey(modContext);
+  const entryContextKey = String(entry?.contextKey || '').trim();
+  if (entryContextKey) {
+    return entryContextKey === contextKey;
+  }
+
+  const normalizedStateKey = String(stateKey || '').trim();
+  if (normalizedStateKey.startsWith('pack:') || normalizedStateKey.startsWith('global:')) {
+    return normalizedStateKey.startsWith(`${contextKey}:`);
+  }
+
+  return contextKey === 'global';
+}
+
+function getInstalledDownloadableModrinthProjectIds(projectType = '', modContext = getActiveModContext()) {
+  const state = readDownloadableModrinthState();
+  const projectTypes = projectType
+    ? [normalizeModrinthProjectType(projectType)]
+    : ['shader', 'resourcepack'];
+  const installedProjectIds = [];
+  let changed = false;
+
+  for (const currentProjectType of projectTypes) {
+    const downloadTarget = getModrinthDownloadTarget(currentProjectType, modContext);
+    const bucket = getDownloadableModrinthBucket(state, currentProjectType);
+    if (!bucket) {
+      continue;
+    }
+
+    for (const [projectId, entry] of Object.entries(bucket)) {
+      if (!downloadableModrinthEntryMatchesContext(projectId, entry, modContext)) {
+        continue;
+      }
+
+      const existingPath = getDownloadableModrinthEntryPath(entry, downloadTarget.directory);
+      if (!existingPath) {
+        delete bucket[projectId];
+        changed = true;
+        continue;
+      }
+
+      installedProjectIds.push(getDownloadableModrinthEntryProjectId(projectId, entry));
+    }
+  }
+
+  if (changed) {
+    writeDownloadableModrinthState(state);
+  }
+
+  return uniqueStrings(installedProjectIds);
+}
+
+async function enrichDownloadableModrinthEntryMetadata(state, projectType, projectId, entry) {
+  if (entry?.iconUrl && entry?.title && entry?.description) {
+    return entry;
+  }
+
+  const modrinthProjectId = getDownloadableModrinthEntryProjectId(projectId, entry);
+  try {
+    const projectInfo = await fetchModrinthProject(modrinthProjectId);
+    const bucket = getDownloadableModrinthBucket(state, projectType);
+    const currentEntry = bucket?.[projectId] || entry;
+    const updatedEntry = {
+      ...currentEntry,
+      projectId: modrinthProjectId,
+      slug: String(projectInfo?.slug || currentEntry.slug || '').trim(),
+      title: String(projectInfo?.title || currentEntry.title || modrinthProjectId).trim(),
+      description: String(projectInfo?.description || currentEntry.description || '').trim(),
+      iconUrl: String(projectInfo?.icon_url || currentEntry.iconUrl || '').trim()
+    };
+    bucket[projectId] = updatedEntry;
+    writeDownloadableModrinthState(state);
+    return updatedEntry;
+  } catch (_error) {
+    return entry;
+  }
+}
+
+function listDownloadablePackFilesRecursive(directory, visitedDirectories = new Set(), seenFiles = new Set()) {
+  if (!directory || !fs.existsSync(directory)) {
+    return [];
+  }
+  let canonicalDirectory = '';
+  try {
+    canonicalDirectory = getComparablePath(fs.realpathSync(directory));
+  } catch (_error) {
+    canonicalDirectory = getComparablePath(directory);
+  }
+  if (visitedDirectories.has(canonicalDirectory)) {
+    return [];
+  }
+  visitedDirectories.add(canonicalDirectory);
+
+  let directoryEntries = [];
+  try {
+    directoryEntries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    logger.warn('Could not read resource or shader pack directory', {
+      directory,
+      error: serializeError(error)
+    });
+    return [];
+  }
+
+  const files = [];
+  for (const directoryEntry of directoryEntries) {
+    const entryPath = path.join(directory, directoryEntry.name);
+    let linkedStats = null;
+    try {
+      linkedStats = directoryEntry.isSymbolicLink() ? fs.statSync(entryPath) : null;
+    } catch (error) {
+      logger.warn('Ignored unreadable resource or shader pack path', {
+        path: entryPath,
+        error: serializeError(error)
+      });
+      continue;
+    }
+
+    if (directoryEntry.isDirectory() || linkedStats?.isDirectory()) {
+      files.push(...listDownloadablePackFilesRecursive(entryPath, visitedDirectories, seenFiles));
+      continue;
+    }
+    if ((!directoryEntry.isFile() && !linkedStats?.isFile()) || !directoryEntry.name.toLowerCase().endsWith('.zip')) {
+      continue;
+    }
+
+    let canonicalFile = '';
+    try {
+      canonicalFile = getComparablePath(fs.realpathSync(entryPath));
+    } catch (_error) {
+      canonicalFile = getComparablePath(entryPath);
+    }
+    if (seenFiles.has(canonicalFile)) {
+      logger.info('Ignored duplicate pack path (same file or symbolic link)', {
+        path: entryPath,
+        canonicalFile
+      });
+      continue;
+    }
+    seenFiles.add(canonicalFile);
+    files.push(entryPath);
+  }
+  return files;
+}
+
+function getDownloadablePackIdentity(filePath) {
+  const stem = path.basename(filePath, path.extname(filePath))
+    .toLowerCase()
+    .replace(/(?:^|[-_. ])v?\d+(?:[._-]\d+)+(?:[-_.][a-z]+\d*)*/giu, '-')
+    .replace(/(?:^|[-_. ])(?:copy|final|new|old|updated?|\d+)(?=$|[-_. ])/gu, '-')
+    .replace(/[-_. ]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+  return stem ? `name:${stem}` : `path:${getComparablePath(filePath)}`;
+}
+
+function getLocalPackIconDataUrl(filePath) {
+  try {
+    const archive = getZipCentralDirectoryEntries(filePath);
+    const iconEntry = archive.entries.find((entry) => (
+      String(entry?.name || '').replace(/^\.\//u, '').toLowerCase() === 'pack.png'
+      && Number(entry.uncompressedSize || 0) <= 2 * 1024 * 1024
+    ));
+    if (!iconEntry) {
+      return '';
+    }
+    const iconBuffer = readZipEntryBufferFromArchive(archive, iconEntry);
+    if (!iconBuffer.length || iconBuffer.length > 2 * 1024 * 1024) {
+      return '';
+    }
+    return `data:image/png;base64,${iconBuffer.toString('base64')}`;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function createLocalDownloadablePackEntry(projectType, filePath) {
+  const stats = fs.statSync(filePath);
+  const fileName = path.basename(filePath);
+  return {
+    id: `file:${filePath}`,
+    projectId: '',
+    slug: '',
+    name: fileName.replace(/\.zip$/iu, ''),
+    description: projectType === 'shader'
+      ? 'Lokaler Shaderpack im shaderpacks-Ordner des aktiven Profils.'
+      : 'Lokales Ressourcenpaket im resourcepacks-Ordner des aktiven Profils.',
+    iconUrl: getLocalPackIconDataUrl(filePath),
+    isProtected: false,
+    canDisable: false,
+    path: filePath,
+    size: stats.size,
+    enabled: true,
+    autoDisabled: false,
+    disabledReason: '',
+    managed: false,
+    source: 'manual',
+    itemType: projectType,
+    sourceLabel: projectType === 'shader' ? 'Shader' : 'Ressourcenpaket',
+    fileName,
+    minecraftVersion: '',
+    versionName: '',
+    versionNumber: '',
+    lastUpdated: stats.mtime.toISOString()
+  };
+}
+
+async function getInstalledDownloadableModrinthEntries(modContext = getActiveModContext()) {
+  const contentMutationLocked = isMinecraftMutationLocked();
+  const state = readDownloadableModrinthState();
+  const installedEntries = [];
+  let changed = false;
+
+  for (const projectType of ['shader', 'resourcepack']) {
+    const downloadTarget = getModrinthDownloadTarget(projectType, modContext);
+    const bucket = getDownloadableModrinthBucket(state, projectType);
+    if (!bucket) {
+      continue;
+    }
+
+    for (const [stateKey, rawEntry] of Object.entries(bucket)) {
+      if (!downloadableModrinthEntryMatchesContext(stateKey, rawEntry, modContext)) {
+        continue;
+      }
+
+      const projectId = getDownloadableModrinthEntryProjectId(stateKey, rawEntry);
+      const entry = await enrichDownloadableModrinthEntryMetadata(state, projectType, stateKey, rawEntry);
+      const existingPath = getDownloadableModrinthEntryPath(entry, downloadTarget.directory);
+      if (!existingPath) {
+        delete bucket[stateKey];
+        changed = true;
+        continue;
+      }
+
+      let stats = null;
+      try {
+        stats = fs.statSync(existingPath);
+      } catch (_error) {
+        delete bucket[stateKey];
+        changed = true;
+        continue;
+      }
+
+      installedEntries.push({
+        id: `download:${projectType}:${projectId}`,
+        projectId,
+        slug: String(entry.slug || '').trim(),
+        name: String(entry.title || entry.fileName || projectId).trim(),
+        description: String(entry.description || '').trim() || (projectType === 'shader'
