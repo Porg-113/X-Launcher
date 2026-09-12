@@ -98,6 +98,7 @@ strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .s
 .closing a { display: inline-block; background: var(--cyan); color: #001115; padding: 14px 22px; border-radius: 12px; text-decoration: none; font-weight: 900; box-shadow: 0 0 25px rgba(0, 255, 255, .25); }
 footer { display: flex; justify-content: space-between; color: #548087; font-size: .76rem; padding: 35px 0 45px; }
 body, body * { font-weight: 400 !important; }
+.live-stats, .live-stats strong, .live-stats small, .download, .download strong, .download small, .secondary { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
 .reveal { opacity: 0; transform: translateY(34px); transition: opacity .85s ease, transform .85s cubic-bezier(.2,.8,.2,1); }
 .reveal.visible { opacity: 1; transform: translateY(0); }
 .features .reveal:nth-child(2) { transition-delay: .12s; }

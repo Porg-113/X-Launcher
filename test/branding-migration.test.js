@@ -39,5 +39,6 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteCss, /strong, b, h1, h2, h3, h4, h5, h6/u);
   assert.match(websiteCss, /fonts\/Minecraft\.otf/u);
   assert.match(websiteCss, /body, body \* \{ font-weight: 400 !important; \}/u);
+  assert.match(websiteCss, /\.live-stats, \.live-stats strong, \.live-stats small, \.download, \.download strong, \.download small, \.secondary \{ font-family: Inter/u);
   assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft.otf')));
 });
