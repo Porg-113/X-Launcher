@@ -1,0 +1,1133 @@
+    } else {
+      statusEl.textContent = 'Minecraft-Ordner wird erstellt';
+      statusEl.style.color = 'var(--danger)';
+    }
+  }
+
+  updateJavaStatus() {
+    const javaStatusEl = document.getElementById('java-status');
+    const fabricStatusEl = document.getElementById('fabric-status');
+
+    if (javaStatusEl) {
+      if (!this.launcherStatus?.javaFound) {
+        javaStatusEl.textContent = 'Java nicht gefunden';
+        javaStatusEl.style.color = 'var(--danger)';
+      } else if (this.launcherStatus.needsJavaUpgrade) {
+        javaStatusEl.textContent = `Java ${this.launcherStatus.javaMajorVersion} erkannt, Java 21 empfohlen`;
+        javaStatusEl.style.color = 'var(--warning, #f1c40f)';
+      } else {
+        javaStatusEl.textContent = `Java ${this.launcherStatus.javaMajorVersion} erkannt`;
+        javaStatusEl.style.color = 'var(--success)';
+      }
+    }
+
+    if (fabricStatusEl) {
+      if (!this.launcherStatus?.success) {
+        fabricStatusEl.textContent = 'Java-Status nicht verfügbar';
+      } else {
+        const activePack = this.getActivePack();
+        const activeVersion = this.getSelectedVersionDisplayName() || 'keine Auswahl';
+        fabricStatusEl.textContent = activePack
+          ? `Aktiv: ${activePack.name} | ${activeVersion}`
+          : `Aktiv: ${activeVersion}`;
+        fabricStatusEl.style.color = 'var(--success)';
+      }
+    }
+  }
+
+  updateModsCount() {
+    const countEl = document.getElementById('mods-count');
+    if (countEl) {
+      countEl.textContent = `${this.mods.length} Mod${this.mods.length !== 1 ? 's' : ''}`;
+    }
+  }
+
+  updateModsCheckStatus(overrideText = '') {
+    const statusEl = document.getElementById('mods-check-status');
+    if (!statusEl) {
+      return;
+    }
+
+    statusEl.classList.remove('is-ok', 'is-warning', 'is-error');
+    if (overrideText) {
+      statusEl.textContent = overrideText;
+      statusEl.classList.add('is-error');
+      return;
+    }
+
+    const versionLabel = this.getSelectedVersionDisplayName();
+    const versionText = versionLabel ? `Fabric ${versionLabel}` : 'die ausgewählte Version';
+    const viewConfig = this.getModsViewConfig();
+    const visibleMods = this.mods.filter((mod) => (
+      viewConfig.value === 'hidden'
+        ? Boolean(mod.hiddenInModsTab)
+        : !mod.hiddenInModsTab && String(mod.itemType || 'mod') === viewConfig.value
+    ));
+    if (viewConfig.value === 'hidden') {
+      if (!visibleMods.length) {
+        statusEl.textContent = viewConfig.emptyText;
+        statusEl.classList.add('is-warning');
+        return;
+      }
+
+      const enabledHiddenMods = visibleMods.filter((mod) => mod.enabled !== false);
+      statusEl.textContent = `${enabledHiddenMods.length}/${visibleMods.length} Pflicht- und Systemmods aktiv.`;
+      statusEl.classList.add(enabledHiddenMods.length === visibleMods.length ? 'is-ok' : 'is-warning');
+      return;
+    }
+    if (viewConfig.value !== 'mod') {
+      if (!visibleMods.length) {
+        statusEl.textContent = viewConfig.emptyText;
+        statusEl.classList.add('is-warning');
+        return;
+      }
+
+      statusEl.textContent = `${visibleMods.length} ${viewConfig.title}${visibleMods.length === 1 ? '' : ''} installiert.`;
+      statusEl.classList.add('is-ok');
+      return;
+    }
+
+    const activeMods = visibleMods.filter((mod) => mod.enabled !== false);
+    const managedActiveMods = activeMods.filter((mod) => mod.managed);
+    const manualActiveMods = activeMods.filter((mod) => !mod.managed);
+    const disabledMods = visibleMods.filter((mod) => mod.enabled === false);
+    const autoDisabledMods = disabledMods.filter((mod) => mod.autoDisabled);
+    const currentVersionId = this.getActiveContextVersionId();
+    const lastResult = this.lastModsCheckResult?.versionId === currentVersionId
+      ? this.lastModsCheckResult
+      : null;
+
+    if (!visibleMods.length) {
+      statusEl.textContent = `Keine Mods für ${versionText} installiert.`;
+      statusEl.classList.add('is-warning');
+      return;
+    }
+
+    if (manualActiveMods.length > 0) {
+      statusEl.textContent = `${manualActiveMods.length} aktive Mod${manualActiveMods.length === 1 ? '' : 's'} sind manuell und können nicht sicher automatisch korrigiert werden. Alle prüfen übernimmt erkennbare Modrinth-JARs oder schaltet unpassende Dateien aus.`;
+      statusEl.classList.add('is-warning');
+      return;
+    }
+
+    if (autoDisabledMods.length > 0) {
+      statusEl.textContent = `${autoDisabledMods.length} Mod${autoDisabledMods.length === 1 ? '' : 's'} sind ausgeschaltet, weil keine passende Version für ${versionText} gefunden wurde.`;
+      statusEl.classList.add('is-warning');
+      return;
+    }
+
+    if (disabledMods.length > 0) {
+      statusEl.textContent = `${disabledMods.length} Mod${disabledMods.length === 1 ? ' ist' : 's sind'} ausgeschaltet. Aktive verwaltete Mods sind passend für ${versionText}.`;
+      statusEl.classList.add('is-warning');
+      return;
+    }
+
+    const checkedText = lastResult?.success && Number.isFinite(Number(lastResult.updated)) && Number.isFinite(Number(lastResult.total))
+      ? ` Zuletzt geprüft: ${lastResult.updated}/${lastResult.total}.`
+      : '';
+    statusEl.textContent = `Alles richtig: ${managedActiveMods.length} verwaltete Mod${managedActiveMods.length === 1 ? '' : 's'} sind passend für ${versionText} aktiv.${checkedText}`;
+    statusEl.classList.add('is-ok');
+  }
+
+  switchSection(sectionId) {
+    this.activateSection(sectionId);
+  }
+
+  handleNavClick(event) {
+    const item = event.target.closest('.nav-item');
+    if (item) {
+      this.activateSection(item.getAttribute('data-section'));
+    }
+  }
+
+  updateLoadingState({ text, progress, reset = false } = {}) {
+    const overlay = document.getElementById('loading-overlay');
+    const loadingText = document.getElementById('loading-text');
+    const progressBar = document.getElementById('loading-progress');
+    const percentEl = document.getElementById('loading-percent');
+
+    if (loadingText && typeof text === 'string') {
+      loadingText.textContent = this.localizeText(text);
+    }
+
+    if (reset) {
+      this.loadingProgress = 0;
+    }
+
+    if (Number.isFinite(Number(progress))) {
+      const normalizedProgress = Math.min(100, Math.max(0, Number(progress)));
+      this.loadingProgress = reset
+        ? normalizedProgress
+        : Math.max(this.loadingProgress || 0, normalizedProgress);
+    }
+
+    const visibleProgress = Math.round(this.loadingProgress || 0);
+    if (progressBar) {
+      progressBar.style.width = `${visibleProgress}%`;
+    }
+    if (percentEl) {
+      percentEl.textContent = `${visibleProgress}%`;
+    }
+
+    overlay?.setAttribute('aria-busy', visibleProgress < 100 ? 'true' : 'false');
+  }
+
+  restartLoaderBrandAnimation(overlay) {
+    if (!overlay) {
+      return;
+    }
+    const brand = overlay.querySelector('.loader-brand');
+    const subbrand = overlay.querySelector('.loader-subbrand');
+    if (brand) brand.textContent = 'X Client';
+    if (subbrand) subbrand.textContent = '';
+    overlay.classList.remove('is-brand-animating');
+    overlay.classList.add('is-brand-animating');
+  }
+
+  showLoading(text = 'Wird geladen...', options = {}) {
+    const overlay = document.getElementById('loading-overlay');
+    const isNewPresentation = Boolean(overlay?.classList.contains('hidden'));
+    if (this.loadingHideTimer) {
+      clearTimeout(this.loadingHideTimer);
+      this.loadingHideTimer = null;
+    }
+    if (isNewPresentation && this.loadingWelcomeTimer) {
+      clearTimeout(this.loadingWelcomeTimer);
+      this.loadingWelcomeTimer = null;
+    }
+
+    // Slow or failed work must never trap the interface behind this overlay.
+    if (isNewPresentation) {
+      if (this.loadingAutoHideTimer) {
+        clearTimeout(this.loadingAutoHideTimer);
+      }
+      this.loadingAutoHideTimer = window.setTimeout(() => {
+        this.loadingAutoHideTimer = null;
+        this.hideLoading();
+      }, options.waitForCompletion ? 12000 : 7000);
+    }
+
+    this.loadingShownAt = Date.now();
+    if (isNewPresentation) {
+      this.startupLoadingActive = Boolean(options.waitForCompletion);
+    }
+    const isStartupLoader = Boolean(options.startup);
+    overlay?.classList.toggle('is-action-loading', !isStartupLoader);
+    overlay?.classList.remove('hidden', 'is-completing', 'is-compact');
+    if (isNewPresentation) {
+      overlay?.classList.remove('is-welcome-visible');
+      this.restartLoaderBrandAnimation(overlay);
+    }
+    overlay?.setAttribute('aria-hidden', 'false');
+    this.updateLoadingPlayerName(this.user?.username || options.playerName || '');
+    if (options.sound) {
+      this.playLoadingSound(options.sound);
+    }
+    this.updateLoadingState({
+      text,
+      progress: Number.isFinite(Number(options.progress)) ? Number(options.progress) : 18,
+      reset: true
+    });
+  }
+
+  updateLoadingPlayerName(username = '') {
+    const overlay = document.getElementById('loading-overlay');
+    const playerName = String(username || '').trim();
+    const playerElement = overlay?.querySelector('.loader-player');
+    if (playerElement) {
+      playerElement.textContent = playerName;
+      playerElement.hidden = !playerName;
+    }
+    const welcomeLabel = overlay?.querySelector('.loader-welcome');
+    if (welcomeLabel) {
+      welcomeLabel.textContent = this.language === 'de' ? 'Willkommen zurück' : 'Welcome back';
+      welcomeLabel.hidden = !playerName;
+    }
+    if (playerName) {
+      overlay?.classList.add('is-welcome-visible');
+    }
+  }
+
+  finishLoading(text = 'Bereit.') {
+    const overlay = document.getElementById('loading-overlay');
+    if (!overlay || overlay.classList.contains('hidden')) {
+      return;
+    }
+
+    this.updateLoadingState({
+      text,
+      progress: 100
+    });
+    if (this.loadingHideTimer) {
+      clearTimeout(this.loadingHideTimer);
+    }
+    const completionHoldMs = this.startupLoadingActive ? 250 : 0;
+    this.loadingHideTimer = window.setTimeout(() => {
+      this.loadingHideTimer = null;
+      this.hideLoading();
+    }, completionHoldMs);
+  }
+
+  hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (this.loadingHideTimer) {
+      clearTimeout(this.loadingHideTimer);
+      this.loadingHideTimer = null;
+    }
+    if (this.loadingAutoHideTimer) {
+      clearTimeout(this.loadingAutoHideTimer);
+      this.loadingAutoHideTimer = null;
+    }
+    if (this.loadingWelcomeTimer) {
+      clearTimeout(this.loadingWelcomeTimer);
+      this.loadingWelcomeTimer = null;
+    }
+    overlay?.classList.add('hidden');
+    overlay?.classList.remove('is-completing', 'is-welcome-visible');
+    overlay?.setAttribute('aria-hidden', 'true');
+    overlay?.setAttribute('aria-busy', 'false');
+    this.startupLoadingActive = false;
+  }
+
+  showNotification(message) {
+    const notification = document.getElementById('notification');
+    if (this.notificationHideTimer) {
+      clearTimeout(this.notificationHideTimer);
+      this.notificationHideTimer = null;
+    }
+    notification?.classList.add('hidden');
+    notification?.classList.remove('is-hiding');
+  }
+
+  startServiceStatusMonitor() {
+    if (this.serviceStatusCheckTimer) {
+      return;
+    }
+
+    if (!this.serviceStatusListenersAttached) {
+      window.addEventListener('offline', () => {
+        this.setServiceStatus({
+          id: 'internet',
+          level: 'critical',
+          message: 'Keine Internetverbindung.'
+        });
+      });
+      window.addEventListener('online', () => this.checkServiceHealth({ force: true }));
+      this.serviceStatusListenersAttached = true;
+    }
+
+    if (navigator.onLine === false) {
+      this.setServiceStatus({
+        id: 'internet',
+        level: 'critical',
+        message: 'Keine Internetverbindung.'
+      });
+    }
+
+    const initialCheck = this.checkServiceHealth();
+    this.serviceStatusCheckTimer = setInterval(() => {
+      if (!document.hidden) this.checkServiceHealth();
+    }, X_LAUNCHER_SERVICE_HEALTH_INTERVAL_MS);
+    return initialCheck;
+  }
+
+  async checkServiceHealth(options = {}) {
+    if (this.serviceStatusCheckInFlight && !options.force) {
+      return;
+    }
+
+    if (typeof window.electronAPI?.checkServiceHealth !== 'function') {
+      return;
+    }
+
+    this.serviceStatusCheckInFlight = true;
+    try {
+      const result = await window.electronAPI.checkServiceHealth();
+      this.applyServiceHealthResult(result);
+    } catch (error) {
+      this.setServiceStatus({
+        id: 'launcher-server',
+        level: 'critical',
+        message: 'Launcher-Server antwortet nicht.',
+        detail: error.message
+      });
+    } finally {
+      this.serviceStatusCheckInFlight = false;
+    }
+  }
+
+  applyServiceHealthResult(result) {
+    const statuses = Array.isArray(result?.statuses) ? result.statuses : [];
+    if (!statuses.length) {
+      return;
+    }
+
+    statuses.forEach((status) => {
+      const id = String(status?.id || '').trim();
+      if (!id) {
+        return;
+      }
+
+      if (status.ok) {
+        this.clearServiceStatus(id);
+        return;
+      }
+
+      this.setServiceStatus({
+        id,
+        level: status.level || 'warning',
+        message: status.message || 'Dienst momentan nicht erreichbar.',
+        detail: status.error || ''
+      });
+    });
+  }
+
+  setServiceStatus(status) {
+    const id = String(status?.id || '').trim();
+    if (!id) {
+      return;
+    }
+
+    const recoveryTimer = this.serviceStatusRecoveredTimers.get(id);
+    if (recoveryTimer) {
+      clearTimeout(recoveryTimer);
+      this.serviceStatusRecoveredTimers.delete(id);
+    }
+
+    const nextStatus = {
+      id,
+      level: ['ok', 'warning', 'critical'].includes(status.level) ? status.level : 'warning',
+      message: this.localizeText(status.message || ''),
+      detail: status.detail || '',
+      recovery: Boolean(status.recovery),
+      updatedAt: Date.now()
+    };
+    const current = this.serviceStatusMap.get(id);
+    if (
+      current
+      && current.level === nextStatus.level
+      && current.message === nextStatus.message
+      && current.recovery === nextStatus.recovery
+    ) {
+      return;
+    }
+
+    this.serviceStatusMap.set(id, nextStatus);
+    this.renderServiceStatuses();
+  }
+
+  clearServiceStatus(id) {
+    const normalizedId = String(id || '').trim();
+    const current = this.serviceStatusMap.get(normalizedId);
+    if (!current) {
+      return;
+    }
+
+    this.serviceStatusMap.delete(normalizedId);
+    this.renderServiceStatuses();
+
+    if (!current.recovery && normalizedId !== 'downloads-disabled') {
+      this.showServiceRecoveredStatus(normalizedId);
+    }
+  }
+
+  showServiceRecoveredStatus(id) {
+    this.setServiceStatus({
+      id,
+      level: 'ok',
+      message: 'Verbindung wiederhergestellt',
+      recovery: true
+    });
+
+    const timer = setTimeout(() => {
+      const current = this.serviceStatusMap.get(id);
+      if (current?.recovery) {
+        this.serviceStatusMap.delete(id);
+        this.renderServiceStatuses();
+      }
+      this.serviceStatusRecoveredTimers.delete(id);
+    }, X_LAUNCHER_SERVICE_RECOVERY_VISIBLE_MS);
+    this.serviceStatusRecoveredTimers.set(id, timer);
+  }
+
+  renderServiceStatuses() {
+    const stack = document.getElementById('service-status-stack');
+    if (!stack) {
+      return;
+    }
+
+    const statuses = Array.from(this.serviceStatusMap.values())
+      .sort((left, right) => {
+        const levelOrder = { critical: 0, warning: 1, ok: 2 };
+        return (levelOrder[left.level] ?? 3) - (levelOrder[right.level] ?? 3)
+          || left.updatedAt - right.updatedAt;
+      });
+
+    stack.classList.toggle('is-empty', statuses.length === 0);
+    stack.innerHTML = statuses.map((status) => `
+      <div class="service-status service-status-${this.escapeHtml(status.level)}" role="status" data-service-id="${this.escapeHtml(status.id)}">
+        <span class="service-status-dot" aria-hidden="true"></span>
+        <p>${this.escapeHtml(status.message)}</p>
+      </div>
+    `).join('');
+  }
+}
+
+Object.assign(MinecraftLauncher.prototype, {
+  async loadHostedServerStatus() {
+    if (typeof window.electronAPI?.getHostedServerStatus !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.getHostedServerStatus();
+      this.hostedServerStatus = result || {};
+      this.hostedServers = result?.servers || [];
+      this.activeHostedServerId = result?.activeServerId || result?.activeServer?.id || '';
+      this.updateHostedServerStatus(result || {});
+    } catch (error) {
+      this.updateHostedServerStatus({ success: false, error: error.message, servers: [] });
+    }
+  },
+
+  showRouterPasswordPrompt() {
+    const modal = document.getElementById('router-password-modal');
+    const input = document.getElementById('router-password-input');
+    if (!modal || !input) return Promise.resolve('');
+    if (this.pendingRouterPasswordPrompt) this.resolveRouterPasswordPrompt('');
+    input.value = '';
+    modal.classList.remove('hidden');
+    return new Promise((resolve) => {
+      this.pendingRouterPasswordPrompt = { resolve, previousFocus: document.activeElement };
+      window.setTimeout(() => input.focus(), 0);
+    });
+  },
+
+  resolveRouterPasswordPrompt(password = '') {
+    if (!this.pendingRouterPasswordPrompt) return;
+    const modal = document.getElementById('router-password-modal');
+    const input = document.getElementById('router-password-input');
+    const { resolve, previousFocus } = this.pendingRouterPasswordPrompt;
+    this.pendingRouterPasswordPrompt = null;
+    if (input) input.value = '';
+    modal?.classList.add('hidden');
+    previousFocus?.focus?.();
+    resolve(String(password || ''));
+  },
+
+  updateHostedServerStatus(status = this.hostedServerStatus || {}) {
+    this.hostedServerStatus = status;
+    this.hostedServers = status.servers || [];
+    this.activeHostedServerId = status.activeServerId || status.activeServer?.id || '';
+    const activeServer = status.activeServer || {};
+    const running = Boolean(status.running);
+    const powerButton = document.getElementById('hosted-server-start-btn');
+    if (powerButton) {
+      const stopping = Boolean(status.stopping);
+      powerButton.textContent = stopping ? 'Stoppt…' : (running ? 'Stoppen' : 'Starten & Online');
+      powerButton.classList.toggle('btn-success', !running && !stopping);
+      powerButton.classList.toggle('btn-danger', running || stopping);
+      powerButton.disabled = !this.activeHostedServerId || stopping;
+      powerButton.setAttribute('aria-label', running || stopping ? 'Minecraft-Server stoppen' : 'Minecraft-Server starten und online stellen');
+    }
+
+    const statusEl = document.getElementById('hosted-server-status');
+    if (statusEl) {
+      statusEl.classList.remove('is-ok', 'is-warning', 'is-error');
+      if (status.error) {
+        statusEl.textContent = `Hosting: ${status.error}`;
+        statusEl.classList.add('is-error');
+      } else if (status.publiclyReachable) {
+        statusEl.textContent = `Online: ${status.address}`;
+        statusEl.classList.add('is-ok');
+      } else if (status.connectionError) {
+        statusEl.textContent = status.connectionError;
+        statusEl.classList.add('is-error');
+      } else if (status.running) {
+        statusEl.textContent = status.connectionChecking
+          ? `Öffentliche Verbindung wird geprüft: ${status.address || status.localAddress || 'localhost'}`
+          : `Server läuft, ist aber von außen nicht erreichbar: ${status.address || status.localAddress || 'localhost'}`;
+        statusEl.classList.add('is-warning');
+      } else {
+        statusEl.textContent = `${this.hostedServers.length} lokaler Server · offline`;
+        statusEl.classList.add('is-warning');
+      }
+    }
+
+    const listStatusEl = document.getElementById('hosted-server-list-status');
+    if (listStatusEl) {
+      listStatusEl.textContent = this.hostedServers.length
+        ? `${this.hostedServers.length} Server gespeichert.`
+        : 'Noch keine lokalen Server erstellt.';
+    }
+
+    const title = document.getElementById('hosted-server-editor-title');
+    if (title) {
+      title.textContent = activeServer.displayName || activeServer.name || 'Dashboard';
+    }
+
+    const subtitle = document.getElementById('hosting-server-subtitle');
+    if (subtitle) {
+      const version = activeServer.minecraftVersion || 'latest';
+      subtitle.textContent = activeServer.id
+        ? `Paper ${version} · ${activeServer.ramGb || 4} GB RAM · Port ${activeServer.port || 25565}`
+        : 'Wähle einen Server oder erstelle einen neuen lokalen Paper-Server.';
+    }
+
+    const statusPill = document.getElementById('hosting-status-pill');
+    if (statusPill) {
+      statusPill.classList.remove('online', 'offline', 'warning');
+      statusPill.classList.add(status.publiclyReachable ? 'online' : (running ? 'warning' : 'offline'));
+      statusPill.textContent = status.publiclyReachable ? 'Online' : (running ? 'Lokal' : 'Offline');
+    }
+
+    const addressEl = document.getElementById('hosted-server-address');
+    if (addressEl) {
+      addressEl.textContent = status.address || status.localAddress || 'Nicht gestartet';
+    }
+    const directConnectionStatus = document.getElementById('direct-connection-status');
+    if (directConnectionStatus) {
+      directConnectionStatus.classList.remove('online', 'warning', 'offline');
+      if (status.publiclyReachable) {
+        directConnectionStatus.textContent = 'Extern erreichbar';
+        directConnectionStatus.classList.add('online');
+      } else if (running) {
+        directConnectionStatus.textContent = status.connectionChecking ? 'Wird geprüft' : 'Nicht extern';
+        directConnectionStatus.classList.add('warning');
+      } else {
+        directConnectionStatus.textContent = 'Offline';
+        directConnectionStatus.classList.add('offline');
+      }
+    }
+    const fallbackAddress = document.getElementById('hosted-server-fallback-address');
+    if (fallbackAddress) {
+      fallbackAddress.textContent = status.connectionError
+        || status.externalCheck?.reason
+        || (running
+          ? (status.upnp?.success
+            ? 'Port 25565 TCP wurde per UPnP freigegeben; der externe Test läuft.'
+            : status.upnp?.reason || 'UPnP-Portfreigabe ist nicht verfügbar.')
+          : 'Beim Start werden UPnP, Windows-Firewall und öffentliche IPv4 automatisch geprüft.');
+    }
+    const routerButton = document.getElementById('hosted-server-router-btn');
+    if (routerButton) {
+      routerButton.classList.toggle('hidden', !running || status.publiclyReachable || status.upnp?.success || !status.routerSettingsUrl);
+    }
+
+    const runtimeEl = document.getElementById('hosted-server-runtime');
+    if (runtimeEl) {
+      const resources = status.resources || {};
+      const players = status.players || {};
+      runtimeEl.innerHTML = `
+        <div class="hosting-metric"><span>Status</span><strong>${status.publiclyReachable ? 'Online' : (running ? 'Lokal' : 'Offline')}</strong></div>
+        <div class="hosting-metric"><span>Direkte Verbindung</span><strong>${status.publiclyReachable ? 'Erreichbar' : (status.connectionChecking ? 'Prüfung läuft' : 'Nicht erreichbar')}</strong></div>
+        <div class="hosting-metric"><span>Spieler</span><strong>${this.escapeHtml(players.online ?? 0)}/${this.escapeHtml(players.max || activeServer.maxPlayers || 0)}</strong></div>
+        <div class="hosting-metric"><span>TPS</span><strong>${this.escapeHtml(status.tps || 'über Konsole')}</strong></div>
+        <div class="hosting-metric"><span>CPU</span><strong>${this.escapeHtml(resources.cpu || 'unbekannt')}</strong></div>
+        <div class="hosting-metric"><span>RAM</span><strong>${this.escapeHtml(resources.memory || 'unbekannt')}</strong></div>
+        <div class="hosting-metric"><span>Disk</span><strong>${this.escapeHtml(resources.disk || 'unbekannt')}</strong></div>
+        <div class="hosting-metric"><span>Netzwerk</span><strong>${this.escapeHtml(resources.network || 'unbekannt')}</strong></div>
+      `;
+    }
+
+    this.renderHostedServerList(status);
+    this.renderOracleVmList(status);
+    this.renderHostingConsole(status);
+    this.renderHostingPlayers(status);
+    this.renderHostingFiles(status);
+    this.fillHostedServerForm(activeServer);
+    this.updateHostedServerEditorMode();
+
+    if (!this.hostedServerStatusTimer) {
+      this.hostedServerStatusTimer = window.setInterval(() => {
+        if (!document.hidden && this.activeSectionId === 'hosting') {
+          this.loadHostedServerStatus();
+        }
+      }, 15000);
+    }
+  },
+
+  updateHostedServerEditorMode() {
+    const editor = document.getElementById('hosted-server-editor');
+    const hostingSection = document.getElementById('hosting');
+    const isCreate = this.hostedServerFormMode === 'create' || !this.activeHostedServerId;
+    const isHidden = this.hostedServerFormMode === 'hidden' && !this.activeHostedServerId;
+    editor?.classList.toggle('hidden', isHidden);
+    editor?.classList.toggle('is-create-mode', !isHidden && isCreate);
+    hostingSection?.classList.toggle('hosting-editor-open', !isHidden);
+    document.getElementById('hosted-server-final-create-btn')?.classList.toggle('hidden', !isCreate);
+    document.getElementById('hosted-server-cancel-create-btn')?.classList.toggle('hidden', !isCreate);
+    document.getElementById('hosted-server-save-btn')?.classList.toggle('hidden', isCreate);
+    document.getElementById('hosted-server-delete-btn')?.classList.toggle('hidden', isCreate);
+    const hasServer = Boolean(this.activeHostedServerId);
+    ['hosted-server-start-btn', 'hosted-server-restart-btn'].forEach((id) => {
+      const button = document.getElementById(id);
+      if (button) button.disabled = !hasServer;
+    });
+    document.querySelector('.server-summary-card')?.classList.toggle('is-disabled-panel', !hasServer);
+    document.querySelector('.live-players-card')?.classList.toggle('is-disabled-panel', !hasServer);
+    document.querySelector('.moderation-card')?.classList.toggle('is-disabled-panel', !hasServer);
+    document.querySelector('.server-host-console-panel')?.classList.toggle('is-disabled-panel', !hasServer);
+  },
+
+  fillHostedServerForm(server = {}) {
+    const values = {
+      'hosted-server-name-input': server.displayName || server.name || '',
+      'hosted-server-ram-input': server.ramGb || 4,
+      'hosted-server-port-input': server.port || 25565,
+      'hosted-server-max-players-input': server.maxPlayers || 20,
+      'hosted-server-seed-input': server.seed || '',
+      'hosted-server-domain-input': server.customDomain || '',
+      'hosted-server-view-distance-input': server.viewDistance || 10,
+      'hosted-server-simulation-distance-input': server.simulationDistance || 10,
+      'hosted-server-spawn-protection-input': server.spawnProtection ?? 16
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const element = document.getElementById(id);
+      if (element && !element.matches(':focus')) element.value = String(value);
+    });
+    const selects = {
+      'hosted-server-edition-select': 'java',
+      'hosted-server-software-select': 'paper',
+      'hosted-server-version-input': server.minecraftVersion || 'latest',
+      'hosted-server-java-input': server.javaVersion || 21,
+      'hosted-server-difficulty-select': server.difficulty || 'normal',
+      'hosted-server-gamemode-select': server.gamemode || 'survival'
+    };
+    this.renderHostedServerVersionOptions(selects['hosted-server-version-input']);
+    Object.entries(selects).forEach(([id, value]) => {
+      const element = document.getElementById(id);
+      if (element && !element.matches(':focus')) element.value = String(value);
+    });
+    const checks = {
+      'hosted-server-pvp-checkbox': server.pvp !== false,
+      'hosted-server-whitelist-checkbox': Boolean(server.whitelist),
+      'hosted-server-online-mode-checkbox': server.onlineMode !== false,
+      'hosted-server-command-block-checkbox': Boolean(server.enableCommandBlock),
+      'hosted-server-hardcore-checkbox': Boolean(server.hardcore),
+      'hosted-server-nether-checkbox': server.allowNether !== false,
+      'hosted-server-end-checkbox': server.allowEnd !== false,
+      'hosted-server-eula-checkbox': true
+    };
+    Object.entries(checks).forEach(([id, checked]) => {
+      const element = document.getElementById(id);
+      if (element) element.checked = checked;
+    });
+  },
+
+  getHostedServerOptionsFromUI() {
+    return {
+      serverId: this.activeHostedServerId,
+      name: document.getElementById('hosted-server-name-input')?.value.trim() || '',
+      displayName: document.getElementById('hosted-server-name-input')?.value.trim() || '',
+      minecraftVersion: document.getElementById('hosted-server-version-input')?.value || 'latest',
+      javaVersion: Number(document.getElementById('hosted-server-java-input')?.value || 21),
+      ramGb: Number(document.getElementById('hosted-server-ram-input')?.value || 4),
+      port: Number(document.getElementById('hosted-server-port-input')?.value || 25565),
+      seed: document.getElementById('hosted-server-seed-input')?.value.trim() || '',
+      gamemode: document.getElementById('hosted-server-gamemode-select')?.value || 'survival',
+      difficulty: document.getElementById('hosted-server-difficulty-select')?.value || 'normal',
+      pvp: Boolean(document.getElementById('hosted-server-pvp-checkbox')?.checked),
+      hardcore: Boolean(document.getElementById('hosted-server-hardcore-checkbox')?.checked),
+      onlineMode: Boolean(document.getElementById('hosted-server-online-mode-checkbox')?.checked),
+      spawnProtection: Number(document.getElementById('hosted-server-spawn-protection-input')?.value || 16),
+      viewDistance: Number(document.getElementById('hosted-server-view-distance-input')?.value || 10),
+      simulationDistance: Number(document.getElementById('hosted-server-simulation-distance-input')?.value || 10),
+      allowNether: Boolean(document.getElementById('hosted-server-nether-checkbox')?.checked),
+      allowEnd: Boolean(document.getElementById('hosted-server-end-checkbox')?.checked),
+      enableCommandBlock: Boolean(document.getElementById('hosted-server-command-block-checkbox')?.checked),
+      whitelist: Boolean(document.getElementById('hosted-server-whitelist-checkbox')?.checked),
+      maxPlayers: Number(document.getElementById('hosted-server-max-players-input')?.value || 20),
+      customDomain: document.getElementById('hosted-server-domain-input')?.value.trim() || '',
+      acceptEula: Boolean(document.getElementById('hosted-server-eula-checkbox')?.checked)
+    };
+  },
+
+  renderHostedServerVersionOptions(selectedVersion = 'latest') {
+    const select = document.getElementById('hosted-server-version-input');
+    if (!select || select.options.length) return;
+    ['latest', '1.21.8', '1.21.7', '1.21.6', '1.21.5', '1.21.4', '1.20.6', '1.20.4'].forEach((version) => {
+      const option = document.createElement('option');
+      option.value = version;
+      option.textContent = version === 'latest' ? 'Neueste Paper-Version' : version;
+      select.appendChild(option);
+    });
+    select.value = selectedVersion || 'latest';
+  },
+
+  renderHostedServerList(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosted-server-list');
+    if (!list) return;
+    const servers = status.servers || [];
+    const signature = JSON.stringify(servers.map((server) => ({
+      id: server.id,
+      name: server.displayName || server.name,
+      version: server.minecraftVersion,
+      ram: server.ramGb,
+      port: server.port,
+      running: Boolean(server.running),
+      public: Boolean(server.publiclyReachable),
+      address: server.visibleAddress || ''
+    })));
+    if (signature === this.hostedServerListSignature) {
+      this.updateHostedServerListSelection(status);
+      return;
+    }
+    this.hostedServerListSignature = signature;
+    if (!servers.length) {
+      list.innerHTML = '<p class="mods-empty">Noch keine lokalen Server.</p>';
+      return;
+    }
+    list.innerHTML = servers.map((server) => {
+      const active = server.id === (status.activeServerId || this.activeHostedServerId);
+      const isActive = server.id === (status.activeServerId || this.activeHostedServerId);
+      const address = (isActive && status.address) || server.visibleAddress || `localhost:${server.port || 25565}`;
+      const serverState = server.publiclyReachable || (active && status.publiclyReachable)
+        ? 'Online'
+        : (server.running || (active && status.running) ? 'Lokal' : 'Offline');
+      return `
+        <article class="hosted-server-card${active ? ' active' : ''}" data-server-id="${this.escapeHtml(server.id)}">
+          <div>
+            <h4>${this.escapeHtml(server.displayName || server.name)}</h4>
+            <p>${this.escapeHtml(serverState)} · ${this.escapeHtml(address)}</p>
+            <p>Paper ${this.escapeHtml(server.minecraftVersion || 'latest')} · ${this.escapeHtml(server.ramGb || 4)} GB RAM</p>
+          </div>
+          <div class="server-actions">
+            <button class="btn btn-primary" type="button" data-host-action="select" data-server-id="${this.escapeHtml(server.id)}">Öffnen</button>
+            <button class="btn btn-danger" type="button" data-host-action="delete" data-server-id="${this.escapeHtml(server.id)}" data-server-name="${this.escapeHtml(server.displayName || server.name)}">Löschen</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+  },
+
+  updateHostedServerListSelection(status = this.hostedServerStatus || {}) {
+    const activeId = status.activeServerId || this.activeHostedServerId || '';
+    document.querySelectorAll('#hosted-server-list .hosted-server-card').forEach((card) => {
+      card.classList.toggle('active', card.getAttribute('data-server-id') === activeId);
+    });
+  },
+
+  renderOracleVmList(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('oracle-vm-list');
+    if (!list) return;
+    const vms = status.cloudInstances || [];
+    list.innerHTML = vms.length
+      ? vms.map((vm) => `<div class="hosting-vm-row"><strong>${this.escapeHtml(vm.displayName)}</strong><span>${this.escapeHtml(vm.lifecycleState)} · ${this.escapeHtml(vm.shape || '')}</span></div>`).join('')
+      : '<p class="mods-empty">Keine bestehenden X-Client-VMs erkannt.</p>';
+  },
+
+  renderHostingConsole(status = this.hostedServerStatus || {}) {
+    const consoleEl = document.getElementById('hosted-server-console');
+    if (!consoleEl) return;
+    const output = status.consoleOutput || 'Noch keine Logs geladen.';
+    const query = String(this.hostingConsoleSearch || '').trim().toLowerCase();
+    const text = query
+      ? output.split(/\r?\n/u).filter((line) => line.toLowerCase().includes(query)).join('\n')
+      : output;
+    consoleEl.textContent = text || `Keine Konsolenzeile gefunden für "${this.hostingConsoleSearch}".`;
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  },
+
+  renderHostingPlayers(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosting-player-list');
+    const summary = document.getElementById('hosting-players-summary');
+    if (!list) return;
+    const players = status.playerDetails || [];
+    if (summary) summary.textContent = `${status.players?.online ?? players.length} online · ${status.players?.max || status.activeServer?.maxPlayers || 0} Slots`;
+    list.innerHTML = players.length
+      ? players.map((player) => `<article class="hosting-player-card"><div class="hosting-player-avatar">${this.escapeHtml((player.name || '?')[0].toUpperCase())}</div><div class="hosting-player-main"><span class="hosting-player-name">${this.escapeHtml(player.name)}</span><span class="hosting-player-meta">Online</span></div></article>`).join('')
+      : '<p class="hosting-empty-state">Keine Spieler online.</p>';
+  },
+
+  renderHostingFiles(status = this.hostedServerStatus || {}) {
+    const list = document.getElementById('hosting-file-list');
+    if (!list) return;
+    const files = status.files || [];
+    const mods = status.mods || [];
+    const jobs = status.jobs || [];
+    list.innerHTML = [
+      ...mods.map((mod) => `<div class="hosting-history-item"><span>Plugin: ${this.escapeHtml(mod.fileName || mod.name)}</span><button class="btn btn-secondary" type="button" data-host-mod-action="delete" data-mod-file="${this.escapeHtml(mod.fileName || mod.name)}">Löschen</button></div>`),
+      ...files.slice(0, 80).map((file) => `<div class="hosting-history-item"><span>${this.escapeHtml(file.name)}</span><span>Lokal</span></div>`),
+      ...jobs.slice(-8).reverse().map((job) => `<div class="hosting-history-item"><span>${this.escapeHtml(job.message)}</span><span>${this.escapeHtml(new Date(job.at).toLocaleTimeString())}</span></div>`)
+    ].join('') || '<p class="hosting-empty-state">Noch keine Dateien geladen.</p>';
+  },
+
+  resetHostedServerForm() {
+    this.fillHostedServerForm({
+      displayName: '',
+      minecraftVersion: 'latest',
+      javaVersion: 21,
+      ramGb: 4,
+      port: 25565,
+      maxPlayers: 20,
+      gamemode: 'survival',
+      difficulty: 'normal',
+      pvp: true,
+      onlineMode: true,
+      allowNether: true,
+      allowEnd: true,
+      viewDistance: 10,
+      simulationDistance: 10,
+      spawnProtection: 16
+    });
+  },
+
+  openHostedServerCreateForm() {
+    this.activeHostedServerId = '';
+    this.hostedServerFormMode = 'create';
+    this.resetHostedServerForm();
+    this.updateHostedServerEditorMode();
+    document.getElementById('hosted-server-name-input')?.focus();
+  },
+
+  closeHostedServerEditor() {
+    this.hostedServerFormMode = this.activeHostedServerId ? 'edit' : 'hidden';
+    this.fillHostedServerForm(this.hostedServerStatus?.activeServer || {});
+    this.updateHostedServerEditorMode();
+  },
+
+  async saveOracleHostingCredentials() {
+    const credentials = {
+      ociConfig: document.getElementById('oracle-config-input')?.value.trim() || '',
+      tenancyOcid: document.getElementById('oracle-tenancy-input')?.value.trim() || '',
+      userOcid: document.getElementById('oracle-user-input')?.value.trim() || '',
+      fingerprint: document.getElementById('oracle-fingerprint-input')?.value.trim() || '',
+      region: document.getElementById('oracle-region-input')?.value.trim() || 'eu-zurich-1',
+      compartmentOcid: document.getElementById('oracle-compartment-input')?.value.trim() || '',
+      privateKey: document.getElementById('oracle-private-key-input')?.value.trim() || '',
+      sshUsername: document.getElementById('oracle-ssh-user-input')?.value.trim() || 'ubuntu'
+    };
+    this.showLoading('Verbinde Oracle Cloud...', { progress: 20 });
+    try {
+      const result = await window.electronAPI.saveOracleHostingCredentials(credentials);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      document.getElementById('oracle-private-key-input').value = '';
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Oracle Cloud verbunden.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  },
+
+  async loginOracleCloud() {
+    if (typeof window.electronAPI?.loginOracleCloud !== 'function') {
+      this.showNotification('Oracle-Anmeldung ist nicht verfügbar.');
+      return;
+    }
+    this.showLoading('Oracle-Anmeldung wird im Browser geöffnet...', { progress: 20 });
+    try {
+      const result = await window.electronAPI.loginOracleCloud({ region: 'eu-zurich-1' });
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Mit Oracle Cloud angemeldet.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  },
+
+  async logoutOracleCloud() {
+    if (typeof window.electronAPI?.logoutOracleCloud !== 'function') {
+      return;
+    }
+    const confirmed = await this.showConfirm({
+      title: 'Oracle abmelden',
+      message: 'Oracle Cloud wirklich aus diesem Launcher abmelden?',
+      confirmText: 'Abmelden'
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const result = await window.electronAPI.logoutOracleCloud();
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Oracle Cloud abgemeldet.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  },
+
+  async createHostedServer() {
+    const options = this.getHostedServerOptionsFromUI();
+    if (!options.name) {
+      this.showNotification('Bitte gib einen Servernamen ein.');
+      return;
+    }
+    if (!options.acceptEula) {
+      this.showNotification('Bitte akzeptiere die Minecraft EULA.');
+      return;
+    }
+    this.showLoading('Oracle-VM wird erstellt und Minecraft wird eingerichtet...', { progress: 10 });
+    try {
+      const result = await window.electronAPI.createHostedServer(options);
+      if (!result.success) {
+        this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.hostedServerFormMode = 'edit';
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server wurde erstellt.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  },
+
+  async saveHostedServer(options = {}) {
+    if (!this.activeHostedServerId) {
+      if (!options.silent) this.showNotification('Bitte öffne zuerst einen Server.');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.saveHostedServer(this.getHostedServerOptionsFromUI());
+      if (!result.success) {
+        if (!options.silent) this.showNotification('Fehler: ' + result.error);
+        return;
+      }
+      this.updateHostedServerStatus(result);
+      if (!options.silent) this.showNotification(result.message || 'Server gespeichert.');
+    } catch (error) {
+      if (!options.silent) this.showNotification('Fehler: ' + error.message);
+    }
+  },
+
+  async handleHostedServerListClick(event) {
+    const button = event.target?.closest?.('[data-host-action]');
+    const card = event.target?.closest?.('.hosted-server-card');
+    if (!button && !card) return;
+    const serverId = button?.getAttribute('data-server-id') || card?.getAttribute('data-server-id') || '';
+    const action = button?.getAttribute('data-host-action') || 'select';
+    if (action === 'delete') {
+      const confirmed = await this.showConfirm({ title: 'Cloud-Server löschen', message: 'VM und Minecraft-Server wirklich löschen?', confirmText: 'Löschen' });
+      if (!confirmed) return;
+      const result = await window.electronAPI.deleteHostedServer(serverId);
+      if (!result.success) return this.showNotification('Fehler: ' + result.error);
+      this.hostedServerFormMode = 'hidden';
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Server gelöscht.');
+      return;
+    }
+    const result = await window.electronAPI.selectHostedServer(serverId);
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.hostedServerFormMode = 'edit';
+    this.updateHostedServerStatus(result);
+  },
+
+  async runHostedServerAction(action) {
+    if (!this.activeHostedServerId) return this.showNotification('Bitte öffne zuerst einen Server.');
+    const label = action === 'start' ? 'startet' : (action === 'stop' ? 'stoppt' : 'wird neu gestartet');
+    this.showLoading(`Server ${label}...`, { progress: 20 });
+    try {
+      const apiCall = action === 'start'
+        ? window.electronAPI.startHostedServer(this.getHostedServerOptionsFromUI())
+        : (action === 'stop'
+          ? window.electronAPI.stopHostedServer(this.activeHostedServerId)
+          : window.electronAPI.restartHostedServer(this.getHostedServerOptionsFromUI()));
+      const result = await apiCall;
+      if (!result.success) return this.showNotification('Fehler: ' + result.error);
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'Aktion abgeschlossen.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    } finally {
+      this.hideLoading();
+    }
+  },
+
+  startHostedServer() { return this.runHostedServerAction('start'); },
+  stopHostedServer() { return this.runHostedServerAction('stop'); },
+  restartHostedServer() { return this.runHostedServerAction('restart'); },
+
+  async runHostedVmAction(action) {
+    if (!this.activeHostedServerId) return this.showNotification('Bitte öffne zuerst einen Server.');
+    try {
+      const result = await window.electronAPI.hostedServerVmAction(this.activeHostedServerId, action);
+      if (!result.success) return this.showNotification('Fehler: ' + result.error);
+      this.updateHostedServerStatus(result);
+      this.showNotification(result.message || 'VM-Aktion abgeschlossen.');
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  },
+
+  async deleteActiveHostedServer() {
+    if (!this.activeHostedServerId) return this.showNotification('Bitte öffne zuerst einen Server.');
+    const confirmed = await this.showConfirm({ title: 'Cloud-Server löschen', message: 'Diese Aktion beendet und löscht die Oracle-VM.', confirmText: 'Löschen' });
+    if (!confirmed) return;
+    const result = await window.electronAPI.deleteHostedServer(this.activeHostedServerId);
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.hostedServerFormMode = 'hidden';
+    this.updateHostedServerStatus(result);
+    this.showNotification(result.message || 'Server gelöscht.');
+  },
+
+  async sendHostedServerCommand() {
+    const input = document.getElementById('hosted-server-command-input');
+    const command = input?.value.trim() || '';
+    if (!command) return this.showNotification('Bitte gib einen Befehl ein.');
+    try {
+      const result = await window.electronAPI.sendHostedServerCommand(this.activeHostedServerId, command);
+      if (!result.success) return this.showNotification('Fehler: ' + result.error);
+      if (input) input.value = '';
+      this.updateHostedServerStatus(result);
+    } catch (error) {
+      this.showNotification('Fehler: ' + error.message);
+    }
+  },
+
+  async importHostedServerMods(event) {
+    const files = Array.from(event.target?.files || []).map((file) => window.electronAPI.getPathForFile(file)).filter(Boolean);
+    if (!files.length) return;
+    const result = await window.electronAPI.importHostedServerMods(files);
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.updateHostedServerStatus(result);
+    this.showNotification(result.message || 'Plugins hochgeladen.');
+  },
+
+  async createHostedServerBackup() {
+    const result = await window.electronAPI.createHostedServerBackup();
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.updateHostedServerStatus(result);
+    this.showNotification(result.message || 'Backup erstellt.');
+  },
+
+  async restoreHostedServerBackup() {
+    const fileName = document.getElementById('hosting-backup-restore-input')?.value.trim() || '';
+    if (!fileName) return this.showNotification('Bitte Backup-Dateiname eingeben.');
+    const result = await window.electronAPI.restoreHostedServerBackup(fileName);
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.updateHostedServerStatus(result);
+    this.showNotification(result.message || 'Backup wiederhergestellt.');
+  },
+
+  async openHostedServerFolder() {
+    const result = await window.electronAPI.openHostedServerFolder();
+    if (!result.success) return this.showNotification('Fehler: ' + result.error);
+    this.showNotification(`Hosting-Ordner geöffnet: ${result.path}`);
+  }
+});
+
+const launcher = new MinecraftLauncher();
+window.launcher = launcher;
+
+window.addEventListener('load', () => {
+  const activeColor = localStorage.getItem('primaryColor') || '#00d9ff';
+  document.querySelectorAll('.color-btn').forEach((btn) => {
+    if (btn.getAttribute('data-color') === activeColor) {
+      btn.classList.add('active');
+    }
+  });
+});

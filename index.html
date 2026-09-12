@@ -1,8 +1,10 @@
 ﻿<!DOCTYPE html><html lang="de">
 <head>
+  <link rel="preconnect" href="https://cdn.modrinth.com" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.modrinth.com">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>X Launcher</title>
+  <title>X Client</title>
   <script>
     // Apply the persisted accent before the stylesheets paint to avoid a default-color flash.
     (() => {
@@ -38,23 +40,22 @@
   <div id="login-screen" class="screen active">
     <div class="login-container">
       <div class="login-box">
-        <h1 class="login-title">X Launcher</h1>
+        <h1 class="login-title">X Client</h1>
         <p class="login-subtitle">Fabric Mod Loader Edition</p>
 
         <div class="login-form">
-          <p id="login-config-status" class="login-config-status">Xbox/Microsoft-Weblogin wird vorbereitet...</p>
-          <button id="login-btn" class="btn btn-primary login-btn">
-            MIT XBOX ANMELDEN
+          <button id="login-btn" class="btn btn-primary login-btn" type="button">
+            <span id="login-primary-label">Sign in with Xbox</span>
           </button>
         </div>
 
         <div class="login-info">
-          <p>Login über die offizielle Xbox/Microsoft-Webseite</p>
-          <p>Der Browser wird automatisch geöffnet</p>
-          <p>Nach erfolgreicher Anmeldung wirst du direkt übernommen</p>
-          <p>Offline-Modus verfügbar</p>
-          <button id="offline-btn" class="btn btn-secondary" style="margin-top:10px; background-color:black; color:white;">
-            OFFLINE SPIELEN
+          <p id="login-info-primary">Sign in on the official Xbox/Microsoft website.</p>
+          <p id="login-info-secondary">Your browser will open automatically.</p>
+          <p id="login-info-tertiary">The launcher will continue after a successful sign-in.</p>
+          <p id="login-offline-description">Offline mode is available.</p>
+          <button id="offline-btn" class="btn btn-secondary" type="button">
+            Play offline
           </button>
         </div>
       </div>
@@ -71,7 +72,7 @@
               <div class="skin-head-layer hat"></div>
             </div>
             <div class="header-title-group">
-              <h1 class="title">X Launcher</h1>
+              <h1 class="title">X Client</h1>
             </div>
           </div>
         </div>
@@ -100,6 +101,7 @@
             <button class="nav-item" data-section="packs" aria-label="Profile" title="Profile"><img src="assets/icons/nav-profiles.svg" alt=""></button>
             <button class="nav-item" data-section="servers" aria-label="Server" title="Server"><img src="assets/icons/nav-servers.svg" alt=""></button>
             <button class="nav-item hidden" data-section="hosting" aria-label="Hosting" title="Hosting"><img src="assets/icons/nav-hosting.svg" alt=""></button>
+            <button id="admin-nav-item" class="nav-item hidden" data-section="admin" aria-label="Admin Panel" title="Admin Panel"><svg class="admin-nav-code-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 5-7 7 7 7M15.5 5l7 7-7 7M14 3l-4 18"/></svg></button>
             <button class="nav-item" data-section="skins" aria-label="Skins" title="Skins"><img src="assets/icons/nav-skins.svg" alt=""></button>
             <button class="nav-item" data-section="settings" aria-label="Einstellungen" title="Einstellungen"><img src="assets/icons/nav-settings.svg" alt=""></button>
           </nav>
@@ -144,7 +146,7 @@
             <h2>Mods verwalten</h2>
             <div class="section-actions">
               <select id="mods-profile-version-select" class="input-field mods-profile-version-select" aria-label="Minecraft-Version dieses Profils ändern" title="Profil-Version ändern"></select>
-              <button id="update-all-btn" class="btn btn-primary" type="button" data-launcher-action="update-all-mods">Alle anpassen</button>
+              <button id="update-all-btn" class="btn btn-primary mods-check-all-btn" type="button" data-launcher-action="update-all-mods">Check all</button>
               <button id="load-mods-folder-btn" class="btn btn-secondary mods-folder-icon-btn" type="button" aria-label="Mods-Ordner öffnen" title="Mods-Ordner öffnen">
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
                   <path d="M3 6.5h7l2 2h9v10H3zM3 6.5V5h7l2 2h9v1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
@@ -168,6 +170,7 @@
                 <button class="modrinth-type-tab active" type="button" data-mods-view="mod" aria-selected="true">Mods</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="resourcepack" aria-selected="false">Ressourcenpakete</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="shader" aria-selected="false">Shader</button>
+                <button class="modrinth-type-tab" type="button" data-mods-view="datapack" aria-selected="false">Datapacks</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="hidden" aria-selected="false">Ausgeblendet</button>
               </div>
               <div id="mods-drop-zone" class="mods-drop-zone" role="button" tabindex="0">
@@ -194,6 +197,7 @@
               <button class="modrinth-type-tab" type="button" data-modrinth-type="modpack" aria-selected="false">Modpacks</button>
               <button class="modrinth-type-tab" type="button" data-modrinth-type="shader" aria-selected="false">Shader</button>
               <button class="modrinth-type-tab" type="button" data-modrinth-type="resourcepack" aria-selected="false">Ressourcenpakete</button>
+              <button class="modrinth-type-tab" type="button" data-modrinth-type="datapack" aria-selected="false">Datapacks</button>
             </div>
             <div class="modrinth-search-row">
               <div class="modrinth-search-box">
@@ -510,6 +514,18 @@
           </div>
         </section>
 
+        <section id="admin" class="content-section admin-panel-section" aria-label="Admin Panel">
+          <div class="section-header admin-panel-header">
+            <div><span class="admin-panel-kicker">OWNER ONLY</span><h2>Admin Panel</h2><p class="panel-context-text">X Client Spieler und freigegebene Owner-Funktionen.</p></div>
+            <button id="admin-refresh-btn" class="btn btn-secondary" type="button">Aktualisieren</button>
+          </div>
+          <div class="admin-toolbar">
+            <input id="admin-player-search" class="input-field" type="search" placeholder="Spieler suchen..." autocomplete="off">
+            <span id="admin-player-count" class="admin-player-count">0 Spieler</span>
+          </div>
+          <div id="admin-player-list" class="admin-player-list"><p class="admin-empty-state">Spieler werden geladen...</p></div>
+        </section>
+
         <section id="accounts" class="content-section">
           <div class="section-header">
             <h2>Accounts</h2>
@@ -563,6 +579,31 @@
                 <div id="skins-list" class="skins-list"></div>
               </div>
             </div>
+
+            <aside class="skin-card cape-panel">
+              <div class="cape-panel-header">
+                <div><span class="cape-kicker">CAPES</span><h3>Cape selection</h3></div>
+                <button id="unequip-cape-btn" class="btn btn-secondary" type="button">Unequip cape</button>
+              </div>
+              <section class="cape-section custom-capes-section">
+                <div class="cape-section-title"><h4>Custom capes</h4></div>
+                <div id="custom-capes-list" class="cape-grid"></div>
+              </section>
+              <section class="cape-section official-capes-section">
+                <div class="cape-section-title"><h4>Official Minecraft capes</h4></div>
+                <div id="official-capes-list" class="cape-grid"></div>
+              </section>
+              <div id="cape-editor" class="cape-editor hidden" aria-hidden="true">
+                <div class="cape-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="cape-editor-title">
+                  <div class="cape-editor-head"><div><h4 id="cape-editor-title"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l2 4v14H5V7l2-4Zm0 5h10M9 3v5m6-5v5"/></svg><span>Create pixel cape</span></h4><p>Each square is exactly one Minecraft pixel.</p></div><button id="close-cape-editor-btn" class="cape-tool-btn" type="button" title="Close" aria-label="Close"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+                  <div class="cape-editor-tools"><label class="cape-name-control"><input id="cape-name-input" class="input-field" maxlength="40" placeholder="Cape name" aria-label="Cape name"></label><label class="cape-color-control" title="Color" aria-label="Color"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3C8 7 5 10 5 14a7 7 0 0 0 14 0c0-4-3-7-7-11Z"/></svg><input id="cape-color-input" type="color" value="#ffffff"></label><button id="cape-eraser-btn" class="cape-tool-btn" type="button" aria-pressed="false" title="Eraser" aria-label="Eraser"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 19-4-4L14 4l7 7-8 8H7Zm6 0h8M9 17l-4-4"/></svg></button><span class="cape-tool-divider" aria-hidden="true"></span><button id="cape-undo-btn" class="cape-tool-btn" type="button" title="Undo" aria-label="Undo" disabled><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7-5 5 5 5M5 12h8a6 6 0 0 1 6 6"/></svg></button><button id="cape-redo-btn" class="cape-tool-btn" type="button" title="Redo" aria-label="Redo" disabled><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5m4-5h-8a6 6 0 0 0-6 6"/></svg></button><label class="cape-elytra-toggle" title="Use cape texture for Elytra"><span>Elytra</span><input id="cape-elytra-toggle" type="checkbox" aria-label="Use cape texture for Elytra"><span class="setting-switch" aria-hidden="true"></span></label></div>
+                  <div id="cape-face-tabs" class="cape-face-tabs" role="tablist" aria-label="Cape face"><button class="active" type="button" data-cape-face="front">Front</button><button type="button" data-cape-face="back">Back</button><button type="button" data-cape-face="left">Left</button><button type="button" data-cape-face="right">Right</button><button type="button" data-cape-face="top">Top</button><button type="button" data-cape-face="bottom">Bottom</button></div>
+                  <div class="cape-editor-workspace"><div class="cape-canvas-wrap"><strong id="cape-active-face-label">Front · facing the player</strong><div class="cape-face-stage"><canvas id="cape-editor-canvas" width="10" height="16" aria-label="Cape pixel editor"></canvas></div></div><aside class="cape-full-preview"><h5>Preview</h5><div><span>Front</span><canvas id="cape-preview-front" width="10" height="16"></canvas></div><div><span>Back</span><canvas id="cape-preview-back" width="10" height="16"></canvas></div></aside></div>
+                  <p id="cape-editor-error" class="cape-editor-error hidden" role="alert"></p>
+                  <button id="save-cape-btn" class="cape-save-btn" type="button">Save</button>
+                </div>
+              </div>
+            </aside>
           </div>
         </section>
 
@@ -574,22 +615,22 @@
             </div>
           </div>
 
-          <div class="settings-container">
-            <nav class="settings-quick-nav" aria-label="Einstellungsbereiche">
-              <a href="#settings-appearance">Darstellung</a>
-              <a href="#settings-automation">Automatik</a>
-              <a href="#settings-maintenance">Wartung</a>
-              <a href="#settings-storage">Speicherorte</a>
-              <a href="#settings-extras">Extras</a>
-              <a href="#settings-cleanup">Bereinigung</a>
-            </nav>
+          <nav class="settings-overview" aria-label="Einstellungsbereiche">
+            <a href="#settings-appearance">Darstellung</a>
+            <a href="#settings-automation">Verhalten &amp; Updates</a>
+            <a href="#settings-maintenance">Hilfe &amp; Wartung</a>
+            <a href="#settings-storage">Speicherorte</a>
+            <a href="#settings-extras">Extras</a>
+            <a href="#settings-cleanup">Cleanup</a>
+          </nav>
 
+          <div class="settings-container">
             <section id="settings-appearance" class="settings-group">
               <div class="settings-group-header">
                 <span class="settings-group-index">01</span>
                 <div>
                   <h3>Darstellung</h3>
-                  <p>Optik, Sprache und Sound des Launchers.</p>
+                  <p>Optik und Sound des Launchers.</p>
                 </div>
               </div>
 
@@ -654,18 +695,6 @@
 
                 <article class="setting-item">
                   <div class="setting-heading">
-                    <h4>Sprache</h4>
-                    <p id="language-status">Automatisch an Systemsprache anpassen.</p>
-                  </div>
-                  <select id="language-select" class="input-field">
-                    <option value="auto">Automatisch (System)</option>
-                    <option value="de">Deutsch</option>
-                    <option value="en">English</option>
-                  </select>
-                </article>
-
-                <article class="setting-item">
-                  <div class="setting-heading">
                     <h4>Sound</h4>
                     <p>Feedback beim Klicken und Bedienen.</p>
                   </div>
@@ -679,11 +708,18 @@
                       <label class="sound-select-label" for="click-sound-select">
                         Klick Sound
                         <select id="click-sound-select" class="input-field">
-                          <option value="soft">Soft Tap</option>
-                          <option value="crystal">Crystal</option>
-                          <option value="wood">Wood</option>
-                          <option value="bubble">Bubble</option>
-                          <option value="paper">Paper</option>
+                          <option value="alpaca">Alpaca Switch</option>
+                          <option value="blackink">Gateron Black Ink</option>
+                          <option value="bluealps">Blue Alps</option>
+                          <option value="boxnavy">Box Navy</option>
+                          <option value="cream">NK Cream</option>
+                          <option value="holypanda">Holy Panda</option>
+                          <option value="mxblack">Cherry MX Black</option>
+                          <option value="mxblue">Cherry MX Blue</option>
+                          <option value="mxbrown">Cherry MX Brown</option>
+                          <option value="redink">Gateron Red Ink</option>
+                          <option value="topre">Topre</option>
+                          <option value="turquoise">Turquoise Tealios</option>
                         </select>
                       </label>
                       <button id="sound-preview-btn" class="btn btn-secondary" type="button" data-skip-click-sound="true">Anhören</button>
@@ -697,8 +733,8 @@
               <div class="settings-group-header">
                 <span class="settings-group-index">02</span>
                 <div>
-                  <h3>Automatik</h3>
-                  <p>Regeln für Mods.</p>
+                  <h3>Verhalten &amp; Updates</h3>
+                  <p>Automatische Abläufe an einem Ort.</p>
                 </div>
               </div>
 
@@ -726,13 +762,18 @@
                 </article>
 
                 <article class="setting-item setting-item-wide">
-                  <div class="setting-heading">
-                    <h4>Launcher automatisch updaten</h4>
-                    <p id="launcher-update-status">Der installierte Launcher prüft beim Start automatisch nach Updates.</p>
-                  </div>
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="automatic-updates-toggle" checked>
+                    <span class="setting-toggle-copy">
+                      <strong>Launcher automatisch aktualisieren</strong>
+                      <small>Prüft und lädt Updates im Hintergrund. Die Installation startet erst nach deiner Bestätigung.</small>
+                    </span>
+                    <span class="setting-switch" aria-hidden="true"></span>
+                  </label>
+                  <p id="launcher-update-status">Automatische Updates sind aktiv.</p>
                   <div class="settings-actions">
                     <button id="check-launcher-update-btn" class="btn btn-secondary" type="button">Jetzt prüfen</button>
-                    <button id="install-launcher-update-btn" class="btn btn-primary hidden" type="button">Update installieren</button>
+                    <button id="install-launcher-update-btn" class="btn btn-primary hidden" type="button">Neu starten &amp; installieren</button>
                   </div>
                 </article>
               </div>
@@ -742,8 +783,8 @@
               <div class="settings-group-header">
                 <span class="settings-group-index">03</span>
                 <div>
-                  <h3>Wartung</h3>
-                  <p>Diagnose, Logs und Tutorial.</p>
+                  <h3>Hilfe &amp; Wartung</h3>
+                  <p>Probleme prüfen oder die Einführung erneut ansehen.</p>
                 </div>
               </div>
 
@@ -817,7 +858,7 @@
                 <span class="settings-group-index">05</span>
                 <div>
                   <h3>Extras</h3>
-                  <p>Optionale Bereiche und visuelle Effekte.</p>
+                  <p>Optional launcher features.</p>
                 </div>
               </div>
 
@@ -839,18 +880,15 @@
 
                 <article class="setting-item setting-item-wide">
                   <div class="setting-heading">
-                    <h4>Neon-Rahmen</h4>
-                    <p id="neon-frame-status">Neon-Rahmen sind ausgeschaltet.</p>
+                    <h4>Minecraft Copyright &amp; Danksagungen</h4>
+                    <p>X Client ist ein unabhängiger, inoffizieller Client und steht in keiner Verbindung zu Mojang oder Microsoft.</p>
                   </div>
-                  <label class="setting-toggle setting-toggle-inline">
-                    <input type="checkbox" id="neon-frame-toggle">
-                    <span class="setting-toggle-copy">
-                      <strong>Neon-Rahmen anzeigen</strong>
-                      <small>Aktiviert die leuchtenden Rahmen-Striche in Mausnähe.</small>
-                    </span>
-                    <span class="setting-switch" aria-hidden="true"></span>
-                  </label>
+                  <div class="settings-actions">
+                    <button class="btn btn-secondary" type="button" data-open-url="https://www.minecraft.net/de-de/attribution">Minecraft Danksagungen</button>
+                    <button class="btn btn-secondary" type="button" data-open-url="https://www.minecraft.net/de-de/attribution/third-party-notices">Hinweise zu Drittanbietern</button>
+                  </div>
                 </article>
+
               </div>
             </section>
 
@@ -858,23 +896,19 @@
               <div class="settings-group-header">
                 <span class="settings-group-index">06</span>
                 <div>
-                  <h3>Bereinigung</h3>
-                  <p>Gefährliche Aufräumaktionen für Mod-Dateien.</p>
+                  <h3>Cleanup</h3>
+                  <p>Dangerous cleanup actions for mod files.</p>
                 </div>
               </div>
-
               <div class="settings-grid">
                 <article class="setting-item setting-item-wide danger">
-                  <div class="setting-heading">
-                    <h4>Alle -2-Mods löschen</h4>
-                    <p id="numbered-mod-cleanup-status">Löscht jede Mod-JAR mit „-2.jar“ am Dateiende aus allen Launcher-Modordnern – auch Pflichtmods.</p>
-                  </div>
                   <div class="settings-actions">
-                    <button id="cleanup-numbered-mods-btn" class="btn btn-danger" type="button">Alle -2-Mods löschen</button>
+                    <button id="cleanup-numbered-mods-btn" class="btn btn-danger" type="button">Clear</button>
                   </div>
                 </article>
               </div>
             </section>
+
           </div>
         </section>
       </main>
@@ -882,13 +916,26 @@
   </div>
 
   <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-label="Aktion läuft" aria-hidden="true">
+    <button id="loading-dismiss-btn" class="loading-dismiss-btn" type="button" aria-label="Ladebildschirm schließen" title="Ladebildschirm schließen">&times;</button>
     <div class="loader-shell">
+      <svg class="action-spinner" width="65" height="65" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle class="action-spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle>
+      </svg>
       <div class="loader-brand-stack" aria-hidden="true">
-        <div class="loader-brand">Minecraft</div>
+        <div class="loader-brand">X Client</div>
       </div>
       <div class="loader-welcome-line" aria-live="polite">
         <span class="loader-welcome" hidden>Welcome back</span>
         <span class="loader-player" hidden></span>
+      </div>
+      <div class="loader-work" aria-live="polite">
+        <div class="loader-status-row">
+          <span id="loading-text">Launcher wird vorbereitet...</span>
+          <span id="loading-percent">0%</span>
+        </div>
+        <div class="loader-progress-track" aria-hidden="true">
+          <div id="loading-progress" class="loader-progress-bar"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -919,6 +966,70 @@
       <div class="confirm-actions">
         <button id="confirm-cancel-btn" class="btn btn-secondary" type="button">Abbrechen</button>
         <button id="confirm-ok-btn" class="btn btn-danger" type="button">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="datapack-install-modal" class="confirm-modal datapack-install-modal hidden" role="dialog" aria-modal="true" aria-labelledby="datapack-install-title">
+    <div class="confirm-box">
+      <div id="datapack-install-existing-view" class="confirm-content">
+        <h3 id="datapack-install-title">Install Datapack</h3>
+        <p id="datapack-install-message">Choose the world where the datapack should be installed.</p>
+        <select id="datapack-install-world-select" class="input-field" aria-label="Choose a Minecraft world"></select>
+      </div>
+      <div id="datapack-install-existing-actions" class="confirm-actions datapack-install-actions">
+        <button id="datapack-install-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="datapack-create-world-btn" class="btn btn-secondary" type="button">Create New World</button>
+        <button id="datapack-install-confirm-btn" class="btn btn-primary" type="button">Install</button>
+      </div>
+      <div id="datapack-create-world-view" class="confirm-content hidden">
+        <div class="datapack-world-hero">
+          <div class="datapack-world-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z"/><path d="m4 7 8 4 8-4M12 11v10"/><path d="m8 5 8 4"/></svg>
+          </div>
+          <div>
+            <span class="datapack-world-step">WORLD SETUP</span>
+            <h3>Create New World</h3>
+            <p>Choose how your new adventure should begin.</p>
+          </div>
+        </div>
+        <div class="datapack-world-form">
+          <div class="datapack-world-name-field">
+            <label class="field-label" for="datapack-world-name-input">World Name</label>
+            <input id="datapack-world-name-input" class="input-field" type="text" maxlength="64" value="New World" autocomplete="off" placeholder="Enter a world name">
+          </div>
+          <div class="datapack-world-option">
+            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">◆</span><div><label class="field-label" for="datapack-world-gamemode-select">Game Mode</label><small>Choose your play style</small></div></div>
+            <select id="datapack-world-gamemode-select" class="input-field">
+              <option value="survival" selected>Survival</option>
+              <option value="creative">Creative</option>
+              <option value="hardcore">Hardcore</option>
+            </select>
+          </div>
+          <div class="datapack-world-option">
+            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">✦</span><div><label class="field-label" for="datapack-world-difficulty-select">Difficulty</label><small>Set the challenge level</small></div></div>
+            <select id="datapack-world-difficulty-select" class="input-field">
+              <option value="peaceful">Peaceful</option>
+              <option value="easy">Easy</option>
+              <option value="normal" selected>Normal</option>
+              <option value="hard">Hard</option>
+            </select>
+          </div>
+          <div class="datapack-world-option">
+            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">▦</span><div><label class="field-label" for="datapack-world-type-select">World Type</label><small>Shape the generated terrain</small></div></div>
+            <select id="datapack-world-type-select" class="input-field">
+              <option value="default" selected>Default</option>
+              <option value="flat">Superflat</option>
+              <option value="large_biomes">Large Biomes</option>
+              <option value="amplified">Amplified</option>
+            </select>
+          </div>
+        </div>
+        <div class="datapack-world-pack-note"><span aria-hidden="true">✓</span><span>The selected datapack will be installed automatically.</span></div>
+      </div>
+      <div id="datapack-create-world-actions" class="confirm-actions datapack-world-actions hidden">
+        <button id="datapack-create-world-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="datapack-create-world-confirm-btn" class="btn btn-primary" type="button"><span aria-hidden="true">＋</span> Create World</button>
       </div>
     </div>
   </div>
@@ -1003,8 +1114,6 @@
   </div>
 
   <!-- Notification Toast -->
-
-  <div id="service-status-stack" class="service-status-stack" aria-live="polite" aria-label="Statusmeldungen"></div>
 
   <script src="node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
   <script src="app.js"></script>

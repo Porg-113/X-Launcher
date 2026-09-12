@@ -1,0 +1,58 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: npm run build:installer
+
+      - name: Require a trusted Authenticode signature
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem -LiteralPath dist -Filter 'X-Client-*-x64.exe' -File
+          if (-not $installers) { throw 'No installer was produced.' }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Release is not signed with a trusted certificate: $($installer.Name) ($($signature.Status))"
+            }
+          }
+
+      - name: Create SHA-256 checksums
+        shell: pwsh
+        run: npm run release:hashes
+
+      - name: Upload release files
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/latest.yml
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/SHA256SUMS.txt

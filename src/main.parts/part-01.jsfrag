@@ -1,0 +1,4575 @@
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, safeStorage } = require('electron');
+const path = require('path');
+const { powerSaveBlocker } = require('electron');
+const { autoUpdater } = require('electron-updater');
+const { nativeTheme } = require('electron');
+const os = require('os');
+const fs = require('fs');
+const crypto = require('crypto');
+const net = require('net');
+const dns = require('dns').promises;
+const { spawn, spawnSync, execFileSync } = require('child_process');
+const https = require('https');
+const http = require('http');
+const zlib = require('zlib');
+const { Authflow, Titles } = require('prismarine-auth');
+const {
+  assertTrustedHttpsUrl,
+  createRobustness,
+  hashFile,
+  serializeError,
+  verifyFileIntegrity
+} = require('./core/robustness');
+const createOracleHostingBackend = require('./oracle-hosting');
+const createLocalDirectHostingBackend = require('./local-direct-hosting');
+const createModsEngine = require('./core/mods-engine');
+const { listServers, listWorlds } = require('./core/minecraft-data');
+const {
+  clearCurrentUser,
+  deriveCurrentUser,
+  getCurrentUser,
+  hasAdminPermission,
+  setCurrentUser
+} = require('./core/admin-state');
+const ADMIN_DIRECTORY = require('./core/admin-directory');
+
+let fetchImpl;
+try {
+  fetchImpl = globalThis.fetch || require('node-fetch');
+} catch (error) {
+  fetchImpl = globalThis.fetch;
+}
+
+if (!fetchImpl) {
+  fetchImpl = async () => {
+    throw new Error('fetch ist nicht verfügbar. Bitte installiere node-fetch oder nutze Node 18+.');
+  };
+}
+
+let mainWindow;
+const launcherWindows = new Set();
+let windowCreateCount = 0;
+let sharedWindowAnimationStartedAt = Date.now();
+let sharedActiveSectionId = 'dashboard';
+let startupUpdatePromise = null;
+let launcherAppUpdateSetupDone = false;
+let launcherAppUpdateCheckPromise = null;
+let launcherAppUpdateReady = false;
+let launcherAppUpdateInstallPromptOpen = false;
+let hostedServerProcess = null;
+let hostedServerStartedAt = '';
+let hostedServerRunningId = '';
+let hostedServerPowerSaveBlockerId = null;
+const hostedServerProcesses = new Map();
+const hostedServerUpnpMappings = new Map();
+const hostedServerFirewallRules = new Map();
+let activeMinecraftProcess = null;
+let launcherPresenceActive = false;
+let anonymousPresenceTimer = null;
+let anonymousPresenceLastMinute = '';
+let cosmeticsPresenceLastSentAt = 0;
+let cosmeticsCapeLastSignature = '';
+let cosmeticsBackendSessionToken = '';
+let verifiedOwnerSession = { uuid: '', verifiedAt: 0 };
+const verifiedMinecraftSessions = new Map();
+let minecraftLaunchReserved = false;
+
+const PROJECT_ROOT_DIR = path.join(__dirname, '..');
+const ICONS_DIR = path.join(PROJECT_ROOT_DIR, 'icons');
+const ASSETS_DIR = path.join(PROJECT_ROOT_DIR, 'assets');
+const REQUIRED_MODS_DIR = path.join(ASSETS_DIR, 'required-mods');
+const FULLBRIGHT_RESOURCE_PACK_FILE_NAME = 'X Client Fullbright.zip';
+const FULLBRIGHT_RESOURCE_PACK_ID = `file/${FULLBRIGHT_RESOURCE_PACK_FILE_NAME}`;
+const LEGACY_FULLBRIGHT_RESOURCE_PACK_IDS = [
+  'file/X Client Fullbright'
+];
+
+const ROAMING_APPDATA_DIR = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+const WINDOWS_USERS_DIR = path.dirname(os.homedir());
+const DEFAULT_WINDOWS_USER_NAME = path.basename(os.homedir());
+const DEFAULT_MINECRAFT_FOLDER_NAME = '.minecraft';
+const FALLBACK_MINECRAFT_DIR = path.join(WINDOWS_USERS_DIR, DEFAULT_WINDOWS_USER_NAME, 'AppData', 'Roaming', DEFAULT_MINECRAFT_FOLDER_NAME);
+let DEFAULT_MINECRAFT_DIR = FALLBACK_MINECRAFT_DIR;
+const DEFAULT_DOWNLOADS_DIR = path.join(os.homedir(), 'Downloads');
+const CONFIG_DIR = path.join(ROAMING_APPDATA_DIR, '.minecraft-launcher');
+const ROBUSTNESS = createRobustness({
+  configDir: CONFIG_DIR,
+  debug: parseBooleanEnv(process.env.X_LAUNCHER_DEBUG)
+});
+const logger = ROBUSTNESS.logger;
+const LOG_DIR = ROBUSTNESS.logDir;
+const BACKUP_DIR = ROBUSTNESS.backupDir;
+const DIAGNOSTICS_DIR = path.join(CONFIG_DIR, 'diagnostics');
+const PROFILE_SETTINGS_CLIPBOARD_DIR = path.join(CONFIG_DIR, 'profile-settings-clipboard');
+const PROFILE_INGAME_SETTINGS_FILE_NAME = 'settings.txt';
+let RESOURCEPACKS_DIR = path.join(DEFAULT_MINECRAFT_DIR, 'resourcepacks');
+let SHADERPACKS_DIR = path.join(DEFAULT_MINECRAFT_DIR, 'shaderpacks');
+const MODS_LIBRARY_DIR = path.join(CONFIG_DIR, 'mods-library');
+const MODS_STATE_FILE = path.join(CONFIG_DIR, 'mods-state.json');
+const DASH_TWO_MOD_PURGE_MARKER_FILE = path.join(CONFIG_DIR, 'delete-dash-two-mods.enabled');
+const DOWNLOADABLE_MODRINTH_STATE_FILE = path.join(CONFIG_DIR, 'modrinth-downloads.json');
+const MODRINTH_CATALOG_CACHE_FILE = path.join(CONFIG_DIR, 'modrinth-catalog-cache.json');
+const MOD_DISABLE_AUDIT_NAME = 'mod-disable-history.jsonl';
+const PACKS_DIR = path.join(CONFIG_DIR, 'packs');
+const PACKS_STATE_FILE = path.join(CONFIG_DIR, 'packs.json');
+const OFFICIAL_LAUNCHER_PROFILES_FILE_NAME = 'launcher_profiles.json';
+const ACCOUNTS_STATE_FILE = path.join(CONFIG_DIR, 'accounts.json');
+const ADMIN_DIRECTORY_FILE = path.join(CONFIG_DIR, 'admin-directory.json');
+const SERVER_FAVORITES_STATE_FILE = path.join(CONFIG_DIR, 'server-favorites.json');
+const HOSTED_SERVER_DIR = path.join(CONFIG_DIR, 'hosted-server');
+const HOSTED_SERVER_STATE_FILE = path.join(HOSTED_SERVER_DIR, 'hosted-server.json');
+const HOSTED_SERVER_INSTANCES_DIR = path.join(HOSTED_SERVER_DIR, 'servers');
+const HOSTED_SERVER_AUTO_DNS_SUFFIX = 'sslip.io';
+const SKINS_DIR = path.join(CONFIG_DIR, 'skins');
+const CAPES_DIR = path.join(CONFIG_DIR, 'capes');
+const CAPES_STATE_FILE = path.join(CAPES_DIR, 'capes.json');
+const ACTIVE_CAPE_DESCRIPTOR_FILE = path.join(CAPES_DIR, 'active-cape.txt');
+const DEFAULT_COSMETICS_API_URL = 'https://x-client-cosmetics.cosmetics-worker.workers.dev';
+const COSMETICS_API_URL = String(process.env.X_COSMETICS_API_URL || DEFAULT_COSMETICS_API_URL).trim().replace(/\/+$/u, '');
+const SKIN_LIBRARY_DIR = path.join(SKINS_DIR, 'library');
+const USER_FILE = path.join(CONFIG_DIR, 'user.json');
+const LAUNCHER_CONFIG_FILE = path.join(CONFIG_DIR, 'launcher-config.json');
+const LAUNCHER_LIVE_THEME_FILE = path.join(CONFIG_DIR, 'x-launcher-theme.json');
+const SELECTED_SKIN_FILE = path.join(SKINS_DIR, 'selected-skin.png');
+const AUTH_CACHE_DIR = path.join(CONFIG_DIR, 'auth-cache');
+const DEFAULT_MICROSOFT_CLIENT_ID = Titles.MinecraftJava;
+const FORCE_OFFLINE_MODE = parseBooleanEnv(process.env.X_FORCE_OFFLINE_MODE);
+const ALLOW_OFFICIAL_LAUNCHER_FALLBACK = parseBooleanEnv(process.env.X_ALLOW_OFFICIAL_LAUNCHER_FALLBACK);
+const ORACLE_HOSTING = createOracleHostingBackend({
+  configDir: CONFIG_DIR,
+  robustness: ROBUSTNESS,
+  logger,
+  shell,
+  safeStorage
+});
+const LOCAL_DIRECT_HOSTING = createLocalDirectHostingBackend({
+  configDir: CONFIG_DIR,
+  robustness: ROBUSTNESS,
+  logger,
+  shell
+});
+const MINECRAFT_SERVER_STATUS_TIMEOUT_MS = 5000;
+const MAX_SERVER_ICON_DATA_URL_LENGTH = 180000;
+const VERSION_MANIFEST_URL = 'https://launchermeta.mojang.com/mc/game/version_manifest.json';
+const FABRIC_GAME_VERSIONS_URL = 'https://meta.fabricmc.net/v2/versions/game';
+const FABRIC_LOADER_VERSIONS_URL = 'https://meta.fabricmc.net/v2/versions/loader';
+const PAPER_API_BASE_URL = 'https://api.papermc.io/v2';
+const BEDROCK_DOWNLOAD_LINKS_URL = 'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links';
+const BEDROCK_SERVER_DOWNLOAD_PAGE_URL = 'https://www.minecraft.net/en-us/download/server/bedrock';
+// Keep the complete stable profile range. The former 120-entry cap cut older
+// releases out before the profile creation/version selectors received them.
+const FABRIC_RELEASE_LIMIT = 500;
+const FABRIC_LATEST_FALLBACK_LIMIT = 5;
+const SUPPORTED_MINECRAFT_VERSIONS = [
+  '26.2'
+];
+const SUPPORTED_MINECRAFT_VERSION_SET = new Set(SUPPORTED_MINECRAFT_VERSIONS);
+const STANDARD_MIN_MINECRAFT_VERSION = SUPPORTED_MINECRAFT_VERSIONS[0];
+const STANDARD_SUPPORTED_MINECRAFT_VERSIONS_LABEL = `${STANDARD_MIN_MINECRAFT_VERSION}+`;
+const PROFILE_MIN_MINECRAFT_VERSION = '1.8';
+const WEAK_MANAGED_VERSION_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MODRINTH_API_BASE_URL = 'https://api.modrinth.com/v2';
+const MODRINTH_SEARCH_LIMIT = 12;
+const MODRINTH_MIN_SEARCH_LIMIT = 4;
+const MODRINTH_MAX_SEARCH_LIMIT = 20;
+const MODRINTH_SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const MODRINTH_UNAVAILABLE_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MODRINTH_SEARCH_CACHE_MAX_ENTRIES = 120;
+const modrinthSearchCache = new Map();
+let modrinthCatalogDiskCache = null;
+const SERVICE_HEALTH_TIMEOUT_MS = 4500;
+const SERVICE_HEALTH_CHECKS = [
+  {
+    id: 'internet',
+    level: 'critical',
+    message: 'Keine Internetverbindung.',
+    url: 'https://www.google.com/generate_204',
+    okStatus: (status) => status === 204 || (status >= 200 && status < 400)
+  },
+  {
+    id: 'modrinth',
+    level: 'warning',
+    message: 'Modrinth ist momentan nicht erreichbar.',
+    url: `${MODRINTH_API_BASE_URL}/search?limit=1`,
+    headers: {
+      'User-Agent': 'XClient/1.0 (Mod Manager)'
+    }
+  },
+  {
+    id: 'microsoft-auth',
+    level: 'warning',
+    message: 'Microsoft-Anmeldung momentan nicht verfügbar.',
+    url: 'https://login.live.com/oauth20_authorize.srf?client_id=00000000402b5328&response_type=code&redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf&scope=XboxLive.signin%20offline_access',
+    okStatus: (status) => status >= 200 && status < 500
+  },
+  {
+    id: 'launcher-server',
+    level: 'critical',
+    message: 'Launcher-Server antwortet nicht.',
+    url: 'https://api.github.com/repos/Porg-113/X-Launcher/releases/latest',
+    headers: {
+      'User-Agent': 'XClient/1.0 (Service Health)'
+    },
+    okStatus: (status) => status === 200 || status === 404
+  }
+];
+const MODPACK_CACHE_DIR = path.join(CONFIG_DIR, 'modpacks-cache');
+const MODRINTH_API_HEADERS = {
+  'User-Agent': 'XClient/1.0 (Mod Manager)'
+};
+const MODRINTH_API_CACHE_TTL_MS = 5 * 60 * 1000;
+const modrinthApiCache = new Map();
+const TRUSTED_MODRINTH_DOWNLOAD_HOSTS = new Set([
+  'api.modrinth.com',
+  'cdn.modrinth.com'
+]);
+const TRUSTED_MOJANG_DOWNLOAD_HOSTS = new Set([
+  'launchermeta.mojang.com',
+  'launcher.mojang.com',
+  'piston-meta.mojang.com',
+  'piston-data.mojang.com',
+  'libraries.minecraft.net',
+  'resources.download.minecraft.net'
+]);
+const TRUSTED_FABRIC_META_HOSTS = new Set([
+  'meta.fabricmc.net'
+]);
+const TRUSTED_PAPER_DOWNLOAD_HOSTS = new Set([
+  'api.papermc.io'
+]);
+const TRUSTED_BEDROCK_DOWNLOAD_HOSTS = new Set([
+  'net-secondary.web.minecraft-services.net',
+  'www.minecraft.net',
+  'minecraft.azureedge.net',
+  'minecraftpe.azureedge.net'
+]);
+const TRUSTED_PUBLIC_IP_HOSTS = new Set([
+  'api.ipify.org'
+]);
+const TRUSTED_MINECRAFT_STATUS_HOSTS = new Set([
+  'api.mcsrvstat.us'
+]);
+const TRUSTED_LIBRARY_DOWNLOAD_HOSTS = new Set([
+  ...TRUSTED_MOJANG_DOWNLOAD_HOSTS,
+  ...TRUSTED_PAPER_DOWNLOAD_HOSTS,
+  'maven.fabricmc.net'
+]);
+const TRUSTED_MINECRAFT_SERVICE_HOSTS = new Set([
+  'api.minecraftservices.com'
+]);
+const TRUSTED_MINECRAFT_PROFILE_HOSTS = new Set([
+  'api.minecraftservices.com',
+  'api.mojang.com',
+  'sessionserver.mojang.com'
+]);
+const TRUSTED_MINECRAFT_TEXTURE_HOSTS = new Set([
+  'textures.minecraft.net'
+]);
+const SKINMC_BASE_URL = 'https://skinmc.net';
+const ONLINE_SKIN_SEARCH_LIMIT = 8;
+const ONLINE_SKIN_PAGE_LIMIT = 8;
+const ONLINE_SKIN_MAX_BYTES = 512 * 1024;
+const SKIN_LIBRARY_API_HEADERS = {
+  'User-Agent': 'XClient/1.0 (Skin Library)'
+};
+const NAME_SKIN_DIRECT_TAGS = new Set([
+  'angel',
+  'anime',
+  'blue',
+  'boy',
+  'cat',
+  'creeper',
+  'cute',
+  'dark',
+  'demon',
+  'dragon',
+  'enderman',
+  'fire',
+  'fox',
+  'girl',
+  'green',
+  'hero',
+  'hoodie',
+  'ice',
+  'king',
+  'knight',
+  'mage',
+  'ninja',
+  'pirate',
+  'pvp',
+  'red',
+  'robot',
+  'space',
+  'warrior',
+  'wizard',
+  'wolf'
+]);
+const NAME_SKIN_COLOR_TAGS = ['blue', 'red', 'green', 'black', 'white', 'purple', 'orange', 'cyan'];
+const NAME_SKIN_STYLE_TAGS = ['hoodie', 'pvp', 'warrior', 'ninja', 'knight', 'anime', 'cyber', 'adventurer'];
+const NAME_SKIN_THEME_TAGS = ['dragon', 'wolf', 'fire', 'ice', 'space', 'demon', 'angel', 'king'];
+const FABRIC_API_PROJECT_ID = 'P7dR8mSH';
+const SODIUM_PROJECT_ID = 'AANobbMI';
+const IRIS_PROJECT_ID = 'YL57xq9U';
+const MOD_MENU_PROJECT_ID = 'mOgUt4GM';
+const INFINITE_ZOOM_PROJECT_ID = 'pS3Sez5p';
+const SIMPLE_VOICE_CHAT_PROJECT_ID = 'simple-voice-chat';
+const LITHIUM_PROJECT_ID = 'lithium';
+const FERRITE_CORE_PROJECT_ID = 'ferrite-core';
+const ENTITY_CULLING_PROJECT_ID = 'entityculling';
+const IMMEDIATELY_FAST_PROJECT_ID = 'immediatelyfast';
+const MORE_CULLING_PROJECT_ID = 'moreculling';
+const DYNAMIC_FPS_PROJECT_ID = 'dynamic-fps';
+const CLUMPS_PROJECT_ID = 'Wnxd13zP';
+const FAST_IP_PING_PROJECT_ID = '9mtu0sUO';
+const PARTICLE_CORE_PROJECT_ID = 'RSeLon5O';
+const C2ME_PROJECT_ID = 'c2me-fabric';
+const APPLE_SKIN_PROJECT_ID = 'appleskin';
+const CONTINUITY_PROJECT_ID = 'continuity';
+const CHAT_HEADS_PROJECT_ID = 'chat-heads';
+const CONTROLLING_PROJECT_ID = 'controlling';
+const SHULKER_BOX_TOOLTIP_PROJECT_ID = 'shulkerboxtooltip';
+const ENTITY_MODEL_FEATURES_PROJECT_ID = 'entity-model-features';
+const ENTITY_TEXTURE_FEATURES_PROJECT_ID = 'entitytexturefeatures';
+const THREE_D_SKIN_LAYERS_PROJECT_ID = '3dskinlayers';
+const CREATIVE_CORE_PROJECT_ID = 'creativecore';
+const CLOTH_CONFIG_PROJECT_ID = 'cloth-config';
+const SILICON_PROJECT_ID = 'MdNZOBlg';
+const DISTANT_HORIZONS_PROJECT_ID = 'uCdwusMi';
+const VOXY_PROJECT_ID = 'fxxUqruK';
+const MODRINTH_PROJECT_ID_ALIASES = {
+  silicon: SILICON_PROJECT_ID,
+  silicons: SILICON_PROJECT_ID,
+  '9eGKb6K1': SIMPLE_VOICE_CHAT_PROJECT_ID,
+  'gvQqBUqZ': LITHIUM_PROJECT_ID,
+  'uXXizFIs': FERRITE_CORE_PROJECT_ID,
+  'NNAgCjsB': ENTITY_CULLING_PROJECT_ID,
+  '5ZwdcRci': IMMEDIATELY_FAST_PROJECT_ID,
+  '51shyZVL': MORE_CULLING_PROJECT_ID,
+  'LQ3K71Q1': DYNAMIC_FPS_PROJECT_ID,
+  'VSNURh3q': C2ME_PROJECT_ID,
+  'EsAfCjCV': APPLE_SKIN_PROJECT_ID,
+  '1IjD5062': CONTINUITY_PROJECT_ID,
+  'Wb5oqrBJ': CHAT_HEADS_PROJECT_ID,
+  'xv94TkTM': CONTROLLING_PROJECT_ID,
+  '2M01OLQq': SHULKER_BOX_TOOLTIP_PROJECT_ID,
+  '4I1XuqiY': ENTITY_MODEL_FEATURES_PROJECT_ID,
+  'BVzZfTc1': ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  'zV5r3pPn': THREE_D_SKIN_LAYERS_PROJECT_ID,
+  'OsZiaDHq': CREATIVE_CORE_PROJECT_ID,
+  '9s6osm5g': CLOTH_CONFIG_PROJECT_ID
+};
+const DEFAULT_PACK_PROJECTS = [
+  {
+    projectId: FABRIC_API_PROJECT_ID,
+    slug: 'fabric-api',
+    title: 'Fabric API'
+  },
+  {
+    projectId: SILICON_PROJECT_ID,
+    slug: 'silicons',
+    title: 'Silicon'
+  },
+  {
+    projectId: SODIUM_PROJECT_ID,
+    slug: 'sodium',
+    title: 'Sodium'
+  },
+  {
+    projectId: IRIS_PROJECT_ID,
+    slug: 'iris',
+    title: 'Iris Shaders'
+  },
+  {
+    projectId: MOD_MENU_PROJECT_ID,
+    slug: 'modmenu',
+    title: 'Mod Menu'
+  },
+  {
+    projectId: INFINITE_ZOOM_PROJECT_ID,
+    slug: 'infinite-zoom',
+    title: 'Infinite Zoom'
+  },
+  {
+    projectId: SIMPLE_VOICE_CHAT_PROJECT_ID,
+    slug: 'simple-voice-chat',
+    title: 'Simple Voice Chat'
+  },
+  {
+    projectId: LITHIUM_PROJECT_ID,
+    slug: 'lithium',
+    title: 'Lithium'
+  },
+  {
+    projectId: FERRITE_CORE_PROJECT_ID,
+    slug: 'ferrite-core',
+    title: 'FerriteCore'
+  },
+  {
+    projectId: ENTITY_CULLING_PROJECT_ID,
+    slug: 'entityculling',
+    title: 'Entity Culling'
+  },
+  {
+    projectId: IMMEDIATELY_FAST_PROJECT_ID,
+    slug: 'immediatelyfast',
+    title: 'ImmediatelyFast'
+  },
+  {
+    projectId: MORE_CULLING_PROJECT_ID,
+    slug: 'moreculling',
+    title: 'More Culling'
+  },
+  {
+    projectId: DYNAMIC_FPS_PROJECT_ID,
+    slug: 'dynamic-fps',
+    title: 'Dynamic FPS'
+  },
+  {
+    projectId: CLUMPS_PROJECT_ID,
+    slug: 'clumps',
+    title: 'Clumps'
+  },
+  {
+    projectId: FAST_IP_PING_PROJECT_ID,
+    slug: 'fast-ip-ping',
+    title: 'Fast IP Ping'
+  },
+  {
+    projectId: PARTICLE_CORE_PROJECT_ID,
+    slug: 'particle-core',
+    title: 'Particle Core'
+  },
+  {
+    projectId: C2ME_PROJECT_ID,
+    slug: 'c2me-fabric',
+    title: 'Concurrent Chunk Management Engine'
+  },
+  {
+    projectId: APPLE_SKIN_PROJECT_ID,
+    slug: 'appleskin',
+    title: 'AppleSkin'
+  },
+  {
+    projectId: CONTINUITY_PROJECT_ID,
+    slug: 'continuity',
+    title: 'Continuity'
+  },
+  {
+    projectId: CHAT_HEADS_PROJECT_ID,
+    slug: 'chat-heads',
+    title: 'Chat Heads'
+  },
+  {
+    projectId: CONTROLLING_PROJECT_ID,
+    slug: 'controlling',
+    title: 'Controlling'
+  },
+  {
+    projectId: SHULKER_BOX_TOOLTIP_PROJECT_ID,
+    slug: 'shulkerboxtooltip',
+    title: 'Shulker Box Tooltip'
+  }
+];
+const KNOWN_FABRIC_MOD_ID_PROJECT_IDS = {
+  silicon: SILICON_PROJECT_ID,
+  sodium: SODIUM_PROJECT_ID,
+  iris: IRIS_PROJECT_ID,
+  modmenu: MOD_MENU_PROJECT_ID,
+  'mod-menu': MOD_MENU_PROJECT_ID,
+  infinitezoom: INFINITE_ZOOM_PROJECT_ID,
+  'infinite-zoom': INFINITE_ZOOM_PROJECT_ID,
+  voicechat: SIMPLE_VOICE_CHAT_PROJECT_ID,
+  lithium: LITHIUM_PROJECT_ID,
+  ferritecore: FERRITE_CORE_PROJECT_ID,
+  entityculling: ENTITY_CULLING_PROJECT_ID,
+  immediatelyfast: IMMEDIATELY_FAST_PROJECT_ID,
+  moreculling: MORE_CULLING_PROJECT_ID,
+  dynamic_fps: DYNAMIC_FPS_PROJECT_ID,
+  clumps: CLUMPS_PROJECT_ID,
+  fastipping: FAST_IP_PING_PROJECT_ID,
+  'fast-ip-ping': FAST_IP_PING_PROJECT_ID,
+  particle_core: PARTICLE_CORE_PROJECT_ID,
+  'particle-core': PARTICLE_CORE_PROJECT_ID,
+  c2me: C2ME_PROJECT_ID,
+  appleskin: APPLE_SKIN_PROJECT_ID,
+  entity_model_features: ENTITY_MODEL_FEATURES_PROJECT_ID,
+  entitymodelfeatures: ENTITY_MODEL_FEATURES_PROJECT_ID,
+  emf: ENTITY_MODEL_FEATURES_PROJECT_ID,
+  entity_texture_features: ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  entitytexturefeatures: ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  etf: ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  skinlayers3d: THREE_D_SKIN_LAYERS_PROJECT_ID,
+  '3d-skin-layers': THREE_D_SKIN_LAYERS_PROJECT_ID,
+  creativecore: CREATIVE_CORE_PROJECT_ID,
+  cloth_config: CLOTH_CONFIG_PROJECT_ID,
+  clothconfig: CLOTH_CONFIG_PROJECT_ID,
+  continuity: CONTINUITY_PROJECT_ID,
+  chat_heads: CHAT_HEADS_PROJECT_ID,
+  chatheads: CHAT_HEADS_PROJECT_ID,
+  controlling: CONTROLLING_PROJECT_ID,
+  shulkerboxtooltip: SHULKER_BOX_TOOLTIP_PROJECT_ID,
+  distanthorizons: DISTANT_HORIZONS_PROJECT_ID,
+  'distant-horizons': DISTANT_HORIZONS_PROJECT_ID,
+  distant_horizons: DISTANT_HORIZONS_PROJECT_ID,
+  'distant horizons': DISTANT_HORIZONS_PROJECT_ID,
+  voxy: VOXY_PROJECT_ID,
+  fabric: FABRIC_API_PROJECT_ID,
+  'fabric-api': FABRIC_API_PROJECT_ID
+};
+const KNOWN_MOD_CONFLICTS = [
+  {
+    id: 'sodium-optifine',
+    title: 'Sodium und OptiFine/OptiFabric',
+    left: { projectIds: [SODIUM_PROJECT_ID], terms: ['sodium'] },
+    right: { terms: ['optifine', 'optifabric'] },
+    message: 'Sodium/Iris und OptiFine/OptiFabric patchen dieselben Renderpfade. Entferne OptiFine/OptiFabric oder nutze eine Modrinth-kompatible Alternative.'
+  },
+  {
+    id: 'iris-optifine',
+    title: 'Iris und OptiFine/OptiFabric',
+    left: { projectIds: [IRIS_PROJECT_ID], terms: ['iris'] },
+    right: { terms: ['optifine', 'optifabric'] },
+    message: 'Iris ersetzt die Shader-Funktionen von OptiFine. Beide gemeinsam verursachen häufig Fabric-Startfehler.'
+  }
+];
+const HIDDEN_FABRIC_API_MINECRAFT_VERSIONS = new Set([
+  '1.21.11'
+]);
+const X_CLIENT_MOD_VERSION = '1.0.152';
+const REQUIRED_BUNDLED_MODS = [
+  {
+    projectId: 'x-launcher-menu',
+    slug: 'x-launcher-menu',
+    title: 'X Client',
+    description: 'Vollständiges X-Client-Menü mit HUD, Zoom, Fullbright und Client-Modulen.',
+    iconUrl: '',
+    fileName: 'x-launcher-menu.jar',
+    versionNumber: X_CLIENT_MOD_VERSION,
+    versionName: `X Client ${X_CLIENT_MOD_VERSION}`,
+    minecraftVersions: SUPPORTED_MINECRAFT_VERSIONS,
+    assetPathByMinecraftVersion: {
+      '26.2': path.join(REQUIRED_MODS_DIR, 'x-launcher-menu-26.2.jar')
+    }
+  }
+];
+const MODS_TAB_REQUIRED_BUNDLED_MODS = REQUIRED_BUNDLED_MODS.filter((entry) => (
+  ['x-launcher-menu'].includes(String(entry?.projectId || '').trim())
+));
+const REMOVED_BUNDLED_PROJECT_IDS = new Set([
+  'safe-settings',
+  'x-client',
+  'x-standard-client',
+  'Ji79dP1f'
+]);
+const REMOVED_BUNDLED_MOD_FILE_NAMES = new Set([
+  'safe-settings.jar',
+  'x-standard-client.jar',
+  'x_client.jar',
+  'xclient.jar',
+  'simplefullbright.jar',
+  'verysimplefullbright.jar'
+]);
+const LEGACY_BUNDLED_PROJECT_IDS = new Set([
+  'fabric-key-mapping-api-v1',
+  ...REMOVED_BUNDLED_PROJECT_IDS
+]);
+const REQUIRED_MANAGED_PROJECT_IDS = new Set([
+  FABRIC_API_PROJECT_ID,
+  SILICON_PROJECT_ID,
+  SODIUM_PROJECT_ID,
+  IRIS_PROJECT_ID,
+  MOD_MENU_PROJECT_ID,
+  INFINITE_ZOOM_PROJECT_ID,
+  SIMPLE_VOICE_CHAT_PROJECT_ID,
+  LITHIUM_PROJECT_ID,
+  FERRITE_CORE_PROJECT_ID,
+  ENTITY_CULLING_PROJECT_ID,
+  IMMEDIATELY_FAST_PROJECT_ID,
+  MORE_CULLING_PROJECT_ID,
+  DYNAMIC_FPS_PROJECT_ID,
+  CLUMPS_PROJECT_ID,
+  FAST_IP_PING_PROJECT_ID,
+  PARTICLE_CORE_PROJECT_ID,
+  C2ME_PROJECT_ID,
+  APPLE_SKIN_PROJECT_ID,
+  ENTITY_MODEL_FEATURES_PROJECT_ID,
+  ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  THREE_D_SKIN_LAYERS_PROJECT_ID,
+  CREATIVE_CORE_PROJECT_ID,
+  CLOTH_CONFIG_PROJECT_ID,
+  CONTINUITY_PROJECT_ID,
+  CHAT_HEADS_PROJECT_ID,
+  CONTROLLING_PROJECT_ID,
+  SHULKER_BOX_TOOLTIP_PROJECT_ID
+]);
+const OPTIONAL_DEFAULT_CONFLICT_IDENTIFIERS = new Set(
+  DEFAULT_PACK_PROJECTS
+    .flatMap((entry) => [entry?.projectId, entry?.slug])
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter((entry) => entry && entry !== FABRIC_API_PROJECT_ID.toLowerCase() && entry !== 'fabric-api')
+);
+const HIDDEN_MODS_TAB_PROJECT_IDS = new Set([
+  FABRIC_API_PROJECT_ID,
+  SILICON_PROJECT_ID,
+  SODIUM_PROJECT_ID,
+  IRIS_PROJECT_ID,
+  MOD_MENU_PROJECT_ID,
+  INFINITE_ZOOM_PROJECT_ID,
+  SIMPLE_VOICE_CHAT_PROJECT_ID,
+  LITHIUM_PROJECT_ID,
+  FERRITE_CORE_PROJECT_ID,
+  ENTITY_CULLING_PROJECT_ID,
+  IMMEDIATELY_FAST_PROJECT_ID,
+  MORE_CULLING_PROJECT_ID,
+  DYNAMIC_FPS_PROJECT_ID,
+  CLUMPS_PROJECT_ID,
+  FAST_IP_PING_PROJECT_ID,
+  PARTICLE_CORE_PROJECT_ID,
+  C2ME_PROJECT_ID,
+  APPLE_SKIN_PROJECT_ID,
+  ENTITY_MODEL_FEATURES_PROJECT_ID,
+  ENTITY_TEXTURE_FEATURES_PROJECT_ID,
+  THREE_D_SKIN_LAYERS_PROJECT_ID,
+  CREATIVE_CORE_PROJECT_ID,
+  CLOTH_CONFIG_PROJECT_ID,
+  CONTINUITY_PROJECT_ID,
+  CHAT_HEADS_PROJECT_ID,
+  CONTROLLING_PROJECT_ID,
+  SHULKER_BOX_TOOLTIP_PROJECT_ID,
+  'safe-settings'
+]);
+const HIDDEN_MODS_TAB_PROJECT_SLUGS = new Set([
+  'fabric-api',
+  'silicon',
+  'silicons',
+  'sodium',
+  'iris',
+  'modmenu',
+  'infinite-zoom',
+  'infinitezoom',
+  'simple-voice-chat',
+  'lithium',
+  'ferrite-core',
+  'entityculling',
+  'immediatelyfast',
+  'moreculling',
+  'dynamic-fps',
+  'clumps',
+  'fast-ip-ping',
+  'particle-core',
+  'c2me-fabric',
+  'appleskin',
+  'entity-model-features',
+  'entitytexturefeatures',
+  '3dskinlayers',
+  'creativecore',
+  'cloth-config',
+  'continuity',
+  'chat-heads',
+  'controlling',
+  'shulkerboxtooltip',
+  'safe-settings'
+]);
+const REQUIRED_MANUAL_MOD_FILE_PREFIXES = new Set([
+  'clumps',
+  'dynamic-fps',
+  'dynamicfps',
+  'fast-ip-ping',
+  'particle-core',
+  'particlecore'
+]);
+const PROTECTED_MOD_PROJECT_IDS = new Set(
+  [
+    ...REQUIRED_MANAGED_PROJECT_IDS,
+    ...(MODS_TAB_REQUIRED_BUNDLED_MODS || [])
+      .map((entry) => String(entry?.projectId || '').trim())
+      .filter(Boolean)
+  ]
+);
+const PROTECTED_MOD_SLUGS = new Set(
+  [
+    ...HIDDEN_MODS_TAB_PROJECT_SLUGS,
+    ...(MODS_TAB_REQUIRED_BUNDLED_MODS || [])
+      .map((entry) => String(entry?.slug || '').trim().toLowerCase())
+      .filter(Boolean)
+  ]
+);
+const MINECRAFT_SKIN_UPLOAD_URL = 'https://api.minecraftservices.com/minecraft/profile/skins';
+const DISABLED_MOD_SUFFIX = '.disabled';
+const DISABLED_MODS_DIR_NAME = '.x-disabled-mods';
+const MODS_ENGINE = createModsEngine({
+  fsModule: fs,
+  pathModule: path,
+  fetchImpl,
+  logger,
+  serializeError,
+  configDir: CONFIG_DIR,
+  getActiveModContext: (...args) => getActiveModContext(...args),
+  getModrinthInstallContext: (...args) => getModrinthInstallContext(...args),
+  getEffectiveSelectedVersionId: (...args) => getEffectiveSelectedVersionId(...args),
+  persistEffectiveSelectedVersionId: (...args) => persistEffectiveSelectedVersionId(...args),
+  getCurrentMinecraftVersion: (...args) => getCurrentMinecraftVersion(...args),
+  getModrinthTargetChangeWarning: (...args) => getModrinthTargetChangeWarning(...args),
+  installDownloadableModrinthProject: (...args) => installDownloadableModrinthProject(...args),
+  installModrinthModpack: (...args) => installModrinthModpack(...args),
+  updateDownloadableModrinthProjects: (...args) => updateDownloadableModrinthProjects(...args),
+  getInstalledDownloadableModrinthEntries: (...args) => getInstalledDownloadableModrinthEntries(...args),
+  removeDownloadableModrinthEntry: (...args) => removeDownloadableModrinthEntry(...args),
+  requiredBundledMods: REQUIRED_BUNDLED_MODS,
+  requiredManagedProjectIds: REQUIRED_MANAGED_PROJECT_IDS,
+  hiddenProjectIds: HIDDEN_MODS_TAB_PROJECT_IDS,
+  hiddenSlugs: HIDDEN_MODS_TAB_PROJECT_SLUGS,
+  protectedProjectIds: PROTECTED_MOD_PROJECT_IDS,
+  fabricApiProjectId: FABRIC_API_PROJECT_ID,
+  disabledModsDirName: DISABLED_MODS_DIR_NAME,
+  modrinthProjectIdAliases: MODRINTH_PROJECT_ID_ALIASES,
+  resourcepacksDir: RESOURCEPACKS_DIR,
+  shaderpacksDir: SHADERPACKS_DIR,
+  isMinecraftRunning: () => isMinecraftMutationLocked(),
+  getFileDeletionBlockReason: () => '',
+  shouldPurgeModFile: (filePath) => (
+    fs.existsSync(DASH_TWO_MOD_PURGE_MARKER_FILE)
+    && /-2\.jar$/iu.test(path.basename(String(filePath || '')))
+  )
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception in launcher main process', {
+    error: serializeError(error),
+    memory: process.memoryUsage()
+  });
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection in launcher main process', {
+    error: serializeError(reason),
+    memory: process.memoryUsage()
+  });
+});
+
+ensureDir(CONFIG_DIR);
+ensureLauncherConfig();
+logger.setDebugEnabled(isDebugModeEnabled());
+setActiveMinecraftDirectory(getConfiguredMinecraftDirectory());
+const startupMinecraftConfig = readLauncherConfig();
+if (getComparablePath(startupMinecraftConfig.minecraftPath) !== getComparablePath(FALLBACK_MINECRAFT_DIR)
+  || startupMinecraftConfig.minecraftFolderName !== DEFAULT_MINECRAFT_FOLDER_NAME
+  || startupMinecraftConfig.minecraftWindowsUserName !== DEFAULT_WINDOWS_USER_NAME
+  || String(startupMinecraftConfig.standardModsPath || '').trim()) {
+  writeLauncherConfig({
+    minecraftPath: FALLBACK_MINECRAFT_DIR,
+    minecraftFolderName: DEFAULT_MINECRAFT_FOLDER_NAME,
+    minecraftWindowsUserName: DEFAULT_WINDOWS_USER_NAME,
+    standardModsPath: ''
+  });
+}
+repairInstalledBundledMods();
+syncOfficialLauncherProfiles();
+
+syncManagedModsForVersion = (...args) => MODS_ENGINE.syncManagedModsForVersion(...args);
+installModrinthMod = (...args) => MODS_ENGINE.installModrinthMod(...args);
+refreshInstalledMod = (...args) => MODS_ENGINE.refreshInstalledMod(...args);
+updateAllManagedMods = (...args) => MODS_ENGINE.updateAllManagedMods(...args);
+getInstalledManagedModProjectIds = (...args) => MODS_ENGINE.getInstalledManagedModProjectIds(...args);
+getInstalledMods = (...args) => MODS_ENGINE.getInstalledMods(...args);
+setInstalledModEnabled = (...args) => MODS_ENGINE.setInstalledModEnabled(...args);
+removeInstalledMod = (...args) => MODS_ENGINE.removeInstalledMod(...args);
+importDroppedMods = async (...args) => {
+  const result = await MODS_ENGINE.importDroppedMods(...args);
+  return result;
+};
+formatManagedModsWarning = (...args) => MODS_ENGINE.formatManagedModsWarning(...args);
+formatManagedModsLaunchMessage = (...args) => MODS_ENGINE.formatManagedModsLaunchMessage(...args);
+assertLaunchRequiredModsSynced = (...args) => MODS_ENGINE.assertLaunchRequiredModsSynced(...args);
+
+function getLiveLauncherWindows() {
+  for (const browserWindow of launcherWindows) {
+    if (!browserWindow || browserWindow.isDestroyed()) {
+      launcherWindows.delete(browserWindow);
+    }
+  }
+
+  return Array.from(launcherWindows);
+}
+
+function getEventWindow(event) {
+  return BrowserWindow.fromWebContents(event?.sender) || mainWindow;
+}
+
+function sendWindowStateToRenderer(targetWindow = mainWindow) {
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  const webContents = targetWindow.webContents;
+  if (!webContents || webContents.isDestroyed()) {
+    return;
+  }
+
+  webContents.send('window-state-changed', {
+    maximized: targetWindow.isMaximized(),
+    minimized: targetWindow.isMinimized(),
+    fullScreen: targetWindow.isFullScreen()
+  });
+}
+
+function sendMinecraftLifecycleEvent(channel, payload = {}, targetWindow = null) {
+  const targetWindows = targetWindow ? [targetWindow] : getLiveLauncherWindows();
+  for (const browserWindow of targetWindows) {
+    if (!browserWindow || browserWindow.isDestroyed()) {
+      continue;
+    }
+
+    const webContents = browserWindow.webContents;
+    if (!webContents || webContents.isDestroyed()) {
+      continue;
+    }
+
+    webContents.send(channel, payload);
+  }
+}
+
+function sendMinecraftLaunchProgress(targetWindow, progress, status, details = {}) {
+  sendMinecraftLifecycleEvent('minecraft-launch-progress', {
+    progress: Math.max(0, Math.min(100, Math.round(Number(progress) || 0))),
+    status: String(status || ''),
+    ...details
+  }, targetWindow);
+}
+
+const ACTIVE_MOD_FOLDER_WATCHERS = new Map();
+let activeModFolderChangeTimer = null;
+let activeModFolderChangePayload = null;
+
+function clearActiveModFolderWatchers() {
+  for (const watcher of ACTIVE_MOD_FOLDER_WATCHERS.values()) {
+    try {
+      watcher.close();
+    } catch (_error) {
+      // ignore
+    }
+  }
+  ACTIVE_MOD_FOLDER_WATCHERS.clear();
+
+  if (activeModFolderChangeTimer) {
+    clearTimeout(activeModFolderChangeTimer);
+    activeModFolderChangeTimer = null;
+  }
+  activeModFolderChangePayload = null;
+}
+
+function sendActiveModFolderChanged(payload) {
+  activeModFolderChangePayload = {
+    type: payload?.type || 'mods',
+    eventType: payload?.eventType || 'change',
+    path: payload?.path || '',
+    timestamp: Date.now()
+  };
+
+  if (activeModFolderChangeTimer) {
+    clearTimeout(activeModFolderChangeTimer);
+  }
+
+  activeModFolderChangeTimer = setTimeout(() => {
+    activeModFolderChangeTimer = null;
+    if (!activeModFolderChangePayload) {
+      return;
+    }
+    sendMinecraftLifecycleEvent('mod-folder-changed', activeModFolderChangePayload);
+    activeModFolderChangePayload = null;
+  }, 150);
+}
+
+function watchActiveModFolder(directory, type) {
+  if (!directory) {
+    return;
+  }
+
+  const normalized = path.resolve(directory);
+  if (ACTIVE_MOD_FOLDER_WATCHERS.has(normalized)) {
+    return;
+  }
+
+  try {
+    ensureDir(normalized);
+    const watcher = fs.watch(normalized, { persistent: false, recursive: true }, (eventType, filename) => {
+      if (!filename) {
+        sendActiveModFolderChanged({ type, eventType, path: normalized });
+        return;
+      }
+      const filePath = path.join(normalized, filename.toString());
+      logger.info('Mod folder change detected', { directory: normalized, type, eventType, path: filePath });
+      sendActiveModFolderChanged({ type, eventType, path: filePath });
+    });
+
+    watcher.on('error', (error) => {
+      logger.warn('Mod folder watcher error', { directory: normalized, type, error: serializeError(error) });
+      if (ACTIVE_MOD_FOLDER_WATCHERS.has(normalized)) {
+        ACTIVE_MOD_FOLDER_WATCHERS.delete(normalized);
+      }
+    });
+
+    ACTIVE_MOD_FOLDER_WATCHERS.set(normalized, watcher);
+    logger.info('Watching mod folder recursively', { directory: normalized, type });
+  } catch (error) {
+    logger.warn('Could not watch mod folder', { directory: normalized, type, error: serializeError(error) });
+  }
+}
+
+function ensureActiveModFolderWatchers() {
+  clearActiveModFolderWatchers();
+  const modContext = getActiveModContext();
+  if (!modContext) {
+    return;
+  }
+
+  watchActiveModFolder(modContext.modsDir, 'mods');
+  watchActiveModFolder(modContext.resourcepacksDir || RESOURCEPACKS_DIR, 'resourcepack');
+  watchActiveModFolder(modContext.shaderpacksDir || SHADERPACKS_DIR, 'shader');
+}
+
+function updateActiveModFolderWatchers() {
+  clearActiveModFolderWatchers();
+  ensureActiveModFolderWatchers();
+}
+
+function sendWindowGroupStateToRenderer() {
+  const windows = getLiveLauncherWindows();
+  const visibleWindows = windows.filter((browserWindow) => browserWindow.isVisible());
+  const activeWindows = (visibleWindows.length ? visibleWindows : windows)
+    .sort((firstWindow, secondWindow) => {
+      const firstBounds = firstWindow.getBounds();
+      const secondBounds = secondWindow.getBounds();
+      if (firstBounds.x !== secondBounds.x) {
+        return firstBounds.x - secondBounds.x;
+      }
+      return firstBounds.y - secondBounds.y;
+    });
+  const count = activeWindows.length;
+
+  activeWindows.forEach((browserWindow, index) => {
+    const webContents = browserWindow.webContents;
+    if (!webContents || webContents.isDestroyed()) {
+      return;
+    }
+
+    webContents.send('window-group-state-changed', {
+      count,
+      index,
+      role: count > 1 && index === 0 ? 'navigation' : 'content',
+      grouped: count > 1,
+      activeSectionId: sharedActiveSectionId,
+      sharedAnimationStartedAt: sharedWindowAnimationStartedAt
+    });
+  });
+}
+
+function scheduleWindowGroupStateSync() {
+  setTimeout(sendWindowGroupStateToRenderer, 80);
+}
+
+function sendLauncherAppUpdateState(status, detail = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  const webContents = mainWindow.webContents;
+  if (!webContents || webContents.isDestroyed()) {
+    return;
+  }
+
+  webContents.send('launcher-app-update-state', {
+    status,
+    ...detail
+  });
+}
+
+function isPortableLauncherBuild() {
+  return Boolean(process.env.PORTABLE_EXECUTABLE_DIR || process.env.PORTABLE_EXECUTABLE_FILE);
+}
+
+function getPackagedLauncherUpdateConfig() {
+  const updateConfigPath = path.join(process.resourcesPath || '', 'app-update.yml');
+  if (!updateConfigPath || !fs.existsSync(updateConfigPath)) {
+    return {};
+  }
+
+  try {
+    const rawConfig = fs.readFileSync(updateConfigPath, 'utf8');
+    return {
+      provider: getUpdateConfigValue(rawConfig, 'provider'),
+      url: getUpdateConfigValue(rawConfig, 'url'),
+      owner: getUpdateConfigValue(rawConfig, 'owner'),
+      repo: getUpdateConfigValue(rawConfig, 'repo')
+    };
+  } catch (_error) {
+    return {};
+  }
+}
+
+function getUpdateConfigValue(rawConfig, key) {
+  const match = rawConfig.match(new RegExp(`^\\s*${key}:\\s*['"]?([^'"]+?)['"]?\\s*$`, 'im'));
+  return String(match?.[1] || '').trim();
+}
+
+function isPlaceholderLauncherUpdateConfig(updateConfig) {
+  const values = [
+    updateConfig?.url,
+    updateConfig?.owner,
+    updateConfig?.repo
+  ].map((value) => String(value || '').trim().toLowerCase());
+
+  return values.some((value) => (
+    value.includes('example.com')
+    || value.includes('deine-domain')
+    || value.includes('dein_github_name')
+    || value.includes('dein-github-name')
+  ));
+}
+
+function getLauncherAppUpdateAvailability() {
+  if (!app.isPackaged) {
+    return {
+      available: false,
+      reason: 'Auto-Updates laufen nur in der installierten App.'
+    };
+  }
+
+  if (process.platform !== 'win32') {
+    return {
+      available: false,
+      reason: 'Dieser Build ist nur für Windows-Auto-Updates konfiguriert.'
+    };
+  }
+
+  if (isPortableLauncherBuild()) {
+    return {
+      available: false,
+      reason: 'Portable Builds werden nicht automatisch aktualisiert. Bitte den Installer nutzen.'
+    };
+  }
+
+  const updateConfig = getPackagedLauncherUpdateConfig();
+  if (isPlaceholderLauncherUpdateConfig(updateConfig)) {
+    return {
+      available: false,
+      reason: 'Update-Quelle ist noch ein Platzhalter.',
+      updateUrl: updateConfig.url || '',
+      updateOwner: updateConfig.owner || '',
+      updateRepo: updateConfig.repo || ''
+    };
+  }
+
+  return {
+    available: true,
+    updateUrl: updateConfig.url || '',
+    updateOwner: updateConfig.owner || '',
+    updateRepo: updateConfig.repo || ''
+  };
+}
+
+function getUpdateVersion(info) {
+  return String(info?.version || info?.releaseName || '').trim();
+}
+
+function getUpdateReleaseNotes(info) {
+  const releaseNotes = info?.releaseNotes;
+  if (Array.isArray(releaseNotes)) {
+    return releaseNotes
+      .map((entry) => String(entry?.note || entry || '').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+  return String(releaseNotes || '').trim();
+}
+
+function setupLauncherAppAutoUpdater() {
+  if (launcherAppUpdateSetupDone) {
+    return;
+  }
+
+  launcherAppUpdateSetupDone = true;
+  const automaticUpdatesEnabled = readLauncherConfig().automaticUpdatesEnabled !== false;
+  autoUpdater.autoDownload = automaticUpdatesEnabled;
+  // GitHub's latest stable release is selected directly. Intermediate
+  // versions are never installed one after another.
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.fullChangelog = false;
+  // Installation only starts after an explicit restart action.
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    sendLauncherAppUpdateState('checking');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    sendLauncherAppUpdateState('available', {
+      version: getUpdateVersion(info),
+      releaseNotes: getUpdateReleaseNotes(info),
+      message: 'Launcher-Update gefunden. Download startet...'
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    sendLauncherAppUpdateState('not-available', {
+      version: getUpdateVersion(info)
+    });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    sendLauncherAppUpdateState('download-progress', {
+      percent: Math.max(0, Math.min(100, Number(progress?.percent) || 0)),
+      transferred: Number(progress?.transferred) || 0,
+      total: Number(progress?.total) || 0,
+      bytesPerSecond: Number(progress?.bytesPerSecond) || 0
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    launcherAppUpdateReady = true;
+    sendLauncherAppUpdateState('downloaded', {
+      version: getUpdateVersion(info),
+      releaseNotes: getUpdateReleaseNotes(info),
+      message: 'Launcher-Update ist bereit. Der Launcher bleibt geöffnet, bis du den Neustart bestätigst.'
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    sendLauncherAppUpdateState('error', {
+      error: error?.message || String(error || 'Unbekannter Update-Fehler')
+    });
+  });
+
+  setTimeout(() => {
+    if (readLauncherConfig().automaticUpdatesEnabled === false) {
+      sendLauncherAppUpdateState('automatic-disabled');
+      return;
+    }
+    checkLauncherAppUpdates({ silent: true }).catch((error) => {
+      sendLauncherAppUpdateState('error', {
+        error: error?.message || String(error || 'Unbekannter Update-Fehler')
+      });
+    });
+  }, 3500);
+}
+
+async function checkLauncherAppUpdates(options = {}) {
+  const availability = getLauncherAppUpdateAvailability();
+  if (!availability.available) {
+    if (!options.silent) {
+      sendLauncherAppUpdateState('skipped', {
+        reason: availability.reason,
+        updateUrl: availability.updateUrl || ''
+      });
+    }
+
+    return {
+      success: true,
+      skipped: true,
+      reason: availability.reason,
+      updateUrl: availability.updateUrl || '',
+      updateOwner: availability.updateOwner || '',
+      updateRepo: availability.updateRepo || ''
+    };
+  }
+
+  if (launcherAppUpdateCheckPromise) {
+    return launcherAppUpdateCheckPromise;
+  }
+
+  // Manual checks may download an update even when automatic checks are off.
+  autoUpdater.autoDownload = options.manual === true
+    || readLauncherConfig().automaticUpdatesEnabled !== false;
+  launcherAppUpdateCheckPromise = autoUpdater.checkForUpdates()
+    .then((result) => ({
+      success: true,
+      updateInfo: result?.updateInfo || null
+    }))
+    .catch((error) => {
+      const message = error?.message || String(error || 'Unbekannter Update-Fehler');
+      sendLauncherAppUpdateState('error', { error: message });
+      return { success: false, error: message };
+    })
+    .finally(() => {
+      launcherAppUpdateCheckPromise = null;
+    });
+
+  return launcherAppUpdateCheckPromise;
+}
+
+async function promptInstallDownloadedLauncherAppUpdate(info) {
+  if (launcherAppUpdateInstallPromptOpen || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  launcherAppUpdateInstallPromptOpen = true;
+  try {
+    const version = getUpdateVersion(info);
+    const language = resolveLauncherLanguage();
+    const copy = language === 'de'
+      ? {
+          buttons: ['Jetzt neu starten', 'Spaeter'],
+          title: 'Launcher-Update bereit',
+          message: version
+            ? `X Client ${version} wurde heruntergeladen.`
+            : 'Ein Launcher-Update wurde heruntergeladen.',
+          detail: 'Starte den Launcher neu, um das Update zu installieren.'
+        }
+      : {
+          buttons: ['Restart now', 'Later'],
+          title: 'Launcher update ready',
+          message: version
+            ? `X Client ${version} has been downloaded.`
+            : 'A launcher update has been downloaded.',
+          detail: 'Restart the launcher to install the update.'
+        };
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: copy.buttons,
+      defaultId: 0,
+      cancelId: 1,
+      title: copy.title,
+      message: copy.message,
+      detail: copy.detail
+    });
+
+    if (result.response === 0) {
+      installDownloadedLauncherAppUpdate();
+    }
+  } finally {
+    launcherAppUpdateInstallPromptOpen = false;
+  }
+}
+
+function installDownloadedLauncherAppUpdate(options = {}) {
+  if (!launcherAppUpdateReady) {
+    return {
+      success: false,
+      error: 'Es ist noch kein Launcher-Update heruntergeladen.'
+    };
+  }
+
+  sendLauncherAppUpdateState('installing');
+  const silent = options.silent !== false;
+  setImmediate(() => autoUpdater.quitAndInstall(silent, true));
+  return { success: true };
+}
+
+function createWindow() {
+  const launcherIconPath = resolveLauncherIconPath();
+  const launcherWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 1000,
+    minHeight: 800,
+    frame: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      enableRemoteModule: false
+    },
+    ...(launcherIconPath ? { icon: launcherIconPath } : {})
+  });
+
+  windowCreateCount += 1;
+  launcherWindow.__xLauncherWindowId = windowCreateCount;
+  launcherWindows.add(launcherWindow);
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = launcherWindow;
+  }
+
+  launcherWindow.loadFile(path.join(__dirname, '../index.html')).catch((error) => {
+    logger.error('Launcher window failed to load', {
+      windowId: launcherWindow.__xLauncherWindowId,
+      error: serializeError(error)
+    });
+  });
+  launcherWindow.on('maximize', () => sendWindowStateToRenderer(launcherWindow));
+  launcherWindow.on('unmaximize', () => {
+    sendWindowStateToRenderer(launcherWindow);
+    scheduleWindowGroupStateSync();
+  });
+  launcherWindow.on('restore', () => {
+    sendWindowStateToRenderer(launcherWindow);
+    scheduleWindowGroupStateSync();
+  });
+  launcherWindow.on('enter-full-screen', () => sendWindowStateToRenderer(launcherWindow));
+  launcherWindow.on('leave-full-screen', () => {
+    sendWindowStateToRenderer(launcherWindow);
+    scheduleWindowGroupStateSync();
+  });
+  launcherWindow.on('show', scheduleWindowGroupStateSync);
+  launcherWindow.on('hide', scheduleWindowGroupStateSync);
+  launcherWindow.on('move', scheduleWindowGroupStateSync);
+  launcherWindow.on('resize', scheduleWindowGroupStateSync);
+  launcherWindow.webContents.on('did-finish-load', () => {
+    sendWindowStateToRenderer(launcherWindow);
+    sendWindowGroupStateToRenderer();
+  });
+  launcherWindow.on('closed', () => {
+    launcherWindows.delete(launcherWindow);
+    if (mainWindow === launcherWindow) {
+      mainWindow = getLiveLauncherWindows()[0] || null;
+    }
+    scheduleWindowGroupStateSync();
+  });
+
+  Menu.setApplicationMenu(null);
+  scheduleWindowGroupStateSync();
+  return launcherWindow;
+}
+
+function resolveLauncherIconPath() {
+  const iconCandidates = [
+    path.join(ICONS_DIR, 'icon.ico'),
+    path.join(ICONS_DIR, 'app-icon.ico'),
+    path.join(ICONS_DIR, 'icon.png'),
+    path.join(ICONS_DIR, 'app-icon.png'),
+    path.join(ASSETS_DIR, 'icon.png'),
+    path.join(ASSETS_DIR, 'icon -.png')
+  ];
+
+  return iconCandidates.find((candidatePath) => fs.existsSync(candidatePath)) || '';
+}
+
+function getUserFacingErrorMessage(error, fallback = 'Interner Launcher-Fehler.') {
+  const rawMessage = String(error?.message || error || '').trim();
+  if (!rawMessage) {
+    return fallback;
+  }
+
+  if (/HTTP 429|Error 1015|rate limited|being rate limited|temporarily.*banned/iu.test(rawMessage)) {
+    return 'Modrinth blockiert gerade zu viele Suchanfragen. Bitte warte kurz und suche dann mit mindestens 3 Zeichen erneut.';
+  }
+
+  if (/api\.modrinth\.com/iu.test(rawMessage) && /<!doctype html>|<html/iu.test(rawMessage)) {
+    return 'Modrinth hat statt einer API-Antwort eine Fehlerseite gesendet. Bitte versuche es gleich noch einmal.';
+  }
+
+  if (/heap out of memory|allocation failed|out of memory/i.test(rawMessage)) {
+    return 'Nicht genug Arbeitsspeicher für diese Aktion. Details wurden im Launcher-Log gespeichert.';
+  }
+
+  return rawMessage;
+}
+
+function registerIpcHandler(channel, handler, options = {}) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      return await handler(event, ...args);
+    } catch (error) {
+      logger.error(`IPC handler failed: ${channel}`, {
+        channel,
+        args: options.logArgs === false ? '[redacted]' : args,
+        error: serializeError(error),
+        memory: process.memoryUsage()
+      });
+
+      if (typeof options.fallback === 'function') {
+        try {
+          return options.fallback(error, args);
+        } catch (fallbackError) {
+          logger.error(`IPC fallback failed: ${channel}`, {
+            channel,
+            error: serializeError(fallbackError)
+          });
+        }
+      }
+
+      return {
+        success: false,
+        error: getUserFacingErrorMessage(error)
+      };
+    }
+  });
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+function getAnonymousPresenceMinuteKey(date = new Date()) {
+  return date.toISOString().slice(0, 16).replace(/[-:t]/gi, '');
+}
+
+function isMinecraftProcessActive() {
+  return Boolean(activeMinecraftProcess && activeMinecraftProcess.exitCode === null && !activeMinecraftProcess.killed);
+}
+
+function isMinecraftMutationLocked() {
+  const status = getMinecraftRuntimeStatus();
+  return Boolean(status?.running || status?.launching);
+}
+
+async function hitAnonymousPresenceCounter(key) {
+  try {
+    await fetch(`https://countapi.mileshilliard.com/api/v1/hit/${encodeURIComponent(key)}`);
+  } catch (error) {
+    logger.warn('Anonymous presence counter is unavailable', { message: error.message });
+  }
+}
+
+function sendAnonymousPresenceHeartbeat() {
+  if (!launcherPresenceActive && !isMinecraftProcessActive()) return;
+  const minuteKey = getAnonymousPresenceMinuteKey();
+  if (anonymousPresenceLastMinute === minuteKey) return;
+  anonymousPresenceLastMinute = minuteKey;
+  void hitAnonymousPresenceCounter(`xlauncher-prod-a7f3-active-${minuteKey}`);
+  if (COSMETICS_API_URL && Date.now() - cosmeticsPresenceLastSentAt >= 2 * 60 * 1000) {
+    cosmeticsPresenceLastSentAt = Date.now();
+    void syncCurrentPlayerBackendState();
+  }
+}
+
+async function syncCurrentPlayerBackendState() {
+  const registration = await cosmeticsApiRequest('/v1/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (!registration.success) return registration;
+  const uuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  const state = readCapeState();
+  const activeCapeId = String(state.activeCapes?.[uuid] || state.activeCapeId || '').trim();
+  const custom = state.customCapes.find((cape) => cape.id === activeCapeId && (!cape.ownerUuid || cape.ownerUuid === uuid));
+  const signature = custom ? `${uuid}:${custom.id}:${custom.updatedAt}` : `${uuid}:none`;
+  if (signature === cosmeticsCapeLastSignature) return registration;
+  const capePath = custom ? path.join(CAPES_DIR, custom.fileName) : '';
+  const result = custom && fs.existsSync(capePath)
+    ? await syncCustomCapeOnline(fs.readFileSync(capePath), custom.name)
+    : await clearCustomCapeOnline();
+  if (result.success) cosmeticsCapeLastSignature = signature;
+  return result;
+}
+
+function refreshAnonymousPresence() {
+  const shouldBeActive = launcherPresenceActive || isMinecraftProcessActive();
+  if (shouldBeActive) {
+    sendAnonymousPresenceHeartbeat();
+    if (!anonymousPresenceTimer) anonymousPresenceTimer = setInterval(sendAnonymousPresenceHeartbeat, 15 * 1000);
+    return;
+  }
+  if (anonymousPresenceTimer) {
+    clearInterval(anonymousPresenceTimer);
+    anonymousPresenceTimer = null;
+  }
+  if (anonymousPresenceLastMinute) {
+    void hitAnonymousPresenceCounter(`xlauncher-prod-a7f3-closed-${getAnonymousPresenceMinuteKey()}`);
+    anonymousPresenceLastMinute = '';
+  }
+}
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    app.whenReady().then(() => {
+      const launcherWindow = mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : getLiveLauncherWindows()[0];
+      if (!launcherWindow || launcherWindow.isDestroyed()) {
+        mainWindow = createWindow();
+        return;
+      }
+      if (launcherWindow.isMinimized()) {
+        launcherWindow.restore();
+      }
+      launcherWindow.show();
+      launcherWindow.focus();
+    });
+  });
+}
+
+if (hasSingleInstanceLock) {
+  app.whenReady().then(() => {
+    createWindow();
+    ensureActiveModFolderWatchers();
+    setupLauncherAppAutoUpdater();
+    startupUpdatePromise = null;
+  });
+}
+
+app.on('window-all-closed', () => {
+  launcherPresenceActive = false;
+  refreshAnonymousPresence();
+  if (process.platform !== 'darwin') {
+    if (!isMinecraftProcessActive()) app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  stopAllHostedServerProcesses();
+});
+
+app.on('activate', () => {
+  if (!mainWindow) {
+    createWindow();
+  }
+});
+
+registerIpcHandler('get-user-info', async () => readSavedUser(), { fallback: () => null, logArgs: false });
+function readAdminDirectory() {
+  return ROBUSTNESS.readJsonFile(ADMIN_DIRECTORY_FILE, { players: [], grants: {} }, {
+    label: 'admin-directory',
+    normalize: ADMIN_DIRECTORY.normalizeState
+  });
+}
+
+function writeAdminDirectory(state, operation) {
+  const normalized = ADMIN_DIRECTORY.normalizeState(state);
+  ROBUSTNESS.writeJsonFileAtomic(ADMIN_DIRECTORY_FILE, normalized, {
+    label: 'admin-directory',
+    metadata: { operation }
+  });
+  return normalized;
+}
+
+function registerCurrentPlayerPresence(online = true) {
+  const user = getCurrentUser();
+  if (!user?.uuid) return readAdminDirectory();
+  return writeAdminDirectory(ADMIN_DIRECTORY.upsertPlayer(readAdminDirectory(), user, {
+    clientVersion: app.getVersion(),
+    online
+  }), 'presence');
+}
+
+function currentUserHasDelegatedCapability(permission) {
+  return ADMIN_DIRECTORY.hasPermission(readAdminDirectory(), getCurrentUser()?.uuid, permission);
+}
+
+async function hasVerifiedMinecraftSession() {
+  let user = getCurrentUser();
+  const uuid = ADMIN_DIRECTORY.normalizeUuid(user?.uuid);
+  if (!uuid || !user?.accessToken || user.accessToken === 'offline-token') return false;
+  if (Date.now() - Number(verifiedMinecraftSessions.get(uuid) || 0) < 5 * 60 * 1000) return true;
+  try {
+    const verify = (accessToken) => fetchImpl('https://api.minecraftservices.com/minecraft/profile', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    let response = await verify(user.accessToken);
+    if (response.status === 401 && String(user.loginSource || '').toLowerCase() === 'official-sisu') {
+      user = await refreshOfficialMinecraftSession(user);
+      response = await verify(user.accessToken);
+    }
+    if (!response.ok) return false;
+    const profile = await response.json();
+    const verified = ADMIN_DIRECTORY.normalizeUuid(profile?.id) === uuid;
+    if (verified) verifiedMinecraftSessions.set(uuid, Date.now());
+    return verified;
+  } catch (error) {
+    logger.warn('Owner session verification failed', { message: error.message });
+    return false;
+  }
+}
+
+async function hasVerifiedOwnerSession() {
+  const uuid = ADMIN_DIRECTORY.normalizeUuid(getCurrentUser()?.uuid);
+  if (!hasAdminPermission()) return false;
+  if (verifiedOwnerSession.uuid === uuid && Date.now() - verifiedOwnerSession.verifiedAt < 5 * 60 * 1000) return true;
+  const verified = await hasVerifiedMinecraftSession();
+  if (verified) verifiedOwnerSession = { uuid, verifiedAt: Date.now() };
+  return verified;
+}
+
+registerIpcHandler('get-my-admin-capabilities', async () => {
+  const owner = await hasVerifiedOwnerSession();
+  const delegatedHosting = currentUserHasDelegatedCapability('hosting') && await hasVerifiedMinecraftSession();
+  return { success: true, owner, hosting: owner || delegatedHosting };
+}, { logArgs: false });
+registerIpcHandler('get-admin-players', async () => {
+  if (!await hasVerifiedOwnerSession()) return { success: false, error: 'Nur der verifizierte XClient Owner darf das Admin Panel öffnen.' };
+  const result = await cosmeticsApiRequest('/v1/admin/players');
+  if (!result.success) return result;
+  return { success: true, players: (result.players || []).map((player) => ({
+    ...player,
+    isOwner: deriveCurrentUser({ uuid: player.uuid })?.isAdmin === true
+  })) };
+}, { logArgs: false });
+registerIpcHandler('set-admin-player-permission', async (_event, uuid, permission, enabled) => {
+  if (!await hasVerifiedOwnerSession()) return { success: false, error: 'Nur der verifizierte XClient Owner darf Berechtigungen ändern.' };
+  const normalizedUuid = ADMIN_DIRECTORY.normalizeUuid(uuid);
+  if (deriveCurrentUser({ uuid: normalizedUuid })?.isAdmin === true) {
+    return { success: true, owner: true, message: 'Der Owner besitzt immer alle Berechtigungen.' };
+  }
+  if (!ADMIN_DIRECTORY.ALLOWED_PERMISSIONS.includes(permission)) return { success: false, error: 'Ungültige Admin-Berechtigung.' };
+  const remoteResult = await cosmeticsApiRequest(`/v1/admin/players/${normalizedUuid}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ permission, enabled: enabled === true })
+  });
+  if (!remoteResult.success) return remoteResult;
+  writeAdminDirectory(ADMIN_DIRECTORY.setPermission(readAdminDirectory(), normalizedUuid, permission, enabled), 'permission-change-cache');
+  if (permission === 'hosting' && enabled !== true) {
+    const currentUuid = ADMIN_DIRECTORY.normalizeUuid(getCurrentUser()?.uuid);
+    const state = readHostedServerState();
+    const matchingRunningIds = getHostedServerRunningIds().filter((serverId) => {
+      const server = (state.servers || []).find((entry) => entry.id === serverId);
+      return currentUuid === normalizedUuid || ADMIN_DIRECTORY.normalizeUuid(server?.ownerUuid) === normalizedUuid;
+    });
+    matchingRunningIds.forEach((serverId) => stopHostedServerProcess(serverId));
+    if (matchingRunningIds.length || currentUuid === normalizedUuid) {
+      await LOCAL_DIRECT_HOSTING.stopHostedServer().catch((error) => logger.warn('Could not stop server after permission revocation', { message: error.message }));
+    }
+  }
+  sendMinecraftLifecycleEvent('admin-permissions-changed', {
+    uuid: normalizedUuid,
+    permission,
+    enabled: enabled === true,
+    changedAt: new Date().toISOString()
+  });
+  return { success: true };
+}, { logArgs: false });
+registerIpcHandler('set-anonymous-presence', async (_event, active) => {
+  launcherPresenceActive = active === true;
+  registerCurrentPlayerPresence(launcherPresenceActive);
+  refreshAnonymousPresence();
+  return { success: true, active: launcherPresenceActive || isMinecraftProcessActive() };
+}, { fallback: () => ({ success: false }), logArgs: false });
+registerIpcHandler('get-app-version', async () => ({
+  success: true,
+  version: app.getVersion()
+}));
+registerIpcHandler('check-service-health', async () => checkServiceHealth());
+registerIpcHandler('get-launcher-status', async () => getLauncherStatus());
+registerIpcHandler('check-app-updates', async () => checkLauncherAppUpdates({ manual: true }));
+registerIpcHandler('install-app-update', async () => installDownloadedLauncherAppUpdate());
+registerIpcHandler('get-automatic-updates-enabled', async () => readLauncherConfig().automaticUpdatesEnabled !== false);
+registerIpcHandler('set-automatic-updates-enabled', async (_event, enabled) => {
+  const automaticUpdatesEnabled = enabled === true;
+  writeLauncherConfig({ automaticUpdatesEnabled });
+  autoUpdater.autoDownload = automaticUpdatesEnabled;
+  sendLauncherAppUpdateState(automaticUpdatesEnabled ? 'automatic-enabled' : 'automatic-disabled');
+  return { success: true, enabled: automaticUpdatesEnabled };
+});
+registerIpcHandler('check-launcher-updates', async () => {
+  try {
+    if (!startupUpdatePromise) {
+      startupUpdatePromise = runStartupManagedModsCheck({ refreshAll: true });
+    }
+    return await startupUpdatePromise;
+  } catch (error) {
+    startupUpdatePromise = null;
+    return { success: false, error: error.message };
+  }
+});
+registerIpcHandler('get-available-versions', async () => getAvailableVersions());
+registerIpcHandler('set-selected-version', async (_event, versionId) => {
+  const result = await setSelectedVersion(versionId);
+  updateActiveModFolderWatchers();
+  return result;
+});
+registerIpcHandler('set-standard-version', async (_event, versionId) => setStandardVersion(versionId));
+registerIpcHandler('download-version', async (_event, versionId) => downloadVersion(versionId));
+registerIpcHandler('window-minimize', async (event) => {
+  const targetWindow = getEventWindow(event);
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return { success: false, error: 'Fenster nicht gefunden.' };
+  }
+  targetWindow.minimize();
+  sendWindowStateToRenderer(targetWindow);
+  scheduleWindowGroupStateSync();
+  return { success: true };
+});
+registerIpcHandler('window-toggle-maximize', async (event) => {
+  const targetWindow = getEventWindow(event);
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return { success: false, error: 'Fenster nicht gefunden.' };
+  }
+  if (targetWindow.isMaximized()) {
+    targetWindow.unmaximize();
+    sendWindowStateToRenderer(targetWindow);
+    scheduleWindowGroupStateSync();
+    return { success: true, maximized: false };
+  }
+  targetWindow.maximize();
+  sendWindowStateToRenderer(targetWindow);
+  sendWindowGroupStateToRenderer();
+  return { success: true, maximized: true };
+});
+registerIpcHandler('get-window-state', async (event) => {
+  const targetWindow = getEventWindow(event);
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return { success: false, error: 'Fenster nicht gefunden.' };
+  }
+
+  return {
+    success: true,
+    maximized: targetWindow.isMaximized(),
+    minimized: targetWindow.isMinimized(),
+    fullScreen: targetWindow.isFullScreen()
+  };
+});
+registerIpcHandler('get-global-cursor-position', async (event) => {
+  const targetWindow = getEventWindow(event);
+  const cursor = require('electron').screen.getCursorScreenPoint();
+  const bounds = targetWindow && !targetWindow.isDestroyed()
+    ? targetWindow.getContentBounds()
+    : { x: 0, y: 0, width: 0, height: 0 };
+
+  return {
+    success: true,
+    screenX: cursor.x,
+    screenY: cursor.y,
+    clientX: cursor.x - bounds.x,
+    clientY: cursor.y - bounds.y,
+    windowBounds: bounds
+  };
+});
+registerIpcHandler('get-window-group-state', async () => {
+  sendWindowGroupStateToRenderer();
+  return {
+    success: true,
+    activeSectionId: sharedActiveSectionId,
+    count: getLiveLauncherWindows().length
+  };
+});
+registerIpcHandler('set-window-active-section', async (_event, sectionId) => {
+  const normalizedSectionId = String(sectionId || '').trim();
+  if (!normalizedSectionId) {
+    return { success: false, error: 'Bereich nicht gefunden.' };
+  }
+
+  sharedActiveSectionId = normalizedSectionId;
+  sendWindowGroupStateToRenderer();
+  return { success: true, activeSectionId: sharedActiveSectionId };
+});
+registerIpcHandler('window-close', async (event) => {
+  const targetWindow = getEventWindow(event);
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return { success: false, error: 'Fenster nicht gefunden.' };
+  }
+  targetWindow.close();
+  return { success: true };
+});
+registerIpcHandler('get-packs', async () => getPacksConfig());
+registerIpcHandler('create-pack', async (_event, name, versionId) => {
+  const result = await createPack(name, versionId);
+  updateActiveModFolderWatchers();
+  return result;
+});
+registerIpcHandler('duplicate-pack', async (_event, packId) => duplicatePack(packId));
+registerIpcHandler('set-active-pack', async (_event, packId) => {
+  const result = await setActivePack(packId);
+  updateActiveModFolderWatchers();
+  return result;
+});
+registerIpcHandler('delete-pack', async (_event, packId) => {
+  const result = await deletePack(packId);
+  updateActiveModFolderWatchers();
+  return result;
+});
+registerIpcHandler('copy-profile-settings', async (_event, packId) => copyProfileSettings(packId));
+registerIpcHandler('paste-profile-settings', async (_event, packId) => pasteProfileSettings(packId));
+
+registerIpcHandler('login', async (_event, loginInput, _accessToken = '') => {
+  const loginOptions = loginInput && typeof loginInput === 'object' ? loginInput : {};
+  const loginHint = typeof loginInput === 'string' ? loginInput : '';
+  if (FORCE_OFFLINE_MODE) {
+    const existingUser = (() => {
+      if (!fs.existsSync(USER_FILE)) {
+        return null;
+      }
+      try {
+        return readSavedUserFile();
+      } catch (_error) {
+        return null;
+      }
+    })();
+    const offlineUser = writeSavedUserFile(createOfflineUser(loginHint, existingUser), 'force-offline-login');
+    return {
+      success: true,
+      user: offlineUser,
+      warning: 'Dauer-Offline-Modus ist aktiv. Multiplayer geht nur auf Offline-Mode-Servern.'
+    };
+  }
+
+  try {
+    const authCacheId = loginOptions.addAccount
+      ? `x-launcher-account-${crypto.randomUUID()}`
+      : 'x-launcher';
+    const forceRefresh = loginOptions.forceRefresh === true || loginOptions.addAccount === true;
+    const profile = await loginWithOfficialMicrosoftXboxLogin({ forceRefresh, authCacheId });
+    const userInfo = {
+      username: profile.username,
+      email: null,
+      uuid: profile.uuid,
+      loginTime: new Date().toISOString(),
+      accessToken: profile.accessToken,
+      microsoftAccessToken: profile.microsoftAccessToken || '',
+      userType: 'msa',
+      loginSource: 'official-sisu',
+      tokenSource: 'prismarine-auth',
+      authCacheId
+    };
+
+    const savedUserInfo = writeSavedUserFile(userInfo, 'microsoft-login');
+    const registration = await syncCurrentPlayerBackendState();
+    return {
+      success: true,
+      user: savedUserInfo,
+      warning: registration.success ? '' : 'XClient-Onlineprofil wird erneut synchronisiert, sobald das Backend erreichbar ist.'
+    };
+  } catch (error) {
+    console.error('Login error:', error);
+    if (ALLOW_OFFICIAL_LAUNCHER_FALLBACK && shouldUseOfficialLauncherFallback(error)) {
+      const importedUser = createOfficialLauncherImportedUser(loginHint);
+      if (importedUser) {
+        const savedImportedUser = writeSavedUserFile(importedUser, 'official-launcher-fallback');
+        return {
+          success: true,
+          user: savedImportedUser,
+          warning: 'Microsoft/Xbox-Login war nicht verfügbar. Es wurde automatisch dein offizielles Launcher-Konto übernommen.'
+        };
+      }
+    }
+
+    if (shouldUseOfficialLauncherFallback(error)) {
+      return {
+        success: false,
+        error: `${error.message} Microsoft-Login muss erfolgreich sein, damit Online-Server funktionieren.`
+      };
+    }
+
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('login-offline', async (_event, username) => createOfflineAccount(username));
+registerIpcHandler('get-accounts', async () => getAccountsConfig());
+registerIpcHandler('switch-account', async (_event, accountId) => switchAccount(accountId));
+registerIpcHandler('remove-account', async (_event, accountId) => removeAccount(accountId));
+
+registerIpcHandler('logout', async () => {
+  try {
+    clearCurrentUser();
+    if (fs.existsSync(USER_FILE)) {
+      fs.unlinkSync(USER_FILE);
+    }
+    setActiveAccountId('');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('get-minecraft-path', async () => DEFAULT_MINECRAFT_DIR, { fallback: () => '' });
+registerIpcHandler('get-minecraft-runtime-status', async () => getMinecraftRuntimeStatus(), {
+  fallback: () => ({ running: false, pid: 0 })
+});
+registerIpcHandler('choose-minecraft-path', async () => chooseMinecraftPath());
+registerIpcHandler('get-standard-mods-path', async () => getStandardModsPathInfo());
+registerIpcHandler('choose-standard-mods-path', async () => chooseStandardModsPath());
+registerIpcHandler('reset-standard-mods-path', async () => resetStandardModsPath());
+registerIpcHandler('set-minecraft-windows-user-name', async (_event, windowsUserName) => setMinecraftWindowsUserName(windowsUserName));
+registerIpcHandler('get-auth-config', async () => getAuthConfig());
+registerIpcHandler('set-microsoft-client-id', async (_event, clientId) => setMicrosoftClientId(clientId));
+registerIpcHandler('get-theme-config', async () => getThemeConfig());
+registerIpcHandler('set-primary-color', async (_event, primaryColor) => setPrimaryColor(primaryColor));
+registerIpcHandler('set-theme-mode', async (_event, themeMode) => setThemeMode(themeMode));
+registerIpcHandler('set-appearance-mode', async (_event, appearanceMode) => setAppearanceMode(appearanceMode));
+registerIpcHandler('set-background-animation', async (_event, backgroundAnimation) => setBackgroundAnimation(backgroundAnimation));
+registerIpcHandler('set-live-theme-color', async (_event, primaryColor, appearanceMode) => setLiveThemeColor(primaryColor, appearanceMode), { logArgs: false });
+registerIpcHandler('get-language-config', async () => getLanguageConfig());
+registerIpcHandler('set-language-preference', async (_event, languagePreference) => setLanguagePreference(languagePreference));
+registerIpcHandler('open-launcher-config', async () => openLauncherConfig());
+registerIpcHandler('open-external-url', async (_event, url) => {
+  const normalizedUrl = String(url || '').trim();
+  const allowedHosts = new Set([
+    'cloud.oracle.com',
+    'www.oracle.com',
+    'signup.oraclecloud.com',
+    'docs.oracle.com',
+    'discord.gg',
+    'www.minecraft.net',
+    'youtube.com',
+    'www.youtube.com'
+  ]);
+  let parsed;
+  try {
+    parsed = new URL(normalizedUrl);
+  } catch (_error) {
+    return { success: false, error: 'Ungültige URL.' };
+  }
+  if (parsed.protocol !== 'https:' || !allowedHosts.has(parsed.hostname)) {
+    return { success: false, error: 'Diese URL ist im Launcher nicht erlaubt.' };
+  }
+  await shell.openExternal(parsed.toString());
+  return { success: true };
+});
+registerIpcHandler('open-router-settings', async (_event, url) => {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ''));
+  } catch (_error) {
+    return { success: false, error: 'Ungültige Router-Adresse.' };
+  }
+  const parts = parsed.hostname.split('.').map(Number);
+  const privateIpv4 = parts.length === 4 && (
+    parts[0] === 10
+    || parts[0] === 192 && parts[1] === 168
+    || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31
+  );
+  if (parsed.protocol !== 'http:' || !privateIpv4) {
+    return { success: false, error: 'Nur lokale Router-Adressen sind erlaubt.' };
+  }
+  await shell.openExternal(parsed.toString());
+  return { success: true };
+});
+registerIpcHandler('configure-swisscom-port-forwarding', async (_event, options = {}) => {
+  const password = String(options.password || '');
+  const localIp = String(options.localIp || '');
+  const internalPort = Math.round(Number(options.internalPort) || 25565);
+  if (!password || !/^192\.168\.0\.\d{1,3}$/u.test(localIp) || internalPort < 1024 || internalPort > 65535) {
+    return { success: false, error: 'Router-Passwort oder lokale Serveradresse fehlt.' };
+  }
+  const routerRequest = (pathname, { headers = {}, body = '' } = {}) => new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: '192.168.0.254',
+      port: 80,
+      path: pathname,
+      method: 'POST',
+      headers: { 'Content-Length': Buffer.byteLength(body), ...headers },
+      timeout: 10000
+    }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk.toString(); });
+      response.on('end', () => {
+        let data;
+        try { data = JSON.parse(text); } catch (_error) { data = null; }
+        if (response.statusCode >= 200 && response.statusCode < 300) resolve({ payload: data, headers: response.headers });
+        else {
+          const routerError = data?.errors?.[0] || data?.result?.errors?.[0] || data?.status?.errors?.[0];
+          const detail = [routerError?.description, routerError?.info].filter(Boolean).join(' – ');
+          const normalizedDetail = detail || text.slice(0, 240);
+          if (/shared address space/iu.test(normalizedDetail)) {
+            reject(new Error('CGNAT erkannt: Swisscom verwendet „Shared Address Space“. Dein Router hat keine eigene öffentliche IPv4, deshalb ist eine direkte Portweiterleitung nicht möglich. Bitte bei Swisscom eine öffentliche IPv4 aktivieren lassen.'));
+          }
+          reject(new Error(detail || `Router antwortete mit HTTP ${response.statusCode}: ${text.slice(0, 240)}`));
+        }
+      });
+    });
+    request.on('timeout', () => request.destroy(new Error('Zeitüberschreitung bei der Router-Anmeldung.')));
+    request.on('error', reject);
+    request.write(body);
+    request.end();
+  });
+  try {
+    const loginBody = JSON.stringify({
+      service: 'sah.Device.Information',
+      method: 'createContext',
+      parameters: { applicationName: 'webui', username: 'admin', password }
+    });
+    const loginResponse = await routerRequest('/ws', {
+      headers: {
+        Authorization: 'X-Sah-Login',
+        'Content-Type': 'application/x-sah-ws-4-call+json'
+      },
+      body: loginBody
+    });
+    const login = loginResponse.payload;
+    const contextId = String(login?.data?.contextID || login?.result?.data?.contextID || '');
+    if (!contextId || Number(login?.status ?? login?.result?.status ?? -1) !== 0) {
+      return { success: false, error: 'Router-Anmeldung fehlgeschlagen. Bitte das Internet-Box-Admin-Passwort prüfen.' };
+    }
+    const sessionCookies = (loginResponse.headers['set-cookie'] || [])
+      .map((cookie) => String(cookie).split(';')[0])
+      .filter(Boolean)
+      .join('; ');
+    const authenticatedCall = (pathname, parameters) => routerRequest(pathname, {
+      headers: {
+        Authorization: `X-Sah ${contextId}`,
+        'X-Context': contextId,
+        Cookie: sessionCookies,
+        Origin: 'http://192.168.0.254',
+        Referer: 'http://192.168.0.254/',
+        'Content-Type': 'application/x-sah-ws-4-call+json'
+      },
+      body: JSON.stringify({ parameters })
+    });
+    await authenticatedCall('/sysbus/Time:getTime', {});
+    const existingResponse = await authenticatedCall('/sysbus/Firewall:getPortForwarding', {});
+    const existingRules = existingResponse.payload?.status || existingResponse.payload?.result?.status || {};
+    const occupiedRule = Object.values(existingRules).find((rule) => {
+      const externalPorts = String(rule?.ExternalPort || '').split('-').map(Number);
+      return Number(rule?.Protocol) === 6
+        && externalPorts.length
+        && 25565 >= externalPorts[0]
+        && 25565 <= (externalPorts[1] || externalPorts[0]);
+    });
+    if (occupiedRule && !/^(?:X Client|X Launcher) Minecraft Java$/iu.test(String(occupiedRule.Description || ''))) {
+      return {
+        success: false,
+        error: `Port 25565 ist im Router bereits durch „${occupiedRule.Description || occupiedRule.Id || 'eine andere Regel'}“ belegt. Entferne diese Regel zuerst.`
+      };
+    }
+    const ruleId = String(occupiedRule?.Id || `${Date.now()}_1`);
+    await authenticatedCall('/sysbus/Firewall:setPortForwarding', {
+      id: ruleId,
+      description: 'X Client Minecraft Java',
+      persistent: true,
+      origin: 'webui',
+      sourceInterface: 'data',
+      sourcePrefix: '',
+      enable: true,
+      protocol: '6',
+      destinationIPAddress: localIp,
+      internalPort: String(internalPort),
+      externalPort: '25565'
+    });
+    await authenticatedCall('/sysbus/Firewall:commit', {});
+    return { success: true, message: `Router-Port 25565/TCP wurde auf ${localIp}:${internalPort} weitergeleitet.` };
+  } catch (error) {
+    return { success: false, error: `Router-Konfiguration fehlgeschlagen: ${error.message || String(error)}` };
+  }
+}, { logArgs: false });
+
+registerIpcHandler('install-fabric', async () => selectPreferredFabricVersion());
+registerIpcHandler('get-server-favorites', async () => getServerFavoritesConfig());
+registerIpcHandler('add-server-favorite', async (_event, server) => addServerFavorite(server));
+registerIpcHandler('remove-server-favorite', async (_event, serverId) => removeServerFavorite(serverId));
+const requireOwner = (action) => async (...args) => ((await hasVerifiedOwnerSession())
+  || (currentUserHasDelegatedCapability('hosting') && await hasVerifiedMinecraftSession()))
+  ? action(...args)
+  : { success: false, error: 'Diese Hosting-Funktion ist nur für den XClient Owner oder freigegebene Spieler verfügbar.' };
+registerIpcHandler('get-hosted-server-status', requireOwner(async () => getHostedServerStatus()));
+registerIpcHandler('start-hosted-server', requireOwner(async (_event, options) => startHostedServer(options)));
+registerIpcHandler('stop-hosted-server', requireOwner(async (_event, serverId) => stopHostedServer(serverId)));
+registerIpcHandler('restart-hosted-server', requireOwner(async (_event, options) => restartHostedServer(options)));
+registerIpcHandler('create-hosted-server', requireOwner(async (_event, options) => createHostedServer(options)));
+registerIpcHandler('save-hosted-server', requireOwner(async (_event, options) => saveHostedServer(options)));
+registerIpcHandler('select-hosted-server', requireOwner(async (_event, serverId) => selectHostedServer(serverId)));
+registerIpcHandler('delete-hosted-server', requireOwner(async (_event, serverId) => deleteHostedServer(serverId)));
+registerIpcHandler('send-hosted-server-command', requireOwner(async (_event, serverId, command) => sendHostedServerCommand(serverId, command)));
+registerIpcHandler('import-hosted-server-mods', requireOwner(async (_event, filePaths) => importHostedServerMods(filePaths)));
+registerIpcHandler('install-hosted-server-modrinth-mod', requireOwner(async (_event, project) => installHostedServerModrinthMod(project)));
+registerIpcHandler('remove-hosted-server-mod', requireOwner(async (_event, fileName) => removeHostedServerMod(fileName)));
+registerIpcHandler('open-hosted-server-mods-folder', requireOwner(async () => openHostedServerModsFolder()));
+registerIpcHandler('open-hosted-server-folder', requireOwner(async () => openHostedServerFolder()));
+registerIpcHandler('save-oracle-hosting-credentials', requireOwner(async (_event, credentials) => ORACLE_HOSTING.saveCredentials(credentials)), { logArgs: false });
+registerIpcHandler('login-oracle-cloud', requireOwner(async (_event, options) => ORACLE_HOSTING.loginWithOracleCloud(options)), { logArgs: false });
+registerIpcHandler('logout-oracle-cloud', requireOwner(async () => ORACLE_HOSTING.logoutOracleCloud()));
+registerIpcHandler('hosted-server-vm-action', requireOwner(async (_event, serverId, action) => ORACLE_HOSTING.vmAction(serverId, action)));
+registerIpcHandler('create-hosted-server-backup', requireOwner(async () => LOCAL_DIRECT_HOSTING.createBackup()));
+registerIpcHandler('restore-hosted-server-backup', requireOwner(async (_event, fileName) => LOCAL_DIRECT_HOSTING.restoreBackup(fileName)));
+registerIpcHandler('configure-direct-hosting', requireOwner(async (_event, serverId) => LOCAL_DIRECT_HOSTING.configureDirectConnection(serverId)));
+
+registerIpcHandler('get-mods', async () => getInstalledMods(), { fallback: () => [] });
+registerIpcHandler('get-mods-without-sync', async () => getInstalledMods(getEffectiveSelectedVersionId(), {
+  skipManagedSync: true
+}), { fallback: () => [] });
+registerIpcHandler('get-installed-mod-project-ids', async (_event, versionId) => getInstalledManagedModProjectIds(versionId, { sync: false }), { fallback: () => [] });
+const activeModrinthSearches = new Map();
+registerIpcHandler('search-modrinth-mods', async (event, query, versionId, projectType, offset, limit, forceRefresh) => {
+  const senderId = event.sender.id;
+  activeModrinthSearches.get(senderId)?.abort();
+  const controller = new AbortController();
+  activeModrinthSearches.set(senderId, controller);
+  try {
+    return await searchModrinthMods(query, versionId, projectType, offset, limit, controller.signal, Boolean(forceRefresh));
+  } finally {
+    if (activeModrinthSearches.get(senderId) === controller) {
+      activeModrinthSearches.delete(senderId);
+    }
+  }
+});
+registerIpcHandler('get-modrinth-project-versions', async (_event, projectId, minecraftVersion, projectType) => {
+  const normalizedProjectType = normalizeModrinthProjectType(projectType);
+  const versions = await getCompatibleModrinthProjectVersions(projectId, minecraftVersion, {
+    projectType: normalizedProjectType,
+    strictMinecraftVersion: normalizedProjectType !== 'resourcepack'
+  });
+  return versions.map((entry) => ({
+    id: String(entry?.id || '').trim(),
+    name: String(entry?.name || entry?.version_number || entry?.id || '').trim(),
+    versionNumber: String(entry?.version_number || '').trim(),
+    gameVersions: Array.isArray(entry?.game_versions) ? entry.game_versions.map(String) : [],
+    datePublished: String(entry?.date_published || '').trim()
+  })).filter((entry) => entry.id);
+}, { fallback: () => [] });
+registerIpcHandler('install-modrinth-mod', async (_event, project, target) => installModrinthMod(project, target));
+registerIpcHandler('remove-mod', async (_event, modId) => removeInstalledMod(modId));
+registerIpcHandler('remove-incompatible-mods', async () => {
+  const installedMods = await getInstalledMods();
+  const incompatibleMods = installedMods.filter((mod) => (
+    mod.autoDisabled === true
+    && !mod.isProtected
+    && !mod.hiddenInModsTab
+  ));
+  const removed = [];
+  const errors = [];
+
+  for (const mod of incompatibleMods) {
+    const result = await removeInstalledMod(mod.id);
+    if (result.success) {
+      removed.push(mod.name);
+    } else {
+      errors.push(`${mod.name}: ${result.error || 'Konnte nicht entfernt werden.'}`);
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    removed: removed.length,
+    removedNames: removed,
+    errors,
+    message: removed.length === 1
+      ? 'Eine unpassende Mod wurde entfernt.'
+      : `${removed.length} unpassende Mods wurden entfernt.`
+  };
+});
+registerIpcHandler('refresh-mod', async (_event, modId) => refreshInstalledMod(modId));
+registerIpcHandler('set-mod-enabled', async (_event, modId, enabled) => setInstalledModEnabled(modId, enabled));
+registerIpcHandler('set-mod-alias', async (_event, modId, alias) => setInstalledModAlias(modId, alias));
+registerIpcHandler('import-dropped-mods', async (_event, filePaths, options) => importDroppedMods(filePaths, options));
+registerIpcHandler('get-skin-config', async () => getSkinConfigWithAccountImport());
+registerIpcHandler('get-cape-config', async () => getCapeConfig(), { logArgs: false });
+registerIpcHandler('save-custom-cape', async (_event, dataUrl, name, useAsElytra, capeId) => {
+  return validateAndSaveCustomCape(dataUrl, name, useAsElytra, capeId);
+}, { logArgs: false });
+registerIpcHandler('set-active-cape', async (_event, capeId) => setActiveCape(capeId), { logArgs: false });
+registerIpcHandler('delete-custom-cape', async (_event, capeId) => deleteCustomCape(capeId), { logArgs: false });
+registerIpcHandler('choose-skin-file', async () => chooseSkinFile());
+registerIpcHandler('clear-skin-file', async () => clearSkinFile());
+registerIpcHandler('set-active-skin', async (_event, skinId) => setActiveSkin(skinId));
+registerIpcHandler('remove-skin-file', async (_event, skinId) => removeSkinFile(skinId));
+registerIpcHandler('set-skin-variant', async (_event, skinId, variant) => setSkinVariant(skinId, variant));
+registerIpcHandler('search-online-skins', async (_event, query) => searchOnlineSkins(query));
+registerIpcHandler('download-online-skin', async (_event, onlineSkin) => downloadOnlineSkin(onlineSkin));
+registerIpcHandler('get-datapacks', async () => getDatapackState());
+registerIpcHandler('install-datapack', async (_event, worldId = '') => installDatapack(worldId));
+registerIpcHandler('install-modrinth-datapack', async (_event, project, worldId) => installModrinthDatapack(project, worldId));
+registerIpcHandler('get-modrinth-datapack-worlds', async (_event, project) => getModrinthDatapackWorlds(project));
+registerIpcHandler('create-world-with-datapack', async (_event, project, options) => createWorldWithDatapack(project, options));
+registerIpcHandler('remove-datapack', async (_event, worldId, fileName) => removeDatapack(worldId, fileName));
+registerIpcHandler('open-content-folder', async (_event, contentType = 'mod', worldId = '') => openContentFolder(contentType, worldId));
+registerIpcHandler('get-debug-mode', async () => ({
+  success: true,
+  debugMode: logger.isDebugEnabled(),
+  logFile: logger.getLogFilePath(),
+  backupDir: BACKUP_DIR,
+  diagnosticsDir: DIAGNOSTICS_DIR
+}));
+registerIpcHandler('run-diagnostics', async () => runLauncherDiagnostics());
+registerIpcHandler('set-debug-mode', async (_event, enabled) => setDebugMode(enabled));
+registerIpcHandler('open-diagnostics-folder', async () => {
+  ensureDir(LOG_DIR);
+  ensureDir(DIAGNOSTICS_DIR);
+  const openError = await shell.openPath(CONFIG_DIR);
+  if (openError) {
+    return { success: false, error: `Diagnose-Ordner konnte nicht geöffnet werden: ${openError}` };
+  }
+  return { success: true, path: CONFIG_DIR };
+});
+
+registerIpcHandler('load-mods-folder', async () => {
+  const modContext = getActiveModContext();
+  ensureDir(modContext.modsDir);
+  const openError = await shell.openPath(modContext.modsDir);
+  if (openError) {
+    return {
+      success: false,
+      error: `Mods-Ordner konnte nicht geöffnet werden: ${openError}`,
+      modsPath: modContext.modsDir
+    };
+  }
+
+  return { success: true, modsPath: modContext.modsDir };
+});
+
+function resolveDatapackWorld(worldId) {
+  const id = String(worldId || '').trim();
+  return listWorlds(DEFAULT_MINECRAFT_DIR).find((world) => world.id === id) || null;
+}
+
+function getDatapackState() {
+  const worlds = listWorlds(DEFAULT_MINECRAFT_DIR).map((world) => {
+    const directory = path.join(world.path, 'datapacks');
+    const metadataPath = path.join(world.path, '.x-launcher-datapacks.json');
+    let metadata = {};
+    try { metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')); } catch (_error) { metadata = {}; }
+    let datapacks = [];
+    try {
+      datapacks = fs.existsSync(directory)
+        ? fs.readdirSync(directory, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory() || (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')))
+          .map((entry) => {
+            const saved = metadata[entry.name] || {};
+            return {
+              name: entry.name,
+              displayName: String(saved.title || getDatapackDisplayName(entry.name)),
+              iconDataUrl: getDatapackIconDataUrl(path.join(directory, entry.name), entry.isDirectory()),
+              projectId: String(saved.projectId || ''),
+              type: entry.isDirectory() ? 'folder' : 'zip'
+            };
+          })
+          .sort((left, right) => left.displayName.localeCompare(right.displayName, 'de'))
+        : [];
+    } catch (error) {
+      logger.warn('Datapack directory could not be read', { directory, error: error.message });
+    }
+    return { id: world.id, name: world.name, folder: world.folder, lastPlayed: world.lastPlayed, datapacks };
+  });
+  return { success: true, worlds };
+}
+
+function getDatapackDisplayName(fileName) {
+  return path.basename(String(fileName || ''), path.extname(String(fileName || '')))
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+(?:v?\d+(?:\.\d+)*(?:[-+][a-z0-9.]+)?|mc\s*\d+(?:\.\d+)*)$/iu, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Datapack';
+}
+
+function getDatapackIconDataUrl(datapackPath, isDirectory) {
+  try {
+    let buffer;
+    if (isDirectory) {
+      const iconPath = path.join(datapackPath, 'pack.png');
+      if (!fs.existsSync(iconPath)) return '';
+      buffer = fs.readFileSync(iconPath);
+    } else {
+      const archive = getZipCentralDirectoryEntries(datapackPath);
+      const entry = archive.entries.find((item) => String(item.name || '').replace(/\\/g, '/').toLowerCase() === 'pack.png');
+      if (!entry || entry.uncompressedSize > 2 * 1024 * 1024) return '';
+      buffer = readZipEntryBufferFromArchive(archive, entry);
+    }
+    return buffer?.length ? `data:image/png;base64,${buffer.toString('base64')}` : '';
+  } catch (_error) { return ''; }
+}
+
+function saveDatapackProjectMetadata(world, fileName, projectReference) {
+  const metadataPath = path.join(world.path, '.x-launcher-datapacks.json');
+  let metadata = {};
+  try { metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')); } catch (_error) { metadata = {}; }
+  metadata[fileName] = {
+    projectId: getModrinthProjectId(projectReference),
+    title: getModrinthProjectTitle(projectReference) || getDatapackDisplayName(fileName)
+  };
+  fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
+}
+
+function validateDatapackZip(filePath) {
+  if (path.extname(filePath).toLowerCase() !== '.zip') throw new Error('Datapacks müssen als ZIP-Datei vorliegen.');
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size === 0) throw new Error('Die ausgewählte Datapack-Datei ist leer oder ungültig.');
+  const entries = getZipCentralDirectoryEntries(filePath).entries;
+  const hasMetadata = entries.some((entry) => String(entry.name || '').replace(/\\/g, '/').toLowerCase() === 'pack.mcmeta');
+  if (!hasMetadata) throw new Error('Ungültiges Datapack: pack.mcmeta muss direkt im ZIP-Hauptordner liegen.');
+}
+
+async function installModrinthDatapack(projectReference, worldId) {
+  const world = resolveDatapackWorld(worldId);
+  if (!world) return { success: false, error: 'Die ausgewählte Welt wurde nicht gefunden.' };
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) return { success: false, error: 'Das Modrinth-Datapack konnte nicht gelesen werden.' };
+  const minecraftVersion = String(world.gameVersion || getMinecraftVersionName(getSelectedVersionId()) || '').trim();
+  const version = await getCompatibleModrinthProjectVersion(projectId, minecraftVersion, { projectType: 'datapack', strictMinecraftVersion: Boolean(minecraftVersion) });
+  if (!version) return { success: false, error: `Keine passende Datapack-Version${minecraftVersion ? ` für Minecraft ${minecraftVersion}` : ''} gefunden.` };
+  const file = getPrimaryProjectFile(version, 'datapack');
+  if (!file) return { success: false, error: 'Das Projekt enthält keine Datapack-ZIP-Datei.' };
+  const directory = path.join(world.path, 'datapacks');
+  ensureDir(directory);
+  const fileName = sanitizeDownloadedFileName(file.filename || `${projectId}.zip`, '.zip');
+  const destination = path.join(directory, fileName);
+  if (fs.existsSync(destination)) return { success: false, error: `„${fileName}“ ist in dieser Welt bereits installiert.` };
+  try {
+    await downloadFile(file.url, destination, {
+      expectedSha1: String(file.hashes?.sha1 || ''),
+      expectedSha512: String(file.hashes?.sha512 || ''),
+      expectedSize: Number(file.size || 0)
+    });
+    validateDatapackZip(destination);
+    saveDatapackProjectMetadata(world, fileName, projectReference);
+  } catch (error) {
+    if (fs.existsSync(destination)) fs.unlinkSync(destination);
+    throw error;
+  }
+  return { success: true, message: `${getModrinthProjectTitle(projectReference) || fileName} wurde in „${world.name}“ installiert.`, worlds: getDatapackState().worlds };
+}
+
+async function getModrinthDatapackWorlds(projectReference) {
+  const projectId = getModrinthProjectId(projectReference);
+  if (!projectId) return { success: false, error: 'Das Modrinth-Datapack konnte nicht gelesen werden.', worlds: [] };
+  let versions = [];
+  try {
+    versions = await fetchModrinthJson(`/project/${encodeURIComponent(projectId)}/version`);
+  } catch (error) {
+    return { success: false, error: `Datapack-Versionen konnten nicht geladen werden: ${error.message}`, worlds: [] };
+  }
+  const knownFileNames = new Set();
+  for (const version of Array.isArray(versions) ? versions : []) {
+    for (const file of Array.isArray(version?.files) ? version.files : []) {
+      const name = path.basename(String(file?.filename || '')).toLowerCase();
+      if (name.endsWith('.zip')) knownFileNames.add(name);
+    }
+  }
+  const worlds = getDatapackState().worlds.map((world) => {
+    const installedNames = new Set((world.datapacks || []).map((pack) => String(pack.name || '').toLowerCase()));
+    const alreadyInstalled = (world.datapacks || []).some((pack) => String(pack.projectId || '') === projectId)
+      || [...knownFileNames].some((name) => installedNames.has(name));
+    return { ...world, alreadyInstalled };
+  });
+  return { success: true, worlds: worlds.filter((world) => !world.alreadyInstalled), excludedCount: worlds.filter((world) => world.alreadyInstalled).length };
+}
+
+function encodeNbtString(value) {
+  const text = Buffer.from(String(value), 'utf8');
+  const length = Buffer.alloc(2);
+  length.writeUInt16BE(text.length);
+  return Buffer.concat([length, text]);
+}
+
+function encodeNbtTag(type, name, payload) {
+  return Buffer.concat([Buffer.from([type]), encodeNbtString(name), payload]);
+}
+
+function encodeNbtByte(name, value) {
+  const payload = Buffer.alloc(1);
+  payload.writeInt8(Number(value));
+  return encodeNbtTag(1, name, payload);
+}
+
+function encodeNbtInt(name, value) {
+  const payload = Buffer.alloc(4);
+  payload.writeInt32BE(Number(value));
+  return encodeNbtTag(3, name, payload);
+}
+
+function encodeNbtLong(name, value) {
+  const payload = Buffer.alloc(8);
+  payload.writeBigInt64BE(BigInt(value));
+  return encodeNbtTag(4, name, payload);
+}
+
+function encodeNbtStringTag(name, value) {
+  return encodeNbtTag(8, name, encodeNbtString(value));
+}
+
+function encodeNbtCompound(name, children) {
+  return encodeNbtTag(10, name, Buffer.concat([...children, Buffer.from([0])]));
+}
+
+function encodeNbtCompoundList(name, items) {
+  const length = Buffer.alloc(4);
+  length.writeInt32BE(items.length);
+  return encodeNbtTag(9, name, Buffer.concat([
+    Buffer.from([10]),
+    length,
+    ...items.map((children) => Buffer.concat([...children, Buffer.from([0])]))
+  ]));
+}
+
+function encodeNbtStringList(name, items) {
+  const length = Buffer.alloc(4);
+  length.writeInt32BE(items.length);
+  return encodeNbtTag(9, name, Buffer.concat([Buffer.from([8]), length, ...items.map(encodeNbtString)]));
+}
+
+function createWorldGenerator(worldType, dimension) {
+  if (dimension === 'overworld' && worldType === 'flat') {
+    return encodeNbtCompound('generator', [
+      encodeNbtStringTag('type', 'minecraft:flat'),
+      encodeNbtCompound('settings', [
+        encodeNbtStringTag('biome', 'minecraft:plains'),
+        encodeNbtByte('features', 1),
+        encodeNbtByte('lakes', 0),
+        encodeNbtCompoundList('layers', [
+          [encodeNbtInt('height', 1), encodeNbtStringTag('block', 'minecraft:bedrock')],
+          [encodeNbtInt('height', 2), encodeNbtStringTag('block', 'minecraft:dirt')],
+          [encodeNbtInt('height', 1), encodeNbtStringTag('block', 'minecraft:grass_block')]
+        ]),
+        encodeNbtStringList('structure_overrides', [])
+      ])
+    ]);
+  }
+  const preset = dimension === 'nether' ? 'minecraft:nether' : (dimension === 'end' ? 'minecraft:end' : 'minecraft:overworld');
+  const settings = dimension === 'overworld' && worldType === 'amplified'
+    ? 'minecraft:amplified'
+    : (dimension === 'overworld' && worldType === 'large_biomes' ? 'minecraft:large_biomes' : preset);
+  const biomeSource = dimension === 'nether'
+    ? [encodeNbtStringTag('type', 'minecraft:multi_noise'), encodeNbtStringTag('preset', 'minecraft:nether')]
+    : dimension === 'end'
+      ? [encodeNbtStringTag('type', 'minecraft:the_end')]
+      : [encodeNbtStringTag('type', 'minecraft:multi_noise'), encodeNbtStringTag('preset', 'minecraft:overworld')];
+  return encodeNbtCompound('generator', [
+    encodeNbtStringTag('type', 'minecraft:noise'),
+    encodeNbtStringTag('settings', settings),
+    encodeNbtCompound('biome_source', biomeSource)
+  ]);
+}
+
+function getMinecraftWorldVersionMetadata(versionId = getSelectedVersionId()) {
+  const minecraftVersion = getMinecraftVersionName(versionId) || '1.21.11';
+  const candidates = uniqueStrings([minecraftVersion, versionId]);
+  for (const candidate of candidates) {
+    const jarPath = path.join(DEFAULT_MINECRAFT_DIR, 'versions', candidate, `${candidate}.jar`);
+    if (!fs.existsSync(jarPath)) continue;
+    try {
+      const archive = getZipCentralDirectoryEntries(jarPath);
+      const entry = archive.entries.find((item) => String(item.name || '').replace(/\\/gu, '/') === 'version.json');
+      if (!entry || entry.uncompressedSize > 1024 * 1024) continue;
+      const metadata = JSON.parse(readZipEntryBufferFromArchive(archive, entry).toString('utf8'));
+      const dataVersion = Number(metadata.world_version);
+      if (Number.isInteger(dataVersion) && dataVersion > 0) {
+        return {
+          name: String(metadata.name || metadata.id || minecraftVersion),
+          dataVersion,
+          series: String(metadata.series_id || 'main')
+        };
+      }
+    } catch (error) {
+      logger.warn('Minecraft world version metadata could not be read', { jarPath, error: error.message });
+    }
+  }
+  // 1.21.11 is old enough for newer clients to upgrade and has a known, valid data version.
+  return { name: minecraftVersion, dataVersion: 4671, series: 'main' };
+}
+
+function writeNewMinecraftWorld(worldDir, options) {
+  const hardcore = options.gamemode === 'hardcore';
+  const gameType = options.gamemode === 'creative' ? 1 : 0;
+  const version = getMinecraftWorldVersionMetadata();
+  const seed = BigInt.asIntN(64, BigInt(`0x${crypto.randomBytes(8).toString('hex')}`));
+  const dimensions = encodeNbtCompound('dimensions', [
+    encodeNbtCompound('minecraft:overworld', [encodeNbtStringTag('type', 'minecraft:overworld'), createWorldGenerator(options.worldType, 'overworld')]),
+    encodeNbtCompound('minecraft:the_nether', [encodeNbtStringTag('type', 'minecraft:the_nether'), createWorldGenerator(options.worldType, 'nether')]),
+    encodeNbtCompound('minecraft:the_end', [encodeNbtStringTag('type', 'minecraft:the_end'), createWorldGenerator(options.worldType, 'end')])
+  ]);
+  const data = encodeNbtCompound('Data', [
+    encodeNbtInt('DataVersion', version.dataVersion),
+    encodeNbtInt('version', 19133),
+    encodeNbtStringTag('LevelName', options.name),
+    encodeNbtLong('LastPlayed', Date.now()),
+    encodeNbtInt('GameType', gameType),
+    encodeNbtCompound('difficulty_settings', [
+      encodeNbtStringTag('difficulty', hardcore ? 'hard' : options.difficulty),
+      encodeNbtByte('hardcore', hardcore ? 1 : 0),
+      encodeNbtByte('locked', hardcore ? 1 : 0)
+    ]),
+    encodeNbtByte('allowCommands', gameType === 1 ? 1 : 0),
+    encodeNbtByte('initialized', 0),
+    // This confirmation belongs only to worlds created by X Client. It tells
+    // Minecraft that the user deliberately selected the installed datapack and
+    // avoids the experimental datapack confirmation on first open. Existing
+    // worlds are never touched.
+    encodeNbtByte('confirmedExperimentalSettings', 1),
+    encodeNbtCompound('Version', [
+      encodeNbtInt('Id', version.dataVersion),
+      encodeNbtStringTag('Name', version.name),
+      encodeNbtStringTag('Series', version.series),
+      encodeNbtByte('Snapshot', 0)
+    ])
+  ]);
+  const root = encodeNbtCompound('', [data]);
+  const dataDirectory = path.join(worldDir, 'data', 'minecraft');
+  ensureDir(dataDirectory);
+  ensureDir(path.join(worldDir, 'datapacks'));
+  fs.writeFileSync(path.join(worldDir, 'level.dat'), zlib.gzipSync(root));
+  const worldGenSettings = encodeNbtCompound('', [
+    encodeNbtInt('DataVersion', version.dataVersion),
+    encodeNbtCompound('data', [
+      encodeNbtLong('seed', seed),
+      encodeNbtByte('generate_structures', 1),
+      encodeNbtByte('bonus_chest', 0),
+      dimensions
+    ])
+  ]);
+  fs.writeFileSync(path.join(dataDirectory, 'world_gen_settings.dat'), zlib.gzipSync(worldGenSettings));
+}
+
+async function createWorldWithDatapack(projectReference, rawOptions = {}) {
+  const name = String(rawOptions?.name || '').trim().replace(/[\u0000-\u001f]/gu, '').slice(0, 64);
+  if (!name) return { success: false, error: 'Please enter a world name.' };
+  const gamemode = ['survival', 'creative', 'hardcore'].includes(rawOptions.gamemode) ? rawOptions.gamemode : 'survival';
+  const difficulty = ['peaceful', 'easy', 'normal', 'hard'].includes(rawOptions.difficulty) ? rawOptions.difficulty : 'normal';
+  const worldType = ['default', 'flat', 'large_biomes', 'amplified'].includes(rawOptions.worldType) ? rawOptions.worldType : 'default';
+  const savesDir = path.join(DEFAULT_MINECRAFT_DIR, 'saves');
+  ensureDir(savesDir);
+  const baseFolder = name.replace(/[<>:"/\\|?*]/gu, '_').replace(/[. ]+$/u, '').slice(0, 64) || 'New World';
+  let folder = baseFolder;
+  let suffix = 2;
+  while (fs.existsSync(path.join(savesDir, folder))) folder = `${baseFolder.slice(0, 58)} (${suffix++})`;
+  const worldDir = path.join(savesDir, folder);
+  try {
+    writeNewMinecraftWorld(worldDir, { name, gamemode, difficulty, worldType });
+    const result = await installModrinthDatapack(projectReference, folder);
+    if (!result.success) throw new Error(result.error || 'The datapack could not be installed.');
+    return { success: true, worldId: folder, message: `“${name}” was created and the datapack was installed.` };
+  } catch (error) {
+    if (fs.existsSync(worldDir)) fs.rmSync(worldDir, { recursive: true, force: false });
+    return { success: false, error: error.message };
+  }
+}
+
+async function installDatapack(requestedWorldId = '') {
+  const selection = await dialog.showOpenDialog(mainWindow, {
+    title: 'Datapack auswählen',
+    properties: ['openFile'],
+    filters: [{ name: 'Minecraft-Datapack', extensions: ['zip'] }]
+  });
+  if (selection.canceled || !selection.filePaths[0]) return { success: false, canceled: true };
+  const sourcePath = selection.filePaths[0];
+  validateDatapackZip(sourcePath);
+  let world = resolveDatapackWorld(requestedWorldId);
+  if (!world) {
+    const worlds = listWorlds(DEFAULT_MINECRAFT_DIR);
+    if (!worlds.length) throw new Error('Im aktuellen Minecraft-Profil wurden keine Welten gefunden.');
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'question', title: 'Welt auswählen', message: 'In welche Welt soll das Datapack installiert werden?',
+      buttons: [...worlds.map((entry) => entry.name), 'Abbrechen'], cancelId: worlds.length, defaultId: 0
+    });
+    if (choice.response >= worlds.length) return { success: false, canceled: true };
+    world = worlds[choice.response];
+  }
+  const directory = path.join(world.path, 'datapacks');
+  ensureDir(directory);
+  const destination = path.join(directory, path.basename(sourcePath));
+  if (fs.existsSync(destination)) throw new Error(`„${path.basename(sourcePath)}“ ist in dieser Welt bereits installiert.`);
+  fs.copyFileSync(sourcePath, destination, fs.constants.COPYFILE_EXCL);
+  return { ...getDatapackState(), installed: path.basename(sourcePath), worldId: world.id, message: `Datapack in „${world.name}“ installiert.` };
+}
+
+function removeDatapack(worldId, fileName) {
+  if (isMinecraftMutationLocked()) {
+    throw new Error("Can't be deleted while Minecraft is running.");
+  }
+  const world = resolveDatapackWorld(worldId);
+  if (!world) throw new Error('Die ausgewählte Welt wurde nicht gefunden.');
+  const safeName = path.basename(String(fileName || ''));
+  if (!safeName || safeName !== String(fileName || '')) throw new Error('Ungültiger Datapack-Name.');
+  const directory = path.join(world.path, 'datapacks');
+  const target = path.join(directory, safeName);
+  if (!isPathInsideDirectory(directory, target) || !fs.existsSync(target)) throw new Error('Das Datapack wurde nicht gefunden.');
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink()) throw new Error('Symbolische Verknüpfungen werden aus Sicherheitsgründen nicht gelöscht.');
+  if (stat.isDirectory()) fs.rmSync(target, { recursive: true, force: false });
+  else fs.unlinkSync(target);
+  const metadataPath = path.join(world.path, '.x-launcher-datapacks.json');
+  try {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    if (metadata && Object.prototype.hasOwnProperty.call(metadata, safeName)) {
+      delete metadata[safeName];
+      fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
+    }
+  } catch (_error) { /* Optional display metadata must never block deletion. */ }
+  return { ...getDatapackState(), message: `„${safeName}“ wurde gelöscht.` };
+}
+
+async function openContentFolder(contentType, worldId = '') {
+  const context = getActiveModContext();
+  let directory;
+  if (contentType === 'resourcepack') directory = context.resourcepacksDir || RESOURCEPACKS_DIR;
+  else if (contentType === 'shader') directory = context.shaderpacksDir || SHADERPACKS_DIR;
+  else if (contentType === 'datapack') {
+    const world = resolveDatapackWorld(worldId);
+    if (!world) throw new Error('Bitte zuerst eine Welt auswählen.');
+    directory = path.join(world.path, 'datapacks');
+  } else directory = context.modsDir;
+  ensureDir(directory);
+  const openError = await shell.openPath(directory);
+  return openError ? { success: false, error: openError, path: directory } : { success: true, path: directory };
+}
+
+registerIpcHandler('update-all-mods', async () => {
+  try {
+    const duplicateResult = { removed: 0, warnings: [] };
+    const result = await cleanReinstallAllModrinthContent();
+    const warnings = uniqueStrings([
+      ...(duplicateResult.warnings || []),
+      ...(result.warnings || [])
+    ]);
+    const duplicateMessage = duplicateResult.removed
+      ? ` ${duplicateResult.removed} doppelte Mod${duplicateResult.removed === 1 ? '' : 's'} gelöscht.`
+      : ' Keine doppelten Mods gefunden.';
+    return {
+      success: true,
+      updated: result.updated,
+      total: result.total,
+      warnings: result.warnings,
+      message: result.message
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('cleanup-numbered-and-duplicate-mods', async () => {
+  try {
+    fs.writeFileSync(DASH_TWO_MOD_PURGE_MARKER_FILE, 'enabled\n', 'utf8');
+    const activeContext = getActiveModContext();
+    const roots = uniqueStrings([
+      path.join(DEFAULT_MINECRAFT_DIR, 'mods'),
+      getConfiguredStandardModsDir(),
+      activeContext.modsDir,
+      activeContext.disabledModsDir,
+      activeContext.libraryDir,
+      CONFIG_DIR
+    ]).map((entry) => path.resolve(entry));
+    const visitedDirectories = new Set();
+    const deletedFiles = [];
+    const errors = [];
+
+    const deleteDashTwoJars = (directory) => {
+      if (!directory || !fs.existsSync(directory)) {
+        return;
+      }
+      let realDirectory;
+      try {
+        realDirectory = fs.realpathSync(directory).toLowerCase();
+      } catch (_error) {
+        realDirectory = path.resolve(directory).toLowerCase();
+      }
+      if (visitedDirectories.has(realDirectory)) {
+        return;
+      }
+      visitedDirectories.add(realDirectory);
+
+      let entries = [];
+      try {
+        entries = fs.readdirSync(directory, { withFileTypes: true });
+      } catch (error) {
+        errors.push(`${directory}: ${error.message}`);
+        return;
+      }
+      for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+          deleteDashTwoJars(entryPath);
+          continue;
+        }
+        if (!entry.isFile() || !/-2\.jar$/iu.test(entry.name)) {
+          continue;
+        }
+        try {
+          try {
+            fs.chmodSync(entryPath, 0o666);
+          } catch (_error) {
+            // Continue: normal files do not need an attribute change.
+          }
+          fs.unlinkSync(entryPath);
+          deletedFiles.push(entryPath);
+        } catch (error) {
+          errors.push(`${entryPath}: ${error.message}`);
+        }
+      }
+    };
+
+    roots.forEach(deleteDashTwoJars);
+    return {
+      success: true,
+      removed: deletedFiles.length,
+      removedNames: deletedFiles.map((filePath) => path.basename(filePath)),
+      errors,
+      message: deletedFiles.length
+        ? `${deletedFiles.length} Mod-Datei${deletedFiles.length === 1 ? '' : 'en'} mit -2.jar am Ende dauerhaft gelöscht.`
+        : 'Keine Mod-Dateien mit -2.jar am Ende gefunden.'
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('launch-minecraft', async (event, username, passedAccessToken = '', launchOptions = {}) => {
+  const runtimeStatus = getMinecraftRuntimeStatus();
+  if (minecraftLaunchReserved || runtimeStatus.running) {
+    return {
+      success: false,
+      alreadyRunning: true,
+      pid: runtimeStatus.pid || activeMinecraftProcess?.pid || 0,
+      error: 'Minecraft läuft bereits. Beende es vollständig, bevor du eine weitere Instanz startest.'
+    };
+  }
+
+  minecraftLaunchReserved = true;
+  const repairMessages = [];
+  let lastError = null;
+  const sourceWindow = getEventWindow(event);
+  sendMinecraftLaunchProgress(sourceWindow, 2, 'Launcher wird vorbereitet');
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await launchMinecraftOnce(username, passedAccessToken, {
+        forceRefreshCoreFiles: attempt > 0,
+        forceRefreshManagedMods: attempt > 0,
+        launchOptions,
+        sourceWindow
+      });
+      minecraftLaunchReserved = false;
+      return {
+        ...result,
+        message: formatAutoRepairLaunchMessage(result.message, repairMessages)
+      };
+    } catch (error) {
+      lastError = error;
+      console.error(attempt > 0 ? 'Launch error after auto repair:' : 'Launch error:', error);
+
+      if (attempt > 0 || isNonRepairableLaunchError(error)) {
+        break;
+      }
+
+      const repairResult = await repairMinecraftLaunchFailure(error, {
+        versionId: getEffectiveSelectedVersionId()
+      });
+      if (!repairResult.repaired) {
+        repairMessages.push(...(repairResult.messages || []));
+        break;
+      }
+      repairMessages.push(...repairResult.messages);
+    }
+  }
+
+  const repairNote = repairMessages.length
+    ? ` Automatische Reparatur versucht: ${uniqueStrings(repairMessages).join(' | ')}.`
+    : '';
+
+  minecraftLaunchReserved = false;
+  return {
+    success: false,
+    error: `Minecraft konnte nicht aus ${DEFAULT_MINECRAFT_DIR} gestartet werden. ${lastError?.message || 'Unbekannter Fehler.'}${repairNote}`
+  };
+});
+
+async function launchMinecraftOnce(username, passedAccessToken = '', options = {}) {
+  let minecraftProcessReady = false;
+  const reportProgress = (progress, status, details = {}) => sendMinecraftLaunchProgress(
+    options.sourceWindow,
+    minecraftProcessReady ? progress : Math.min(29, Number(progress) || 0),
+    status,
+    details
+  );
+  reportProgress(5, 'Spielerprofil ist bereit', { phase: 'player', phaseStatus: 'done', detail: username });
+  ensureDir(DEFAULT_MINECRAFT_DIR);
+
+  reportProgress(10, 'Authentifizierung wird geprüft');
+  const savedUser = await readSavedUser();
+  const isOfflineMode = shouldLaunchOfflineSession(savedUser, passedAccessToken);
+  reportProgress(16, 'Launcher-Dateien werden geprüft', { phase: 'dependencies', phaseStatus: 'loading' });
+  await ensureStandardLauncherUpdatedForLaunch();
+  reportProgress(23, 'Minecraft-Version wird geladen', { phase: 'version', phaseStatus: 'loading' });
+  const selectedVersion = await resolveSelectedVersion(getEffectiveSelectedVersionId());
+  const selectedVersionId = selectedVersion.id;
+  const versionData = selectedVersion.data;
+  const modContext = getActiveModContext(selectedVersionId);
+  reportProgress(26, 'Minecraft-Version ist bereit', { phase: 'version', phaseStatus: 'done', detail: getMinecraftVersionName(selectedVersionId, versionData) });
+  reportProgress(28, 'Fabric Loader wird geprüft', { phase: 'fabric', phaseStatus: 'loading', detail: selectedVersionId });
+  const launchGameDir = modContext.gameDir || DEFAULT_MINECRAFT_DIR;
+  ensureDir(launchGameDir);
+  ensureDir(modContext.resourcepacksDir || path.join(launchGameDir, 'resourcepacks'));
+  ensureDir(modContext.shaderpacksDir || path.join(launchGameDir, 'shaderpacks'));
+  ensureVisibleChatOptions(launchGameDir);
+  cleanupFullbrightResourcePack(launchGameDir);
+  repairKnownBrokenModConfigs(launchGameDir);
+  syncOfficialLauncherProfiles();
+  const launchServer = resolveLaunchServer(options.launchOptions || {});
+  let modSyncResult = {
+    synced: 0,
+    totalProjects: 0,
+    files: [],
+    autoDisabledProjects: [],
+    disabledProjects: [],
+    warnings: []
+  };
+  const usesFabric = isFabricVersionId(selectedVersionId);
+  reportProgress(31, usesFabric ? 'Fabric Loader ist bereit' : 'Vanilla ist bereit', { phase: 'fabric', phaseStatus: 'done', detail: selectedVersionId });
+  reportProgress(33, 'Mods werden geprüft', { phase: 'mods', phaseStatus: 'loading' });
+  if (usesFabric) try {
+    modSyncResult = await MODS_ENGINE.syncManagedModsForVersion(selectedVersionId, {
+      modContext,
+      launchPreflight: true,
+      refreshAll: false,
+      refreshDisabledProjects: false
+    });
+    if (modSyncResult.blocked) {
+      throw new Error(`Mod-Konfiguration ist nicht startbereit: ${modSyncResult.blockedReason}`);
+    }
+    const launchModRepairWarnings = await ensureLaunchModFolderHealthy(modContext, selectedVersionId);
+    if (launchModRepairWarnings.length) {
+      modSyncResult.warnings = uniqueStrings([
+        ...(modSyncResult.warnings || []),
+        ...launchModRepairWarnings
+      ]);
+    }
+    const voiceChatCompatibilityWarnings = disableIncompatibleVoiceChatGroupAddons(modContext);
+    if (voiceChatCompatibilityWarnings.length) {
+      modSyncResult.warnings = uniqueStrings([
+        ...(modSyncResult.warnings || []),
+        ...voiceChatCompatibilityWarnings
+      ]);
+    }
+  } catch (error) {
+    logger.warn('Launch mod preflight skipped so Minecraft can start', {
+      selectedVersionId,
+      minecraftVersion: modContext.minecraftVersion,
+      error: serializeError(error)
+    });
+    modSyncResult.warnings = uniqueStrings([
+      ...(modSyncResult.warnings || []),
+      `Mod-Prüfung wurde übersprungen: ${error.message}`
+    ]);
+    reportProgress(33, 'Mod-Prüfung fehlgeschlagen', { phase: 'mods', phaseStatus: 'error', detail: error.message });
+    throw error;
+  }
+  const launchContentEntries = usesFabric
+    ? await MODS_ENGINE.getInstalledMods(selectedVersionId, { skipManagedSync: true })
+    : [];
+  const activeModItems = launchContentEntries.filter((entry) => String(entry.itemType || 'mod') === 'mod' && entry.enabled !== false);
+  reportProgress(43, `${activeModItems.length} Mods sind bereit`, {
+    phase: 'mods', phaseStatus: 'done', detail: `${activeModItems.length} aktive Mods`,
+    items: activeModItems.map((entry) => ({ name: entry.name, iconUrl: entry.iconUrl || '' }))
+  });
+  const validateContentPacks = async (projectType, label, progress) => {
+    const entries = launchContentEntries.filter((entry) => entry.itemType === projectType && entry.enabled !== false);
+    const items = [];
+    for (const entry of entries) {
+      try {
+        const archiveBuffer = await fs.promises.readFile(entry.path);
+        const archive = getZipCentralDirectoryEntriesFromBuffer(archiveBuffer);
+        if (!archive.entries.length) throw new Error('ZIP enthält keine Dateien.');
+        items.push({ name: entry.name, iconUrl: entry.iconUrl || '' });
+      } catch (error) {
+        items.push({ name: entry.name, iconUrl: entry.iconUrl || '', error: error.message });
+      }
+    }
+    const failed = items.filter((item) => item.error);
+    reportProgress(progress, failed.length ? `${failed.length} ${label} fehlerhaft` : `${items.length} ${label} sind bereit`, {
+      phase: projectType === 'resourcepack' ? 'resourcepacks' : 'shaders',
+      phaseStatus: failed.length ? 'error' : 'done', detail: `${items.length} geprüft`, items
+    });
+    if (failed.length) throw new Error(`${label}: ${failed.map((item) => `${item.name}: ${item.error}`).join(' | ')}`);
+  };
+  reportProgress(45, 'Ressourcenpakete werden geprüft', { phase: 'resourcepacks', phaseStatus: 'loading' });
+  await validateContentPacks('resourcepack', 'Ressourcenpakete', 50);
+  reportProgress(52, 'Shader werden geprüft', { phase: 'shaders', phaseStatus: 'loading' });
+  await validateContentPacks('shader', 'Shader', 57);
+  let profile;
+  reportProgress(44, isOfflineMode ? 'Offline-Profil wird vorbereitet' : 'Microsoft-Authentifizierung wird geprüft');
+  if (isOfflineMode) {
+    const savedLoginSource = String(savedUser?.loginSource || '').trim().toLowerCase();
+    const launcherAccount = savedLoginSource === 'official-launcher'
+      ? readOfficialLauncherAccountProfile()
+      : null;
+    const offlineUsername = launcherAccount?.username
+      || normalizeOfflineUsername(savedUser?.username || username || '', 'OfflinePlayer');
+    const offlineUuid = savedLoginSource === 'offline'
+      ? createOfflineUuid(offlineUsername)
+      : normalizeMinecraftUuid(launcherAccount?.uuid || savedUser?.uuid) || createOfflineUuid(offlineUsername);
+    profile = {
+      username: offlineUsername,
+      uuid: offlineUuid,
+      accessToken: '0',
+      userType: 'legacy'
+    };
+  } else {
+    let minecraftAccessToken = passedAccessToken || savedUser?.accessToken;
+    if (!minecraftAccessToken) {
+      throw new Error('Bitte melde dich zuerst mit Microsoft an.');
+    }
+    try {
+      profile = await fetchMinecraftProfile(minecraftAccessToken);
+    } catch (error) {
+      if (!isMinecraftUnauthorizedError(error)) {
+        if (isNetworkFetchError(error) && savedUser?.username && savedUser?.uuid) {
+          profile = {
+            uuid: normalizeMinecraftUuid(savedUser.uuid),
+            username: savedUser.username,
+            accessToken: minecraftAccessToken
+          };
+        } else {
+          throw error;
+        }
+      } else {
+        const refreshedProfile = await refreshOfficialMinecraftSession(savedUser);
+        minecraftAccessToken = refreshedProfile.accessToken;
+        profile = {
+          uuid: refreshedProfile.uuid,
+          username: refreshedProfile.username,
+          accessToken: minecraftAccessToken
+        };
+      }
+
+      if (!profile) {
+        throw error;
+      }
+    }
+    profile.accessToken = minecraftAccessToken;
+    profile.userType = 'msa';
+  }
+
+  const skinSyncResult = await syncActiveSkinForLaunch({
+    accessToken: profile.accessToken,
+    isOfflineMode
+  });
+  const activeSkinLaunchConfig = getActiveSkinLaunchConfig();
+
+  reportProgress(64, 'Assets und Bibliotheken werden vorbereitet', { phase: 'dependencies', phaseStatus: 'loading' });
+  const preparedVersion = await prepareVersion(selectedVersionId, versionData, {
+    forceRefresh: Boolean(options.forceRefreshCoreFiles)
+  });
+
+  const requiredJava = preparedVersion.data.javaVersion?.majorVersion || 8;
+  reportProgress(78, 'Java-Laufzeit wird vorbereitet', { phase: 'dependencies', phaseStatus: 'loading' });
+  const javaInfo = getJavaDetails(preparedVersion.data.javaVersion?.component, requiredJava);
+  reportProgress(84, 'Abhängigkeiten sind bereit', { phase: 'dependencies', phaseStatus: 'done', detail: `Java ${javaInfo.majorVersion}` });
+  reportProgress(88, 'Minecraft-Prozess wird gestartet', { phase: 'launch', phaseStatus: 'loading' });
+
+  const launchProfileName = getLaunchProfileWindowTitle(modContext);
+  const launchResult = await startMinecraftProcess({
+    javaPath: javaInfo.path,
+    versionId: preparedVersion.id,
+    versionData: {
+      ...preparedVersion.data,
+      loggingConfigPath: preparedVersion.loggingConfigPath
+    },
+    minecraftDir: DEFAULT_MINECRAFT_DIR,
+    gameDir: launchGameDir,
+    modsDir: modContext.modsDir,
+    profile,
+    nativesDir: preparedVersion.nativesDir,
+    launchTitle: launchProfileName,
+    launchServer,
+    activeSkinLaunchConfig,
+    sourceWindow: options.sourceWindow
+  });
+  minecraftProcessReady = true;
+  reportProgress(100, 'Minecraft läuft', { phase: 'launch', phaseStatus: 'done' });
+  const serverLaunchMessage = launchServer
+    ? ` Direktbeitritt: ${launchServer.name} (${launchServer.host}:${launchServer.port}).`
+    : '';
+
+  return {
+    success: true,
+    message: `Minecraft ${getMinecraftVersionName(preparedVersion.id, preparedVersion.data)} wird als ${profile.username} mit Profil ${launchProfileName} und Java ${javaInfo.majorVersion} gestartet.${serverLaunchMessage} Log: ${launchResult.logPath}${formatSkinLaunchMessage(skinSyncResult)}${formatManagedModsLaunchMessage(modSyncResult)}`,
+    pid: launchResult.pid
+  };
+}
+
+function repairKnownBrokenModConfigs(gameDir) {
+  const appleSkinConfigPath = path.join(gameDir, 'config', 'appleskin.json5');
+  if (!fs.existsSync(appleSkinConfigPath)) return [];
+  const content = fs.readFileSync(appleSkinConfigPath, 'utf8').trim();
+  if (!content || (content.startsWith('{') && content.endsWith('}'))) return [];
+  ROBUSTNESS.createFileBackup(appleSkinConfigPath, 'corrupt-appleskin-config', {
+    operation: 'repairKnownBrokenModConfigs'
+  });
+  fs.writeFileSync(appleSkinConfigPath, '{}\n', 'utf8');
+  return ['AppleSkin-Konfiguration wurde aus einem Backup zurückgesetzt.'];
+}
+
+function formatAutoRepairLaunchMessage(message, repairMessages = []) {
+  const uniqueMessages = uniqueStrings(repairMessages);
+  if (!uniqueMessages.length) {
+    return message;
+  }
+
+  return `${message} Automatisch repariert: ${uniqueMessages.join(' | ')}`;
+}
+
+function formatRequiredResourcePackLaunchMessage(syncResult) {
+  if (!syncResult?.fileName) {
+    return '';
+  }
+
+  return syncResult.installed
+    ? ` Ressourcenpaket ${syncResult.fileName} wurde installiert/repariert und aktiviert.`
+    : ` Ressourcenpaket ${syncResult.fileName} ist aktiv.`;
+}
+
+function isNonRepairableLaunchError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return [
+    'bitte melde dich',
+    'besitzt kein minecraft java edition profil',
+    'java wurde nicht gefunden',
+    'java-version konnte nicht erkannt',
+    'wird benötigt, gefunden wurde java',
+    'microsoft login ist noch nicht konfiguriert'
+  ].some((fragment) => message.includes(fragment));
+}
+
+async function repairMinecraftLaunchFailure(error, context = {}) {
+  const messages = [];
+  let repaired = false;
+  const selectedVersionId = String(context.versionId || getEffectiveSelectedVersionId() || '').trim();
+  const modContext = getActiveModContext(selectedVersionId);
+
+  try {
+    ensureDir(DEFAULT_MINECRAFT_DIR);
+    ensureVisibleChatOptions(DEFAULT_MINECRAFT_DIR);
+    cleanupFullbrightResourcePack(DEFAULT_MINECRAFT_DIR);
+  } catch (repairError) {
+    messages.push(`Basisprüfung unvollständig: ${repairError.message}`);
+  }
+
+  const diagnostics = readLaunchDiagnostics(DEFAULT_MINECRAFT_DIR);
+  const optionRepairs = repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error);
+  if (optionRepairs.length) {
+    repaired = true;
+    messages.push(...optionRepairs);
+  }
+
+  try {
+    const corruptedWarnings = quarantineCorruptedModFiles(modContext);
+    if (corruptedWarnings.length) {
+      repaired = true;
+      messages.push(`Beschädigte Mods deaktiviert: ${corruptedWarnings.length}`);
+    }
+
+    const incompatibleMods = await disableFabricIncompatibleMods(modContext, diagnostics);
+    if (incompatibleMods.length) {
+      repaired = true;
+      messages.push(`Inkompatible Mods ausgeschaltet: ${incompatibleMods.join(', ')}`);
+    }
+
+    const knownCrashMods = disableKnownCrashModsLocally(modContext, diagnostics);
+    if (knownCrashMods.length) {
+      repaired = true;
+      messages.push(`Crash-Mods deaktiviert: ${knownCrashMods.join(', ')}`);
+    }
+
+    const disabledSuspects = await disableSuspectModsFromLaunchDiagnostics(modContext, diagnostics);
+    if (disabledSuspects.length) {
+      repaired = true;
+      messages.push(`Verdächtige Mods deaktiviert: ${disabledSuspects.join(', ')}`);
+    }
+  } catch (repairError) {
+    messages.push(`Mod-Reparatur unvollständig: ${repairError.message}`);
+  }
+
+  try {
+    if (selectedVersionId) {
+      const selectedVersion = await resolveSelectedVersion(selectedVersionId);
+      await prepareVersion(selectedVersion.id, selectedVersion.data, { forceRefresh: true });
+      repaired = true;
+      messages.push('Minecraft/Fabric-Dateien geprüft und neu geladen');
+      if (false) {
+        messages.push(`Mods geprüft: ${formatManagedModsWarning(syncResult.warnings)}`);
+      }
+    }
+  } catch (repairError) {
+    if (repaired) {
+      messages.push(`Core-Reparatur unvollständig: ${repairError.message}`);
+    }
+  }
+
+  return {
+    repaired,
+    messages: uniqueStrings(messages)
+  };
+}
+
+function parseMissingFabricDependencies(diagnostics) {
+  const dependencies = [];
+  const text = String(diagnostics || '');
+  const pattern = /Install\s+([a-z0-9_.-]+),\s+version\s+(.+?)\s+or\s+later\.?/giu;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    dependencies.push({ id: match[1].toLowerCase(), requirement: `${match[2].trim()} or later` });
+  }
+  return [...new Map(dependencies.map((entry) => [entry.id, entry])).values()];
+}
+
+async function installSuggestedFabricModVersions(modContext, diagnostics) {
+  const suggestions = [];
+  const pattern = /Replace\s+mod\s+'([^'\r\n]+)'\s+(?:\(([^)]+)\)|([0-9][a-z0-9+_.-]*))[^\r\n]*?\bwith\s+version\s+([0-9][a-z0-9+_.-]*)/giu;
+  for (const match of String(diagnostics || '').matchAll(pattern)) {
+    const modName = String(match[1] || '').trim();
+    const modKey = modName.toLowerCase().replace(/[^a-z0-9]+/gu, '');
+    const modId = KNOWN_FABRIC_MOD_ID_PROJECT_IDS[modName.toLowerCase()]
+      || KNOWN_FABRIC_MOD_ID_PROJECT_IDS[modKey]
+      || modName.toLowerCase().replace(/\s+/gu, '-');
+    const version = String(match[4] || '').trim();
+    if (!modId || !version) continue;
+    try {
+      const result = await installManagedProjectVersion({
+        projectId: KNOWN_FABRIC_MOD_ID_PROJECT_IDS[modId] || modId,
+        slug: modId,
+        title: modId
+      }, modContext.minecraftVersion, {
+        forceRefresh: true,
+        requiredVersionRequirement: version,
+        visitedProjects: new Set(),
+        modContext
+      });
+      const activeModFiles = fs.existsSync(modContext.modsDir)
+        ? fs.readdirSync(modContext.modsDir).filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+        : [];
+      for (const fileName of activeModFiles) {
+        const filePath = path.join(modContext.modsDir, fileName);
+        const manifest = readFabricModManifest(filePath)?.manifest;
+        const manifestKey = String(manifest?.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/gu, '');
+        if (manifestKey !== modKey) continue;
+        ensureDir(getDisabledModsDir(modContext));
+        moveFileIfExists(filePath, path.join(getDisabledModsDir(modContext), fileName));
+      }
+      suggestions.push(result.title || modId);
+    } catch (error) {
+      logger.warn('Fabric suggested mod version could not be installed', {
+        modId,
+        version,
+        minecraftVersion: modContext.minecraftVersion,
+        error: serializeError(error)
+      });
+    }
+  }
+  return uniqueStrings(suggestions);
+}
+
+async function installMissingFabricDependencies(modContext, diagnostics) {
+  const installed = [];
+  for (const dependency of parseMissingFabricDependencies(diagnostics)) {
+    try {
+      const result = await installManagedProjectVersion(
+        { projectId: dependency.id, slug: dependency.id, title: dependency.id },
+        modContext.minecraftVersion,
+        { forceRefresh: true, visitedProjects: new Set(), modContext }
+      );
+      installed.push(result.title || dependency.id);
+    } catch (error) {
+      logger.warn('Missing Fabric dependency could not be installed automatically', {
+        dependency,
+        minecraftVersion: modContext.minecraftVersion,
+        error: serializeError(error)
+      });
+    }
+  }
+  return uniqueStrings(installed);
+}
+
+function getFabricModIdsFromIncompatibilityDiagnostics(diagnostics) {
+  const ids = [];
+  const text = String(diagnostics || '');
+  const pattern = /Mod\s+'[^'\r\n]+'\s+\(([a-z0-9_.-]+)\)[^\r\n]*/giu;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    // A missing dependency is repaired instead of deleting the mod that needs it.
+    if (/\b(?:is incompatible|requires|conflicts)\b/iu.test(match[0])
+        && !/\bwhich is missing\b/iu.test(match[0])) {
+      ids.push(match[1].toLowerCase());
+    }
+  }
+  return new Set(ids);
+}
+
+async function disableFabricIncompatibleMods(modContext, diagnostics) {
+  const incompatibleIds = getFabricModIdsFromIncompatibilityDiagnostics(diagnostics);
+  // Known broken builds can fail before Fabric prints the normal incompatibility line.
+  if (/chatanimation-fabric-1\.3\.0\+mc26\.2/iu.test(String(diagnostics || ''))) {
+    incompatibleIds.add('chatanimation');
+  }
+  if (!incompatibleIds.size || !fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  const disabled = [];
+  for (const fileName of fs.readdirSync(modContext.modsDir)) {
+    if (!fileName.toLowerCase().endsWith('.jar')) continue;
+    const filePath = path.join(modContext.modsDir, fileName);
+    const manifestInfo = readFabricModManifest(filePath);
+    const manifest = manifestInfo?.manifest || null;
+    const modId = String(manifest?.id || '').trim().toLowerCase();
+    const fileStem = fileName.replace(/\.jar$/iu, '').toLowerCase();
+    const matchedId = [...incompatibleIds].find((id) => modId === id || fileStem.startsWith(id));
+    if (!matchedId || isProtectedManagedProject('', { slug: matchedId, title: manifest?.name || fileName })) continue;
+    try {
+      const result = await setInstalledModEnabled(`file:${filePath}`, false, {
+        automated: true,
+        reason: 'Fabric meldet diese Mod als inkompatibel.',
+        technicalEvidence: `Mod-ID ${matchedId} wurde in der Startdiagnose als inkompatibel erkannt.`
+      });
+      if (result?.success) {
+        disabled.push(...(result.disabledFiles || [fileName]));
+        logger.warn('Fabric-incompatible mod disabled automatically', { fileName, modId: matchedId, disabledFiles: result.disabledFiles || [fileName] });
+      }
+    } catch (error) {
+      logger.warn('Fabric-incompatible mod could not be disabled', { fileName, error: serializeError(error) });
+    }
+  }
+  return uniqueStrings(disabled);
+}
+
+function readLaunchDiagnostics(minecraftDir) {
+  const logPaths = [
+    path.join(CONFIG_DIR, 'last-launch.log'),
+    path.join(minecraftDir, 'logs', 'latest.log'),
+    getNewestCrashReportPath(minecraftDir)
+  ].filter(Boolean);
+
+  return logPaths
+    .map((logPath) => readTextTail(logPath, 160000))
+    .filter(Boolean)
+    .join('\n');
+}
+
+function getNewestCrashReportPath(minecraftDir) {
+  const crashReportsDir = path.join(minecraftDir, 'crash-reports');
+  if (!fs.existsSync(crashReportsDir)) {
+    return '';
+  }
+
+  try {
+    const reports = fs.readdirSync(crashReportsDir)
+      .filter((fileName) => fileName.toLowerCase().endsWith('.txt'))
+      .map((fileName) => {
+        const filePath = path.join(crashReportsDir, fileName);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(filePath).mtimeMs;
+        } catch (_error) {
+          mtimeMs = 0;
+        }
+        return { filePath, mtimeMs };
+      })
+      .sort((left, right) => right.mtimeMs - left.mtimeMs);
+    return reports[0]?.filePath || '';
+  } catch (_error) {
+    return '';
+  }
+}
+
+function readTextTail(filePath, maxChars = 120000) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return '';
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    return content.length > maxChars ? content.slice(content.length - maxChars) : content;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error) {
+  const text = `${diagnostics || ''}\n${error?.message || ''}`.toLowerCase();
+  const shouldResetResourcePacks = /resource\s*pack|incompatibleresourcepacks|failed to load pack|pack\.mcmeta/u.test(text);
+  const shouldResetShaders = /shader|opengl|glfw|render thread|could not create window|failed to create window/u.test(text);
+  const repairs = [];
+
+  if (!shouldResetResourcePacks && !shouldResetShaders) {
+    return repairs;
+  }
+
+  const optionsPath = path.join(DEFAULT_MINECRAFT_DIR, 'options.txt');
+  if (fs.existsSync(optionsPath)) {
+    try {
+      const original = fs.readFileSync(optionsPath, 'utf8');
+      const lines = original.split(/\r?\n/).map((line) => {
+        if (shouldResetResourcePacks && line.startsWith('resourcePacks:')) {
+          return 'resourcePacks:[]';
+        }
+        if (shouldResetResourcePacks && line.startsWith('incompatibleResourcePacks:')) {
+          return 'incompatibleResourcePacks:[]';
+        }
+        if (shouldResetShaders && line.startsWith('fullscreen:')) {
+          return 'fullscreen:false';
+        }
+        return line;
+      });
+      const next = lines.join('\n');
+      if (next !== original) {
+        fs.writeFileSync(optionsPath, next, 'utf8');
+        repairs.push('Minecraft-Optionen zurückgesetzt');
+      }
+    } catch (_error) {
+      // Option repair is best-effort; other repair steps can still help.
+    }
+  }
+
+  const shaderOptionsPath = path.join(DEFAULT_MINECRAFT_DIR, 'optionsshaders.txt');
+  if (shouldResetShaders && fs.existsSync(shaderOptionsPath)) {
+    try {
+      const original = fs.readFileSync(shaderOptionsPath, 'utf8');
+      const next = original
+        .split(/\r?\n/)
+        .map((line) => line.startsWith('shaderPack:') ? 'shaderPack:OFF' : line)
+        .join('\n');
+      if (next !== original) {
+        fs.writeFileSync(shaderOptionsPath, next, 'utf8');
+        repairs.push('Shader deaktiviert');
+      }
+    } catch (_error) {
+      // ignore
+    }
+  }
+
+  return repairs;
+}
+
+function disableKnownCrashModsLocally(modContext, diagnostics) {
+  const text = String(diagnostics || '').toLowerCase();
+  if (!text || !fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  const rules = [
+    {
+      id: 'voicechat-names',
+      match: [
+        'voicechat-names.mixins.json:groupchatmanagermixin',
+        'from mod voicechat-names',
+        'mod voicechat-names'
+      ],
+      filePatterns: [/^voicechat-names.*\.jar$/iu]
+    },
+    {
+      id: 'krypton',
+      match: ['krypton.mixins.json', 'from mod krypton', 'mod krypton'],
+      filePatterns: [/^krypton.*\.jar$/iu]
+    }
+  ];
+  const disabled = [];
+
+  ensureDir(getDisabledModsDir(modContext));
+  for (const rule of rules) {
+    if (!rule.match.some((fragment) => text.includes(fragment))) {
+      continue;
+    }
+
+    for (const fileName of fs.readdirSync(modContext.modsDir)) {
+      if (!rule.filePatterns.some((pattern) => pattern.test(fileName))) {
+        continue;
+      }
+
+      const sourcePath = path.join(modContext.modsDir, fileName);
+      const targetPath = path.join(getDisabledModsDir(modContext), fileName);
+      if (!isPathInsideDirectory(modContext.modsDir, sourcePath)
+          || !isPathInsideDirectory(getDisabledModsDir(modContext), targetPath)
+          || !fs.existsSync(sourcePath)) {
+        continue;
+      }
+
+      const movedPath = moveFileIfExists(sourcePath, targetPath);
+      if (movedPath) {
+        disabled.push(fileName);
+        logger.warn('Known crash mod disabled locally', {
+          rule: rule.id,
+          fileName,
+          movedPath,
+          minecraftVersion: modContext.minecraftVersion
+        });
+      }
+    }
+  }
+
+  return uniqueStrings(disabled);
+}
+
+function disableIncompatibleVoiceChatGroupAddons(modContext) {
+  if (!fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  const mods = fs.readdirSync(modContext.modsDir)
+    .filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+    .map((fileName) => ({
+      fileName,
+      manifest: readFabricModManifest(path.join(modContext.modsDir, fileName))?.manifest || null
+    }));
+  const voiceChatNames = mods.find(({ manifest }) => String(manifest?.id || '').toLowerCase() === 'voicechat-names'
+    && String(manifest?.version || '') === '1.0.0');
+  const simpleVoiceChat = mods.find(({ manifest }) => String(manifest?.id || '').toLowerCase() === 'voicechat'
+    && /^2\.6\./u.test(String(manifest?.version || '')));
+  const voiceChatNamesFile = voiceChatNames?.fileName || '';
+  const simpleVoiceChatFile = simpleVoiceChat?.fileName || '';
+  if (!voiceChatNamesFile || !simpleVoiceChatFile) {
+    return [];
+  }
+
+  const sourcePath = path.join(modContext.modsDir, voiceChatNamesFile);
+  const targetPath = path.join(getDisabledModsDir(modContext), voiceChatNamesFile);
+  if (!isPathInsideDirectory(modContext.modsDir, sourcePath)
+      || !isPathInsideDirectory(getDisabledModsDir(modContext), targetPath)) {
+    return [];
+  }
+
+  ensureDir(getDisabledModsDir(modContext));
+  const movedPath = moveFileIfExists(sourcePath, targetPath);
+  if (!movedPath) {
+    return [];
+  }
+
+  const reason = 'Voice Chat Names 26.2-1.0.0 erwartet eine veraltete GroupChatManager-Signatur und ist mit Simple Voice Chat 2.6.x für Minecraft 26.2 inkompatibel.';
+  rememberDisabledFileReason(modContext, voiceChatNamesFile, {
+    automated: true,
+    source: 'launch-preflight',
+    reason,
+    technicalEvidence: 'GroupChatManagerMixin: expected CallbackInfoReturnable, addon injects boolean + CallbackInfoReturnable'
+  });
+  recordModDisableEntry(modContext, {
+    fileName: voiceChatNamesFile,
+    filePath: movedPath,
+    reason,
+    technicalEvidence: 'InvalidInjectionException in voicechat-names GroupChatManagerMixin'
+  });
+  return [`${voiceChatNamesFile} wurde wegen einer inkompatiblen Gruppen-Mixin-Signatur deaktiviert; Simple Voice Chat bleibt aktiv.`];
+}
+
+async function disableSuspectModsFromLaunchDiagnostics(modContext, diagnostics) {
+  if (!diagnostics || !fs.existsSync(modContext.modsDir)) {
+    return [];
+  }
+
+  const suspectText = extractSuspectLaunchDiagnosticText(diagnostics);
+  if (!suspectText) {
+    return [];
+  }
+
+  const candidates = getLaunchRepairModCandidates(modContext);
+  const disabled = [];
+  for (const candidate of candidates) {
+    if (candidate.protected) {
+      continue;
+    }
+
+    const evidence = candidate.terms
+      .map((term) => getSuspectTermEvidence(term, suspectText))
+      .find(Boolean);
+    if (!evidence) {
+      continue;
+    }
+
+    if (candidate.projectId) {
+      try {
+        await installManagedProjectVersion({ projectId: candidate.projectId }, modContext.minecraftVersion, {
+          forceRefresh: true,
+          visitedProjects: new Set(),
+          modContext
+        });
+        await syncManagedModsForVersion(modContext.versionId, {
+          modContext,
+          refreshAll: true,
+          refreshDisabledProjects: false
+        });
+        logger.info('Suspect managed mod repaired through Modrinth before disable', {
+          projectId: candidate.projectId,
+          title: candidate.title,
+          minecraftVersion: modContext.minecraftVersion,
+          evidence
+        });
+        continue;
+      } catch (error) {
+        logger.warn('Suspect managed mod Modrinth repair failed before disable', {
+          projectId: candidate.projectId,
+          title: candidate.title,
+          minecraftVersion: modContext.minecraftVersion,
+          evidence,
+          error: serializeError(error)
+        });
+      }
+    } else if (candidate.filePath) {
+      const repairResult = await repairLocalModFileWithModrinthBeforeDisable(candidate.filePath, modContext, modContext.minecraftVersion, {
+        reason: `launch diagnostics suspect: ${evidence}`
+      });
+      if (repairResult.repaired) {
+        await syncManagedModsForVersion(modContext.versionId, {
+          modContext,
+          refreshAll: true,
+          refreshDisabledProjects: false
+        });
+        continue;
+      }
+    }
+
+    const modId = candidate.projectId ? `project:${candidate.projectId}` : `file:${candidate.filePath}`;
+    const result = await setInstalledModEnabled(modId, false, {
+      automated: true,
+      reason: 'Launcher-Diagnose nennt diese Mod in einem technischen Startfehler.',
+      technicalEvidence: evidence
+    });
+    if (result?.success) {
+      disabled.push(candidate.title);
+    }
+
+    if (disabled.length >= 2) {
+      break;
+    }
+  }
+
+  return disabled;
+}
+
+function getSuspectTermEvidence(term, diagnosticsText) {
+  const normalizedTerm = String(term || '').trim();
+  if (!normalizedTerm) {
+    return '';
+  }
+
+  const escapedTerm = escapeRegExp(normalizedTerm);
+  const boundaryPattern = new RegExp(`(^|[^a-zA-Z0-9_])${escapedTerm}($|[^a-zA-Z0-9_])`, 'i');
+  const repairKeywordPattern = /(?:requires|missing|required|not found|could not find|cannot find|failed to load|incompatible|conflict|unsupported|invalid|dependency|version)/i;
+  const lines = String(diagnosticsText || '').split(/\r?\n/u);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] || '';
+    if (!boundaryPattern.test(line)) {
+      continue;
+    }
+
+    const evidenceWindow = lines
+      .slice(Math.max(0, index - 1), Math.min(lines.length, index + 2))
+      .join(' ')
+      .replace(/\s+/gu, ' ')
+      .trim();
+    if (repairKeywordPattern.test(evidenceWindow)) {
+      return evidenceWindow.slice(0, 600);
+    }
+  }
+
+  return '';
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractSuspectLaunchDiagnosticText(diagnostics) {
+  const lines = String(diagnostics || '').split(/\r?\n/);
+  const selected = new Set();
+  const marker = /exception|error|crash|failed|failure|incompatible|requires|missing|conflict|could not|cannot|mod resolution|net\.fabricmc\.loader|mixin/i;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!marker.test(lines[index])) {
+      continue;
+    }
+
+    const start = Math.max(0, index - 3);
+    const end = Math.min(lines.length - 1, index + 6);
+    for (let lineIndex = start; lineIndex <= end; lineIndex += 1) {
+      selected.add(lines[lineIndex].toLowerCase());
+    }
+  }
+
+  return Array.from(selected).join('\n');
+}
+
+function getLaunchRepairModCandidates(modContext) {
+  const state = readModsState(modContext);
+  const managedFilesByPath = new Map(
+    (state.activeSync?.files || []).map((entry) => [path.resolve(entry.targetPath), entry])
+  );
+
+  return fs.readdirSync(modContext.modsDir)
+    .filter((fileName) => fileName.toLowerCase().endsWith('.jar'))
+    .map((fileName) => {
+      const filePath = path.join(modContext.modsDir, fileName);
+      if (!isPathInsideDirectory(modContext.modsDir, filePath)) {
+        return null;
+      }
+
+      const managedEntry = managedFilesByPath.get(path.resolve(filePath));
+      const projectId = String(managedEntry?.projectId || '').trim();
+      const project = projectId ? state.projects?.[projectId] : null;
+      const manifestInfo = readFabricModManifest(filePath);
+      const manifest = manifestInfo?.manifest || {};
+      const manifestId = String(manifest.id || '').trim();
+      const manifestName = String(manifest.name || '').trim();
+      const title = project?.title || manifestName || manifestId || fileName;
+      const baseName = path.basename(fileName, '.jar');
+      const terms = uniqueStrings([
+        fileName,
+        baseName,
+        manifestId,
+        manifestName,
+        projectId,
+        project?.slug,
+        project?.title
+      ])
+        .map((term) => term.toLowerCase())
+        .filter((term) => term.length >= 3);
+
+      return {
+        fileName,
+        filePath,
+        projectId,
+        title,
+        terms,
+        protected: isRequiredModFileName(fileName) || (projectId && isManagedProjectRemoveLocked(projectId, project))
+      };
+    })
+    .filter(Boolean);
+}
+
+function ensureDir(targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    fs.mkdirSync(targetPath, { recursive: true });
+  }
+}
+
+function isSafeSettingsFileName(fileName) {
+  return String(fileName || '').trim().toLowerCase() === PROFILE_INGAME_SETTINGS_FILE_NAME;
+}
+
+function listSafeSettingsFiles(directory) {
+  if (!fs.existsSync(directory)) {
+    return [];
+  }
+
+  return fs.readdirSync(directory)
+    .filter((fileName) => isSafeSettingsFileName(fileName))
+    .filter((fileName) => {
+      const filePath = path.join(directory, fileName);
+      return isPathInsideDirectory(directory, filePath) && fs.statSync(filePath).isFile();
+    });
+}
+
+function copySafeSettingsFile(sourcePath, targetPath) {
+  ensureDir(path.dirname(targetPath));
+  fs.copyFileSync(sourcePath, targetPath);
+  try {
+    const stats = fs.statSync(sourcePath);
+    fs.utimesSync(targetPath, stats.atime, stats.mtime);
+  } catch (_error) {
+    // Timestamp preservation is helpful for future sync decisions, but not required.
+  }
+}
+
+function resolveProfileSettingsDirectory(packId = '') {
+  const normalizedPackId = String(packId || '').trim();
+  if (!normalizedPackId) {
+    return { id: '', name: 'Launcher-Standard', directory: getConfiguredStandardModsDir() };
+  }
+  const pack = readPacksState().packs.find((entry) => entry.id === normalizedPackId);
+  return pack ? { id: pack.id, name: pack.name, directory: pack.modsDir || path.join(pack.packDir, 'mods') } : null;
+}
+
+function ensureProfileIngameSettingsFile(modsDir) {
+  ensureDir(modsDir);
+  const settingsPath = path.join(modsDir, PROFILE_INGAME_SETTINGS_FILE_NAME);
+  if (!fs.existsSync(settingsPath)) {
+    fs.writeFileSync(settingsPath, '{}\n', 'utf8');
+  }
+  return settingsPath;
+}
+
+function copyProfileSettings(packId = '') {
+  const profile = resolveProfileSettingsDirectory(packId);
+  if (!profile) return { success: false, error: 'Das Profil wurde nicht gefunden.' };
+  const fileNames = listSafeSettingsFiles(profile.directory);
+  if (!fileNames.length) return { success: false, error: 'Dieses Profil hat noch keine Minecraft-Einstellungen.' };
+
+  ensureDir(PROFILE_SETTINGS_CLIPBOARD_DIR);
+  for (const existingName of listSafeSettingsFiles(PROFILE_SETTINGS_CLIPBOARD_DIR)) {
+    fs.rmSync(path.join(PROFILE_SETTINGS_CLIPBOARD_DIR, existingName), { force: true });
+  }
+  for (const fileName of fileNames) {
+    copySafeSettingsFile(
+      path.join(profile.directory, fileName),
+      path.join(PROFILE_SETTINGS_CLIPBOARD_DIR, fileName)
+    );
+  }
+  fs.writeFileSync(path.join(PROFILE_SETTINGS_CLIPBOARD_DIR, 'source.json'), JSON.stringify({
+    packId: profile.id,
+    profileName: profile.name,
+    copiedAt: new Date().toISOString()
+  }, null, 2), 'utf8');
+  return { success: true, count: fileNames.length, sourceName: profile.name, message: `Einstellungen von ${profile.name} kopiert.` };
+}
+
+function pasteProfileSettings(packId = '') {
+  const profile = resolveProfileSettingsDirectory(packId);
+  if (!profile) return { success: false, error: 'Das Profil wurde nicht gefunden.' };
+  const fileNames = listSafeSettingsFiles(PROFILE_SETTINGS_CLIPBOARD_DIR);
+  if (!fileNames.length) return { success: false, error: 'Kopiere zuerst die Einstellungen eines Profils.' };
+
+  ensureDir(profile.directory);
+  for (const fileName of fileNames) {
+    copySafeSettingsFile(
+      path.join(PROFILE_SETTINGS_CLIPBOARD_DIR, fileName),
+      path.join(profile.directory, fileName)
+    );
+  }
+  return { success: true, count: fileNames.length, targetName: profile.name, message: `Einstellungen in ${profile.name} eingefügt.` };
+}
+
+function ensureVisibleChatOptions(minecraftDir) {
+  const optionsPath = path.join(minecraftDir, 'options.txt');
+  if (!fs.existsSync(optionsPath)) {
+    return;
+  }
+
+  try {
+    const originalContent = fs.readFileSync(optionsPath, 'utf8');
+    let updatedContent = originalContent.replace(/^chatScale:(.+)$/m, (_match, value) => {
+      const numericValue = Number(String(value || '').trim());
+      return Number.isFinite(numericValue) && numericValue <= 0 ? 'chatScale:1.0' : `chatScale:${value}`;
+    });
+
+    // `chatVisibility:1` allows only system messages on newer versions, which
+    // makes incoming server messages visible while blocking the player's own
+    // normal chat input. Force full chat visibility for launcher starts.
+    updatedContent = updatedContent.replace(/^chatVisibility:.+$/m, 'chatVisibility:0');
+    updatedContent = updatedContent.replace(/^onlyShowSecureChat:.+$/m, 'onlyShowSecureChat:false');
+
+    if (updatedContent !== originalContent) {
+      fs.writeFileSync(optionsPath, updatedContent, 'utf8');
+    }
+  } catch (error) {
+    console.warn('Konnte Chat-Optionen nicht anpassen:', error);
+  }
+}
+
+function cleanupFullbrightResourcePack(minecraftDir) {
+  try {
+    const resourcePacksDir = path.join(minecraftDir, 'resourcepacks');
+    const packPath = path.join(resourcePacksDir, FULLBRIGHT_RESOURCE_PACK_FILE_NAME);
+    const legacyPackPath = path.join(resourcePacksDir, 'X Client Fullbright');
+    const optionsPath = path.join(minecraftDir, 'options.txt');
+
+    removeLegacyFullbrightResourcePackOptions(optionsPath);
+    removeOptionsTextListEntry(optionsPath, 'resourcePacks', FULLBRIGHT_RESOURCE_PACK_ID);
+
+    for (const obsoletePath of [packPath, legacyPackPath]) {
+      if (fs.existsSync(obsoletePath)) {
+        fs.rmSync(obsoletePath, { recursive: true, force: true });
+      }
+    }
+  } catch (error) {
+    console.warn('Konnte Fullbright-Ressourcenpaket nicht entfernen:', error);
+  }
+}
+
+function writeTextFileIfChanged(filePath, content) {
+  const normalizedContent = String(content || '').replace(/\r?\n/g, '\n');
+  if (fs.existsSync(filePath)) {
+    try {
+      if (fs.readFileSync(filePath, 'utf8').replace(/\r?\n/g, '\n') === normalizedContent) {
+        return;
+      }
+    } catch (_error) {
+      // Rewrite unreadable managed files below.
+    }
+  }
+
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, normalizedContent, 'utf8');
+}
+
+function removeLegacyFullbrightResourcePackOptions(optionsPath) {
+  for (const legacyId of LEGACY_FULLBRIGHT_RESOURCE_PACK_IDS) {
+    removeOptionsTextListEntry(optionsPath, 'resourcePacks', legacyId);
+  }
+}
+
+function ensureOptionsTextListEntry(optionsPath, optionName, entry, options = {}) {
+  ensureDir(path.dirname(optionsPath));
+  const normalizedEntry = String(entry || '').trim();
+  if (!normalizedEntry) {
+    return;
+  }
+
+  const originalContent = fs.existsSync(optionsPath) ? fs.readFileSync(optionsPath, 'utf8') : '';
+  const linePattern = new RegExp(`^${escapeRegExp(optionName)}:(.*)$`, 'm');
+  const match = originalContent.match(linePattern);
+  let entries = match ? parseMinecraftOptionsStringList(match[1]) : [];
+
+  entries = entries
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index)
+    .filter((item) => item !== normalizedEntry);
+
+  if (options.ensureVanilla && !entries.includes('vanilla')) {
+    entries.unshift('vanilla');
+  }
+  entries.push(normalizedEntry);
+
+  const nextLine = `${optionName}:${JSON.stringify(entries)}`;
+  const nextContent = match
+    ? originalContent.replace(linePattern, nextLine)
+    : `${originalContent.replace(/\s*$/, '')}${originalContent.trim() ? '\n' : ''}${nextLine}\n`;
+
+  if (nextContent !== originalContent) {
+    fs.writeFileSync(optionsPath, nextContent, 'utf8');
+  }
+}
+
+function removeOptionsTextListEntry(optionsPath, optionName, entry) {
+  const normalizedEntry = String(entry || '').trim();
+  if (!normalizedEntry || !fs.existsSync(optionsPath)) {
+    return false;
+  }
+
+  const originalContent = fs.readFileSync(optionsPath, 'utf8');
+  const linePattern = new RegExp(`^${escapeRegExp(optionName)}:(.*)$`, 'm');
+  const match = originalContent.match(linePattern);
+  if (!match) {
+    return false;
+  }
+
+  const entries = parseMinecraftOptionsStringList(match[1])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .filter((item) => item !== normalizedEntry);
+  const nextLine = `${optionName}:${JSON.stringify(entries)}`;
+  const nextContent = originalContent.replace(linePattern, nextLine);
+  if (nextContent !== originalContent) {
+    fs.writeFileSync(optionsPath, nextContent, 'utf8');
+    return true;
+  }
+  return false;
+}
+
+function parseMinecraftOptionsStringList(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((item) => String(item || '')) : [];
+  } catch (_error) {
+    const items = [];
+    const pattern = /"((?:\\.|[^"\\])*)"/g;
+    let match;
+    while ((match = pattern.exec(value)) !== null) {
+      try {
+        items.push(JSON.parse(`"${match[1]}"`));
+      } catch (_decodeError) {
+        items.push(match[1]);
+      }
+    }
+    return items;
+  }
+}
+
+function getDefaultLauncherConfig() {
+  return {
+    microsoftClientId: '',
+    primaryColor: '#00d9ff',
+    themeMode: 'manual',
+    appearanceMode: 'system',
+    backgroundAnimation: 'default',
+    minecraftWindowsUserName: DEFAULT_WINDOWS_USER_NAME,
+    minecraftFolderName: DEFAULT_MINECRAFT_FOLDER_NAME,
+    minecraftPath: '',
+    standardModsPath: '',
+    debugMode: false,
+    automaticUpdatesEnabled: true,
+    selectedVersionId: '',
+    languagePreference: 'en',
+    notes: 'Microsoft/Xbox-Login nutzt eine integrierte Standard-Client-ID. Keine eigene Azure-App nötig.'
+  };
+}
+
+function ensureLauncherConfig() {
+  ROBUSTNESS.readJsonFile(LAUNCHER_CONFIG_FILE, getDefaultLauncherConfig(), {
+    label: 'launcher-config',
+    normalize: (value) => ({
+      ...getDefaultLauncherConfig(),
+      ...(value && typeof value === 'object' ? value : {})
+    })
+  });
+}
+
+function readLauncherConfig() {
+  return ROBUSTNESS.readJsonFile(LAUNCHER_CONFIG_FILE, getDefaultLauncherConfig(), {
+    label: 'launcher-config',
+    normalize: (value) => ({
+      ...getDefaultLauncherConfig(),
+      ...(value && typeof value === 'object' ? value : {})
+    })
+  });
+}
+
+function writeLauncherConfig(config) {
+  const currentConfig = readLauncherConfig();
+  const nextConfig = {
+    ...currentConfig,
+    ...config
+  };
+  const changedKeys = Object.keys(config || {});
+  const isCriticalConfigChange = changedKeys.some((key) => !['primaryColor', 'themeMode', 'appearanceMode', 'backgroundAnimation', 'debugMode', 'languagePreference'].includes(key));
+  ROBUSTNESS.writeJsonFileAtomic(LAUNCHER_CONFIG_FILE, nextConfig, {
+    label: 'launcher-config',
+    backup: isCriticalConfigChange,
+    metadata: { operation: 'writeLauncherConfig' }
+  });
+  const nextDebugMode = parseBooleanEnv(nextConfig.debugMode);
+  if (logger.isDebugEnabled() !== nextDebugMode) {
+    logger.setDebugEnabled(nextDebugMode);
+  }
+  return nextConfig;
+}
+
+function normalizeLanguagePreference(languagePreference) {
+  const normalized = String(languagePreference || '').trim().toLowerCase();
+  return ['auto', 'de', 'en'].includes(normalized) ? normalized : 'auto';
+}
+
+function getSystemLauncherLanguage() {
+  const locale = String(app?.getLocale?.() || Intl.DateTimeFormat().resolvedOptions().locale || '').toLowerCase();
+  return locale.startsWith('de') ? 'de' : 'en';
+}
+
+function resolveLauncherLanguage(languagePreference = readLauncherConfig().languagePreference) {
+  return 'en';
+}
+
+function getLanguageConfig() {
+  const preference = normalizeLanguagePreference(readLauncherConfig().languagePreference);
+  return {
+    success: true,
+    preference,
+    language: resolveLauncherLanguage(preference)
+  };
+}
+
+function setLanguagePreference(languagePreference) {
+  const preference = 'en';
+  writeLauncherConfig({ languagePreference: preference });
+  return getLanguageConfig();
+}
+
+function isDebugModeEnabled() {
+  try {
+    return parseBooleanEnv(readLauncherConfig().debugMode);
+  } catch (_error) {
+    return parseBooleanEnv(process.env.X_LAUNCHER_DEBUG);
+  }
+}
+
+function normalizeMinecraftDirectory(minecraftDir) {
+  const normalized = path.normalize(String(minecraftDir || '').trim());
+  if (!normalized || !path.isAbsolute(normalized)) {
+    return '';
+  }
+  return normalized;
+}
+
+function normalizeConfiguredMinecraftDirectory(minecraftDir) {
+  const normalized = normalizeMinecraftDirectory(minecraftDir);
+  if (!normalized) {
+    return '';
+  }
+
+  const folderName = path.basename(normalized).toLowerCase();
+  if (folderName !== 'versions') {
+    return normalized;
+  }
+
+  const parentDir = path.dirname(normalized);
+  const parentName = path.basename(parentDir).toLowerCase();
+  if (parentName === DEFAULT_MINECRAFT_FOLDER_NAME) {
+    return parentDir;
+  }
+
+  if (parentName === 'roaming') {
+    return path.join(parentDir, DEFAULT_MINECRAFT_FOLDER_NAME);
+  }
+
+  return normalized;
+}
+
+function normalizeMinecraftFolderName(folderName) {
+  const normalized = String(folderName || '').trim();
+  if (!normalized || normalized === '.' || normalized === '..') {
+    return '';
+  }
+
+  if (path.isAbsolute(normalized) || normalized !== path.basename(normalized)) {
+    return '';
+  }
+
+  if (/[<>:"/\\|?*\x00-\x1F]/.test(normalized)) {
+    return '';
+  }
+
+  return normalized.slice(0, 80);
+}
+
+function normalizeWindowsUserName(userName) {
+  const normalized = String(userName || '').trim();
+  if (!normalized || normalized === '.' || normalized === '..') {
+    return '';
+  }
+
+  if (path.isAbsolute(normalized) || normalized !== path.basename(normalized)) {
+    return '';
+  }
+
+  if (/[<>:"/\\|?*\x00-\x1F]/.test(normalized)) {
+    return '';
+  }
+
+  return normalized.slice(0, 80);
+}
+
+function getConfiguredWindowsUserName() {
+  const config = readLauncherConfig();
+  const configuredUserName = normalizeWindowsUserName(config.minecraftWindowsUserName);
+  if (configuredUserName) {
+    return configuredUserName;
+  }
+
+  const legacyPath = normalizeConfiguredMinecraftDirectory(config.minecraftPath);
+  const legacyParts = legacyPath.split(/[\\/]/).filter(Boolean);
+  const usersIndex = legacyParts.findIndex((part) => part.toLowerCase() === 'users');
+  if (usersIndex >= 0 && legacyParts[usersIndex + 1]) {
+    return normalizeWindowsUserName(legacyParts[usersIndex + 1]) || DEFAULT_WINDOWS_USER_NAME;
+  }
+
+  return DEFAULT_WINDOWS_USER_NAME;
+}
+
+function getConfiguredMinecraftDirectory() {
+  return FALLBACK_MINECRAFT_DIR;
+}
+
+function setActiveMinecraftDirectory(minecraftDir) {
+  DEFAULT_MINECRAFT_DIR = FALLBACK_MINECRAFT_DIR;
+  RESOURCEPACKS_DIR = path.join(DEFAULT_MINECRAFT_DIR, 'resourcepacks');
+  SHADERPACKS_DIR = path.join(DEFAULT_MINECRAFT_DIR, 'shaderpacks');
+}
+
+function getNormalMinecraftModsDir() {
+  return path.join(DEFAULT_MINECRAFT_DIR, 'mods');
+}
+
+function normalizeStandardModsDirectory(modsDir) {
+  const normalized = path.normalize(String(modsDir || '').trim());
+  if (!normalized || !path.isAbsolute(normalized)) {
+    return '';
+  }
+
+  return normalized;
+}
+
+function getConfiguredStandardModsDir() {
+  return getNormalMinecraftModsDir();
+}
+
+function getStandardModsPathInfo() {
+  const modsPath = getConfiguredStandardModsDir();
+  const defaultModsPath = getNormalMinecraftModsDir();
+  return {
+    success: true,
+    modsPath,
+    defaultModsPath,
+    custom: getComparablePath(modsPath) !== getComparablePath(defaultModsPath)
+  };
+}
+
+function getSelectedVersionId() {
+  const config = readLauncherConfig();
+  return String(config.selectedVersionId || '').trim();
+}
+
+function getDefaultPacksState() {
+  return {
+    activePackId: '',
+    packs: []
+  };
+}
+
+function ensurePacksState() {
+  ensureDir(PACKS_DIR);
+  if (!fs.existsSync(PACKS_STATE_FILE)) {
+    ROBUSTNESS.writeJsonFileAtomic(PACKS_STATE_FILE, getDefaultPacksState(), {
+      label: 'packs-state',
+      backup: false,
+      metadata: { createdDefault: true }
+    });
+  }
+}
+
+function normalizePackName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+}
+
+function createPackId(name, existingPackIds = []) {
+  const normalized = normalizePackName(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24) || 'pack';
+  const reservedIds = new Set((existingPackIds || []).map((entry) => String(entry || '').trim()).filter(Boolean));
+
+  let candidate = '';
+  do {
+    candidate = `${normalized}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  } while (
+    reservedIds.has(candidate)
+    || fs.existsSync(path.join(PACKS_DIR, sanitizePathSegment(candidate)))
+  );
+
+  return candidate;
+}
+
+function normalizePacksState(rawState) {
+  const rawPacks = Array.isArray(rawState?.packs) ? rawState.packs : [];
+  const packs = rawPacks
+    .map((pack) => {
+      const id = String(pack?.id || '').trim();
+      const name = normalizePackName(pack?.name);
+      const versionId = String(pack?.versionId || '').trim();
+      if (!id || !name || !versionId) {
+        return null;
+      }
+
+      const packDir = path.join(PACKS_DIR, sanitizePathSegment(id));
+      const modsDir = path.join(packDir, 'mods');
+      const resourcepacksDir = path.join(packDir, 'resourcepacks');
+      const shaderpacksDir = path.join(packDir, 'shaderpacks');
+      return {
+        id,
+        name,
+        versionId,
+        createdAt: String(pack?.createdAt || '').trim() || new Date().toISOString(),
+        updatedAt: String(pack?.updatedAt || '').trim() || new Date().toISOString(),
+        packDir,
+        modsDir,
+        resourcepacksDir,
+        shaderpacksDir
+      };
+    })
+    .filter(Boolean);
+  const activePackId = String(rawState?.activePackId || '').trim();
+
+  return {
+    activePackId: packs.some((pack) => pack.id === activePackId) ? activePackId : '',
+    packs
+  };
+}
+
+function readPacksState() {
+  ensurePacksState();
+  return ROBUSTNESS.readJsonFile(PACKS_STATE_FILE, getDefaultPacksState(), {
+    label: 'packs-state',
+    normalize: normalizePacksState
+  });
+}
+
+function writePacksState(state) {
+  ensurePacksState();
+  const normalizedState = normalizePacksState(state);
+  ROBUSTNESS.writeJsonFileAtomic(PACKS_STATE_FILE, {
+    activePackId: normalizedState.activePackId,
+    packs: normalizedState.packs.map((pack) => ({
+      id: pack.id,
+      name: pack.name,
+      versionId: pack.versionId,
+      createdAt: pack.createdAt,
+      updatedAt: pack.updatedAt
+    }))
+  }, {
+    label: 'packs-state',
+    metadata: { operation: 'writePacksState' }
+  });
+  return normalizedState;
+}
+
+function getOfficialLauncherProfilesPath() {
+  return path.join(DEFAULT_MINECRAFT_DIR, OFFICIAL_LAUNCHER_PROFILES_FILE_NAME);
+}
+
+function readOfficialLauncherProfiles() {
+  const profilesPath = getOfficialLauncherProfilesPath();
+  if (!fs.existsSync(profilesPath)) {
+    return {
+      profiles: {},
+      settings: {}
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
+    return parsed && typeof parsed === 'object'
+      ? {
+          ...parsed,
+          profiles: parsed.profiles && typeof parsed.profiles === 'object' ? parsed.profiles : {}
+        }
+      : {
+          profiles: {},
+          settings: {}
+        };
+  } catch (error) {
+    logger.warn('Official launcher profiles could not be read', {
+      path: profilesPath,
+      error: serializeError(error)
+    });
+    return {
+      profiles: {},
+      settings: {}
+    };
+  }
+}
+
+function writeOfficialLauncherProfiles(profilesData) {
+  ensureDir(DEFAULT_MINECRAFT_DIR);
+  const profilesPath = getOfficialLauncherProfilesPath();
+  ROBUSTNESS.writeJsonFileAtomic(profilesPath, profilesData, {
+    label: 'official-launcher-profiles',
+    metadata: { operation: 'syncOfficialLauncherProfiles' }
+  });
+}
+
+function getOfficialLauncherProfileIdForContext(modContext) {
+  return modContext?.type === 'pack' && modContext.packId
+    ? `x-launcher-pack-${sanitizePathSegment(modContext.packId)}`
+    : 'x-launcher-standard';
+}
+
+function createOfficialLauncherProfileEntry(modContext) {
+  const now = new Date().toISOString();
+  return {
+    created: now,
+    gameDir: modContext.gameDir || DEFAULT_MINECRAFT_DIR,
+    icon: 'Grass',
+    javaArgs: '',
+    lastUsed: now,
+    lastVersionId: modContext.versionId,
+    name: modContext?.type === 'pack'
+      ? `X Client - ${normalizeMinecraftWindowTitle(modContext.name) || 'Profil'}`
+      : 'X Client - Standard',
+    type: 'custom'
+  };
+}
+
+function syncOfficialLauncherProfiles() {
+  try {
+    const profilesData = readOfficialLauncherProfiles();
+    const profiles = profilesData.profiles && typeof profilesData.profiles === 'object'
+      ? profilesData.profiles
+      : {};
+    const contexts = [];
+    const standardVersionId = getSelectedVersionId();
+    if (standardVersionId) {
+      contexts.push(getStandardModContext(standardVersionId));
+    }
+    for (const pack of readPacksState().packs || []) {
+      contexts.push(getPackModContext(pack));
+    }
+    const currentProfileIds = new Set(contexts.map((modContext) => getOfficialLauncherProfileIdForContext(modContext)));
+    for (const profileId of Object.keys(profiles)) {
+      if (profileId.startsWith('x-launcher-pack-') && !currentProfileIds.has(profileId)) {
+        delete profiles[profileId];
+      }
+    }
+
+    for (const modContext of contexts) {
+      ensureDir(modContext.gameDir || DEFAULT_MINECRAFT_DIR);
+      ensureDir(modContext.modsDir);
+      ensureDir(modContext.resourcepacksDir || path.join(modContext.gameDir || DEFAULT_MINECRAFT_DIR, 'resourcepacks'));
+      ensureDir(modContext.shaderpacksDir || path.join(modContext.gameDir || DEFAULT_MINECRAFT_DIR, 'shaderpacks'));
+
+      const profileId = getOfficialLauncherProfileIdForContext(modContext);
+      const previousProfile = profiles[profileId] && typeof profiles[profileId] === 'object'
+        ? profiles[profileId]
+        : {};
+      profiles[profileId] = {
+        ...previousProfile,
+        ...createOfficialLauncherProfileEntry(modContext),
+        created: previousProfile.created || new Date().toISOString()
+      };
+    }
+
+    profilesData.profiles = profiles;
+    writeOfficialLauncherProfiles(profilesData);
+    return true;
+  } catch (error) {
+    logger.warn('Official launcher profile sync failed', { error: serializeError(error) });
+    return false;
+  }
+}
+
+function getActivePack() {
+  const state = readPacksState();
+  return state.packs.find((pack) => pack.id === state.activePackId) || null;
+}
+
+function getEffectiveSelectedVersionId() {
+  return getActivePack()?.versionId || getSelectedVersionId();
+}
+
+function persistEffectiveSelectedVersionId(versionId) {
+  const normalizedVersionId = String(versionId || '').trim();
+  const activePack = getActivePack();
+  if (activePack) {
+    const state = readPacksState();
+    state.packs = state.packs.map((pack) => (
+      pack.id === activePack.id
+        ? {
+            ...pack,
+            versionId: normalizedVersionId,
+            updatedAt: new Date().toISOString()
+          }
+        : pack
+    ));
+    writePacksState(state);
+    return normalizedVersionId;
+  }
+
+  writeLauncherConfig({ selectedVersionId: normalizedVersionId });
+  return normalizedVersionId;
+}
+
+function persistStandardSelectedVersionId(versionId) {
+  const normalizedVersionId = String(versionId || '').trim();
+  writeLauncherConfig({ selectedVersionId: normalizedVersionId });
+  return normalizedVersionId;
+}
+
+async function getLatestStandardFabricVersion() {
+  const remoteVersions = await getRemoteFabricVersions({ limit: FABRIC_LATEST_FALLBACK_LIMIT });
+  return remoteVersions
+    .filter((version) => isSupportedMinecraftVersion(version.minecraftVersion))
+    .slice()
+    .sort((left, right) => getVersionTimestamp(right.releaseTime) - getVersionTimestamp(left.releaseTime))[0] || null;
+}
+
+async function checkStandardLauncherUpdates(options = {}) {
+  const refreshAll = options.refreshAll !== false;
+  const configuredVersionId = getSelectedVersionId();
+  const hasConfiguredVersion = isFullFabricReleaseVersionId(configuredVersionId);
+  const configuredVersion = hasConfiguredVersion
+    ? {
+        id: configuredVersionId,
+        minecraftVersion: getMinecraftVersionName(configuredVersionId, readLocalVersion(configuredVersionId)?.data)
+      }
+    : null;
+  let latestVersion = null;
+
+  try {
+    latestVersion = await getLatestStandardFabricVersion();
+  } catch (_error) {
+    latestVersion = null;
+  }
+
+  let latestLocalVersion = null;
+  if (!latestVersion?.id) {
+    latestLocalVersion = getPreferredLocalFabricVersion('');
+    if (latestLocalVersion?.id
+        && !isSupportedMinecraftVersion(getMinecraftVersionName(latestLocalVersion.id, latestLocalVersion.data))) {
+      latestLocalVersion = null;
+    }
+  }
+  const latestLocalStandardVersion = latestLocalVersion?.id
+    ? {
+        id: latestLocalVersion.id,
+        minecraftVersion: getMinecraftVersionName(latestLocalVersion.id, latestLocalVersion.data)
+      }
+    : null;
+  let standardVersion = latestVersion || latestLocalStandardVersion || configuredVersion;
+
+  if (!standardVersion?.id) {
+    return {
+      success: false,
+      changed: false,
+      error: 'Keine Fabric-Release-Version gefunden.'
+    };
+  }
+
+  const previousVersionId = getSelectedVersionId();
+  const previousMinecraftVersion = previousVersionId
+    ? getMinecraftVersionName(previousVersionId, readLocalVersion(previousVersionId)?.data)
+    : '';
+  const changed = previousVersionId !== standardVersion.id;
+  if (changed) {
+    persistStandardSelectedVersionId(standardVersion.id);
+  }
+
+  const standardContext = getStandardModContext(standardVersion.id);
+  const syncResult = await syncManagedModsForVersion(standardVersion.id, {
+    modContext: standardContext,
+    refreshAll,
+    refreshDisabledProjects: true,
+    removeIncompatible: true
+  });
+  const resourcePackResult = await updateDownloadableModrinthProjects(['resourcepack', 'shader'], standardContext);
+
+  return {
+    success: true,
+    changed,
+    previousVersionId,
+    selectedVersionId: standardVersion.id,
+    minecraftVersion: standardVersion.minecraftVersion,
+    syncedMods: syncResult.synced,
+    syncedResourcepacks: resourcePackResult.updated,
+    disabledProjects: syncResult.disabledProjects || [],
+    warnings: uniqueStrings([...(syncResult.warnings || []), ...(resourcePackResult.warnings || [])]),
+    message: changed
+      ? `Launcher-Standard wurde ${previousMinecraftVersion ? `von Minecraft ${previousMinecraftVersion} ` : ''}auf Minecraft ${standardVersion.minecraftVersion} aktualisiert.`
+      : `Launcher-Standard nutzt Minecraft ${standardVersion.minecraftVersion}.`
+  };
+}
+
+async function syncPackManagedModsForStartup(options = {}) {
+  const refreshAll = Boolean(options.refreshAll);
+  const results = [];
+  const packsState = readPacksState();
+
+  for (const pack of packsState.packs || []) {
+    if (!isFullFabricReleaseVersionId(pack.versionId) || !isProfileFabricVersionAllowed(pack.versionId)) {
+      continue;
+    }
+
+    const modContext = getPackModContext(pack);
+    try {
+      const syncResult = await syncManagedModsForVersion(pack.versionId, {
+        modContext,
+        refreshAll,
+        refreshDisabledProjects: true,
+        removeIncompatible: true
+      });
+      const resourcePackResult = await updateDownloadableModrinthProjects(['resourcepack', 'shader'], modContext);
+      results.push({
+        success: true,
+        packId: pack.id,
+        name: pack.name,
+        versionId: pack.versionId,
+        minecraftVersion: modContext.minecraftVersion,
+        syncedMods: syncResult.synced,
+        syncedResourcepacks: resourcePackResult.updated,
+        disabledProjects: syncResult.disabledProjects || [],
+        warnings: uniqueStrings([...(syncResult.warnings || []), ...(resourcePackResult.warnings || [])])
+      });
+    } catch (error) {
+      logger.warn('Startup pack mod sync failed', {
+        packId: pack.id,
+        versionId: pack.versionId,
+        error: serializeError(error)
+      });
+      results.push({
+        success: false,
+        packId: pack.id,
+        name: pack.name,
+        versionId: pack.versionId,
+        minecraftVersion: modContext.minecraftVersion,
+        error: error.message,
+        warnings: [error.message]
+      });
+    }
+  }
+
+  return results;
+}
+
+async function runStartupManagedModsCheck(options = {}) {
+  const refreshAll = Boolean(options.refreshAll);
+  let standardResult = {
+    success: true,
+    changed: false,
+    warnings: []
+  };
+
+  try {
+    standardResult = await checkStandardLauncherUpdates({ refreshAll });
+  } catch (error) {
+    logger.warn('Startup standard mod sync failed', { error: serializeError(error) });
+    standardResult = {
+      success: false,
+      changed: false,
+      error: error.message,
+      warnings: [error.message]
+    };
+  }
+
+  const packResults = await syncPackManagedModsForStartup({ refreshAll });
+  const warnings = uniqueStrings([
+    ...(standardResult.warnings || []),
+    ...packResults.flatMap((result) => result.warnings || [])
+  ]);
+
+  return {
+    ...standardResult,
+    startupModCheck: true,
+    packResults,
+    warnings
+  };
+}
+
+async function ensureStandardLauncherUpdatedForLaunch() {
+  startupUpdatePromise = null;
+  const selectedVersionId = getEffectiveSelectedVersionId();
+  const selectedFabricVersion = parseFabricVersionId(selectedVersionId);
+  if (!selectedFabricVersion) {
+    return null;
+  }
+
+  try {
+    const loaders = await fetchJson(
+      `${FABRIC_LOADER_VERSIONS_URL}/${encodeURIComponent(selectedFabricVersion.minecraftVersion)}`,
+      { allowedHosts: TRUSTED_FABRIC_META_HOSTS }
+    );
+    const preferredLoader = (loaders || []).find((entry) => entry?.loader?.stable) || loaders?.[0];
+    const preferredLoaderVersion = String(preferredLoader?.loader?.version || '').trim();
+    if (!preferredLoaderVersion
+        || compareVersionStrings(preferredLoaderVersion, selectedFabricVersion.loaderVersion) <= 0) {
+      return null;
+    }
+
+    const updatedVersionId = `fabric-loader-${preferredLoaderVersion}-${selectedFabricVersion.minecraftVersion}`;
+    persistEffectiveSelectedVersionId(updatedVersionId);
+    logger.info('Fabric Loader updated before launch', {
+      previousVersionId: selectedVersionId,
+      selectedVersionId: updatedVersionId,
+      minecraftVersion: selectedFabricVersion.minecraftVersion
+    });
+    return {
+      changed: true,
+      previousVersionId: selectedVersionId,
+      selectedVersionId: updatedVersionId
+    };
+  } catch (error) {
+    // An unavailable Fabric metadata service must not prevent an otherwise
+    // complete local installation from starting offline.
+    logger.warn('Fabric Loader update check before launch failed', {
+      selectedVersionId,
+      error: serializeError(error)
+    });
+    return null;
+  }
+}
+
+function getPacksConfig() {
+  const state = readPacksState();
+  return {
+    success: true,
+    settingsClipboardAvailable: listSafeSettingsFiles(PROFILE_SETTINGS_CLIPBOARD_DIR).length > 0,
+    standardVersionId: getSelectedVersionId(),
+    activePackId: state.activePackId,
+    packs: state.packs
+      .slice()
+      .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))
+  };
+}
+
+async function createPack(name, versionId) {
+  const normalizedName = normalizePackName(name);
+  const normalizedVersionId = String(versionId || '').trim();
+  if (!normalizedName) {
+    return {
+      success: false,
+      error: 'Bitte gib einen Profil-Namen ein.'
+    };
+  }
+
+  if (!isFabricVersionId(normalizedVersionId) && !isFullMinecraftReleaseName(normalizedVersionId)) {
+    return {
+      success: false,
+      error: 'Ein Profil braucht eine gültige Minecraft-Version.'
+    };
+  }
+
+  if (isFabricVersionId(normalizedVersionId) && !isFullFabricReleaseVersionId(normalizedVersionId)) {
+    return {
+      success: false,
+      error: 'Bitte wähle eine normale Minecraft-Vollversion aus.'
+    };
+  }
+
+  if (!isProfileVersionAllowed(normalizedVersionId)) {
+    return {
+      success: false,
+      error: getProfileMinecraftVersionsError()
+    };
+  }
+
+  await resolveSelectedVersion(normalizedVersionId, { allowProfileVersions: true });
+
+  const state = readPacksState();
+  const packId = createPackId(normalizedName, state.packs.map((pack) => pack.id));
+  const packDir = path.join(PACKS_DIR, sanitizePathSegment(packId));
+  const modsDir = path.join(packDir, 'mods');
+  const resourcepacksDir = path.join(packDir, 'resourcepacks');
+  const shaderpacksDir = path.join(packDir, 'shaderpacks');
+
+  ensureDir(packDir);
+  ensureDir(modsDir);
+  ensureDir(resourcepacksDir);
+  ensureDir(shaderpacksDir);

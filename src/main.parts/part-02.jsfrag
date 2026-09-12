@@ -1,0 +1,4511 @@
+
+  state.packs.push({
+    id: packId,
+    name: normalizedName,
+    versionId: normalizedVersionId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    packDir,
+    modsDir,
+    resourcepacksDir,
+    shaderpacksDir
+  });
+  state.activePackId = packId;
+  writePacksState(state);
+  syncOfficialLauncherProfiles();
+
+  const packModContext = {
+    type: 'pack',
+    name: normalizedName,
+    packId,
+    versionId: normalizedVersionId,
+    minecraftVersion: parseFabricVersionId(normalizedVersionId)?.minecraftVersion || normalizedVersionId,
+    gameDir: packDir,
+    modsDir,
+    resourcepacksDir,
+    shaderpacksDir,
+    stateFile: path.join(packDir, 'mods-state.json'),
+    libraryDir: path.join(packDir, 'mods-library')
+  };
+
+  let warning = '';
+  const usesFabric = isFabricVersionId(normalizedVersionId);
+  let message = usesFabric
+    ? `Profil ${normalizedName} wurde erstellt und die Pflichtmods wurden installiert.`
+    : `Profil ${normalizedName} wurde als Vanilla-Profil erstellt.`;
+
+  try {
+    const installWarnings = [];
+
+    for (const projectReference of isFabricVersionId(normalizedVersionId) ? DEFAULT_PACK_PROJECTS : []) {
+      const projectId = getModrinthProjectId(projectReference);
+      if (isManagedProjectHiddenForMinecraftVersion(projectId, packModContext.minecraftVersion)) {
+        continue;
+      }
+
+      const installResult = await installManagedProjectVersion(
+        projectReference,
+        packModContext.minecraftVersion,
+        {
+          visitedProjects: new Set(),
+          modContext: packModContext
+        }
+      );
+      installWarnings.push(...(installResult.warnings || []));
+    }
+
+    const syncResult = usesFabric
+      ? await syncManagedModsForVersion(normalizedVersionId, { modContext: packModContext })
+      : { warnings: [] };
+    warning = formatManagedModsWarning([...(installWarnings || []), ...(syncResult.warnings || [])]);
+    if (warning) {
+      message = `Profil ${normalizedName} wurde erstellt. Pflichtmods haben Hinweise: ${warning}`;
+    }
+  } catch (error) {
+    warning = `Pflichtmods konnten nicht automatisch installiert werden: ${error.message}`;
+    message = `Profil ${normalizedName} wurde erstellt. ${warning}`;
+  }
+
+  return {
+    success: true,
+    activePackId: packId,
+    packs: getPacksConfig().packs,
+    warning,
+    message
+  };
+}
+
+async function duplicatePack(packId) {
+  const sourceId = String(packId || '').trim();
+  const state = readPacksState();
+  const source = state.packs.find((entry) => entry.id === sourceId);
+  if (!source) return { success: false, error: 'Das Profil wurde nicht gefunden.' };
+
+  const existingNames = new Set(state.packs.map((entry) => String(entry.name || '').toLowerCase()));
+  let copyNumber = 1;
+  let copyName = `${source.name} Kopie`;
+  while (existingNames.has(copyName.toLowerCase())) copyName = `${source.name} Kopie ${++copyNumber}`;
+  const newId = createPackId(copyName, state.packs.map((entry) => entry.id));
+  const packDir = path.join(PACKS_DIR, sanitizePathSegment(newId));
+  fs.cpSync(source.packDir, packDir, { recursive: true, force: false, errorOnExist: true });
+  const copiedModsStatePath = path.join(packDir, 'mods-state.json');
+  if (fs.existsSync(copiedModsStatePath)) {
+    const rebasePaths = (value) => {
+      if (Array.isArray(value)) return value.map(rebasePaths);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, rebasePaths(entry)]));
+      }
+      if (typeof value === 'string' && getComparablePath(value).startsWith(`${getComparablePath(source.packDir)}${path.sep}`)) {
+        return path.join(packDir, path.relative(source.packDir, value));
+      }
+      return value;
+    };
+    try {
+      const copiedState = JSON.parse(fs.readFileSync(copiedModsStatePath, 'utf8'));
+      fs.writeFileSync(copiedModsStatePath, JSON.stringify(rebasePaths(copiedState), null, 2), 'utf8');
+    } catch (error) {
+      logger.warn('Could not rebase duplicated profile mod state', { sourceId, newId, error: serializeError(error) });
+    }
+  }
+  const now = new Date().toISOString();
+  const duplicate = {
+    ...source,
+    id: newId,
+    name: copyName,
+    packDir,
+    modsDir: path.join(packDir, 'mods'),
+    resourcepacksDir: path.join(packDir, 'resourcepacks'),
+    shaderpacksDir: path.join(packDir, 'shaderpacks'),
+    createdAt: now,
+    updatedAt: now
+  };
+  ensureProfileIngameSettingsFile(duplicate.modsDir);
+  state.packs.push(duplicate);
+  state.activePackId = newId;
+  writePacksState(state);
+  syncOfficialLauncherProfiles();
+  updateActiveModFolderWatchers();
+  return { success: true, activePackId: newId, packs: getPacksConfig().packs, message: `Profil ${copyName} wurde dupliziert.` };
+}
+
+function setActivePack(packId) {
+  const normalizedPackId = String(packId || '').trim();
+  const state = readPacksState();
+
+  if (!normalizedPackId) {
+    state.activePackId = '';
+    writePacksState(state);
+    syncOfficialLauncherProfiles();
+    return {
+      success: true,
+      activePackId: '',
+      packs: getPacksConfig().packs,
+      message: 'Launcher-Standard wurde aktiviert.'
+    };
+  }
+
+  const packExists = state.packs.some((pack) => pack.id === normalizedPackId);
+  if (!packExists) {
+    return {
+      success: false,
+      error: 'Das Profil wurde nicht gefunden.'
+    };
+  }
+
+  state.activePackId = normalizedPackId;
+  state.packs = state.packs.map((pack) => (
+    pack.id === normalizedPackId
+      ? { ...pack, updatedAt: new Date().toISOString() }
+      : pack
+  ));
+  writePacksState(state);
+  syncOfficialLauncherProfiles();
+
+  const activePack = getActivePack();
+  return {
+    success: true,
+    activePackId: normalizedPackId,
+    packs: getPacksConfig().packs,
+    message: `${activePack?.name || 'Profil'} wurde aktiviert.`
+  };
+}
+
+function deletePack(packId) {
+  const normalizedPackId = String(packId || '').trim();
+  if (!normalizedPackId) {
+    return {
+      success: false,
+      error: 'Kein Profil ausgewählt.'
+    };
+  }
+
+  const state = readPacksState();
+  const pack = state.packs.find((entry) => entry.id === normalizedPackId);
+  if (!pack) {
+    return {
+      success: false,
+      error: 'Das Profil wurde nicht gefunden.'
+    };
+  }
+
+  state.packs = state.packs.filter((entry) => entry.id !== normalizedPackId);
+  if (state.activePackId === normalizedPackId) {
+    state.activePackId = '';
+  }
+  writePacksState(state);
+  syncOfficialLauncherProfiles();
+
+  let cleanupPending = false;
+  if (isPathInsideDirectory(PACKS_DIR, pack.packDir) && fs.existsSync(pack.packDir)) {
+    cleanupPending = true;
+    fs.promises.rm(pack.packDir, { recursive: true, force: true }).catch((error) => {
+      logger.warn('Deleted profile directory cleanup will be retried later', {
+        packId: normalizedPackId,
+        packDir: pack.packDir,
+        error: serializeError(error)
+      });
+    });
+  }
+
+  return {
+    success: true,
+    activePackId: state.activePackId,
+    packs: getPacksConfig().packs,
+    cleanupPending,
+    message: `${pack.name} wurde gelöscht.`
+  };
+}
+
+function getAuthConfig() {
+  const microsoftClientId = getMicrosoftClientId();
+
+  return {
+    success: true,
+    microsoftClientId,
+    configured: false,
+    usesDefaultClientId: true,
+    forcedOfflineMode: FORCE_OFFLINE_MODE,
+    requiresManualToken: false,
+    allowOfficialLauncherFallback: ALLOW_OFFICIAL_LAUNCHER_FALLBACK,
+    configPath: LAUNCHER_CONFIG_FILE
+  };
+}
+
+function normalizePrimaryColor(primaryColor) {
+  const normalized = String(primaryColor || '').trim();
+  return /^#[0-9a-fA-F]{6}$/u.test(normalized) ? normalized.toLowerCase() : '';
+}
+
+function normalizeThemeMode(themeMode) {
+  const normalized = String(themeMode || '').trim().toLowerCase();
+  return normalized === 'rgb' ? 'rgb' : 'manual';
+}
+
+function normalizeAppearanceMode(appearanceMode) {
+  const normalized = String(appearanceMode || '').trim().toLowerCase();
+  return ['system', 'light', 'dark'].includes(normalized) ? normalized : 'system';
+}
+
+function normalizeBackgroundAnimation(backgroundAnimation) {
+  const normalized = String(backgroundAnimation || '').trim().toLowerCase();
+  const legacyMap = {
+    mountains: 'galaxy',
+    rain: 'grid',
+    stars: 'galaxy',
+    waves: 'silk',
+    lightning: 'grid'
+  };
+  const mappedValue = legacyMap[normalized] || normalized;
+  return ['default', 'aurora', 'grid', 'galaxy', 'silk', 'hyperspeed'].includes(mappedValue) ? mappedValue : 'default';
+}
+
+function getEffectiveAppearanceMode(appearanceMode) {
+  const normalized = normalizeAppearanceMode(appearanceMode);
+  if (normalized !== 'system') {
+    return normalized;
+  }
+
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+}
+
+function getThemeConfig() {
+  const config = readLauncherConfig();
+  const primaryColor = normalizePrimaryColor(config.primaryColor) || '#00d9ff';
+  const themeMode = normalizeThemeMode(config.themeMode);
+  const appearanceMode = normalizeAppearanceMode(config.appearanceMode);
+  const effectiveAppearanceMode = getEffectiveAppearanceMode(appearanceMode);
+  const backgroundAnimation = normalizeBackgroundAnimation(config.backgroundAnimation);
+
+  return {
+    success: true,
+    configured: Boolean(normalizePrimaryColor(config.primaryColor)),
+    primaryColor,
+    themeMode,
+    rgbMode: themeMode === 'rgb',
+    appearanceMode,
+    effectiveAppearanceMode,
+    lightMode: effectiveAppearanceMode === 'light',
+    backgroundAnimation
+  };
+}
+
+function setPrimaryColor(primaryColor) {
+  const normalizedColor = normalizePrimaryColor(primaryColor);
+  if (!normalizedColor) {
+    return {
+      success: false,
+      error: 'Die Farbe muss als Hexwert wie #00d9ff gespeichert werden.'
+    };
+  }
+
+  writeLauncherConfig({ primaryColor: normalizedColor });
+
+  return {
+    success: true,
+    primaryColor: normalizedColor
+  };
+}
+
+function setThemeMode(themeMode) {
+  const normalizedMode = normalizeThemeMode(themeMode);
+  writeLauncherConfig({ themeMode: normalizedMode });
+
+  return {
+    success: true,
+    themeMode: normalizedMode,
+    rgbMode: normalizedMode === 'rgb'
+  };
+}
+
+function setAppearanceMode(appearanceMode) {
+  const normalizedMode = normalizeAppearanceMode(appearanceMode);
+  writeLauncherConfig({ appearanceMode: normalizedMode });
+  const effectiveAppearanceMode = getEffectiveAppearanceMode(normalizedMode);
+
+  return {
+    success: true,
+    appearanceMode: normalizedMode,
+    effectiveAppearanceMode,
+    lightMode: effectiveAppearanceMode === 'light'
+  };
+}
+
+function setBackgroundAnimation(backgroundAnimation) {
+  const normalizedAnimation = normalizeBackgroundAnimation(backgroundAnimation);
+  writeLauncherConfig({ backgroundAnimation: normalizedAnimation });
+
+  return {
+    success: true,
+    backgroundAnimation: normalizedAnimation
+  };
+}
+
+async function writeLiveThemeState(primaryColor, appearanceMode) {
+  const normalizedColor = normalizePrimaryColor(primaryColor);
+  if (!normalizedColor) {
+    throw new Error('Die Live-Farbe muss als Hexwert wie #00d9ff gespeichert werden.');
+  }
+  const normalizedAppearanceMode = normalizeAppearanceMode(appearanceMode);
+  const effectiveAppearanceMode = getEffectiveAppearanceMode(normalizedAppearanceMode);
+
+  await fs.promises.mkdir(CONFIG_DIR, { recursive: true });
+  await fs.promises.writeFile(LAUNCHER_LIVE_THEME_FILE, `${JSON.stringify({
+    primaryColor: normalizedColor,
+    appearanceMode: effectiveAppearanceMode,
+    appearancePreference: normalizedAppearanceMode,
+    lightMode: effectiveAppearanceMode === 'light',
+    updatedAt: new Date().toISOString()
+  })}\n`, 'utf8');
+}
+
+async function setLiveThemeColor(primaryColor, appearanceMode) {
+  const normalizedColor = normalizePrimaryColor(primaryColor);
+  if (!normalizedColor) {
+    return {
+      success: false,
+      error: 'Die Live-Farbe muss als Hexwert wie #00d9ff gespeichert werden.'
+    };
+  }
+
+  const normalizedAppearanceMode = normalizeAppearanceMode(appearanceMode);
+  const effectiveAppearanceMode = getEffectiveAppearanceMode(normalizedAppearanceMode);
+  try {
+    await writeLiveThemeState(normalizedColor, effectiveAppearanceMode);
+  } catch (error) {
+    return {
+      success: false,
+      error: `Live-Farbe konnte nicht gespeichert werden: ${error.message || 'Unbekannter Fehler.'}`
+    };
+  }
+  return {
+    success: true,
+    primaryColor: normalizedColor,
+    appearanceMode: effectiveAppearanceMode,
+    appearancePreference: normalizedAppearanceMode,
+    liveThemePath: LAUNCHER_LIVE_THEME_FILE
+  };
+}
+
+function setMicrosoftClientId(clientId) {
+  // Keep this IPC for backwards compatibility, but custom IDs are no longer required.
+  if (String(clientId || '').trim()) {
+    return {
+      success: false,
+      error: 'Eigene Client-IDs werden nicht mehr verwendet. Der Launcher nutzt automatisch die integrierte Xbox/Microsoft-Client-ID.'
+    };
+  }
+
+  writeLauncherConfig({ microsoftClientId: '' });
+  return getAuthConfig();
+}
+
+async function openLauncherConfig() {
+  const openError = await shell.openPath(LAUNCHER_CONFIG_FILE);
+  if (openError) {
+    return {
+      success: false,
+      error: openError,
+      configPath: LAUNCHER_CONFIG_FILE
+    };
+  }
+
+  return {
+    success: true,
+    configPath: LAUNCHER_CONFIG_FILE
+  };
+}
+
+async function chooseMinecraftPath() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    defaultPath: fs.existsSync(DEFAULT_MINECRAFT_DIR) ? DEFAULT_MINECRAFT_DIR : ROAMING_APPDATA_DIR
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, canceled: true, minecraftPath: DEFAULT_MINECRAFT_DIR };
+  }
+
+  const selectedPath = normalizeConfiguredMinecraftDirectory(result.filePaths[0]);
+  if (!selectedPath) {
+    return { success: false, error: 'Ungültiger Minecraft-Pfad.' };
+  }
+
+  writeLauncherConfig({ minecraftPath: selectedPath });
+  setActiveMinecraftDirectory(selectedPath);
+  ensureDir(DEFAULT_MINECRAFT_DIR);
+  syncOfficialLauncherProfiles();
+
+  return { success: true, minecraftPath: DEFAULT_MINECRAFT_DIR };
+}
+
+async function chooseStandardModsPath() {
+  const currentModsPath = getConfiguredStandardModsDir();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: fs.existsSync(currentModsPath) ? currentModsPath : DEFAULT_MINECRAFT_DIR
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return {
+      ...getStandardModsPathInfo(),
+      canceled: true
+    };
+  }
+
+  const selectedPath = normalizeStandardModsDirectory(result.filePaths[0]);
+  if (!selectedPath) {
+    return { success: false, error: 'Ungültiger Mods-Ordner.' };
+  }
+
+  ensureDir(selectedPath);
+  writeLauncherConfig({ standardModsPath: selectedPath });
+  syncOfficialLauncherProfiles();
+  return getStandardModsPathInfo();
+}
+
+function resetStandardModsPath() {
+  writeLauncherConfig({ standardModsPath: '' });
+  ensureDir(getNormalMinecraftModsDir());
+  syncOfficialLauncherProfiles();
+  return getStandardModsPathInfo();
+}
+
+function setMinecraftFolderName(folderName) {
+  const minecraftFolderName = normalizeMinecraftFolderName(folderName);
+  if (!minecraftFolderName) {
+    return { success: false, error: 'Ungültiger Ordnername. Bitte nur einen Namen ohne Pfad-Zeichen eingeben.' };
+  }
+
+  writeLauncherConfig({
+    minecraftFolderName,
+    minecraftPath: ''
+  });
+  setActiveMinecraftDirectory(path.join(ROAMING_APPDATA_DIR, minecraftFolderName));
+  ensureDir(DEFAULT_MINECRAFT_DIR);
+  syncOfficialLauncherProfiles();
+
+  return { success: true, minecraftPath: DEFAULT_MINECRAFT_DIR, minecraftFolderName };
+}
+
+function setMinecraftWindowsUserName(windowsUserName) {
+  const minecraftWindowsUserName = normalizeWindowsUserName(windowsUserName);
+  if (!minecraftWindowsUserName) {
+    return { success: false, error: 'Ungültiger Windows-Name. Bitte nur den Benutzernamen ohne Pfad-Zeichen eingeben.' };
+  }
+
+  writeLauncherConfig({
+    minecraftWindowsUserName,
+    minecraftFolderName: DEFAULT_MINECRAFT_FOLDER_NAME,
+    minecraftPath: ''
+  });
+  setActiveMinecraftDirectory(path.join(WINDOWS_USERS_DIR, minecraftWindowsUserName, 'AppData', 'Roaming', DEFAULT_MINECRAFT_FOLDER_NAME));
+  ensureDir(DEFAULT_MINECRAFT_DIR);
+  syncOfficialLauncherProfiles();
+
+  return { success: true, minecraftPath: DEFAULT_MINECRAFT_DIR, minecraftWindowsUserName };
+}
+
+function readSkinSelectionMeta() {
+  const config = readLauncherConfig();
+  return {
+    sourcePath: String(config.skinSourcePath || ''),
+    originalFileName: String(config.skinOriginalFileName || ''),
+    selectedAt: String(config.skinSelectedAt || '')
+  };
+}
+
+function writeSkinSelectionMeta(meta = {}) {
+  return writeLauncherConfig({
+    skinSourcePath: String(meta.sourcePath || ''),
+    skinOriginalFileName: String(meta.originalFileName || ''),
+    skinSelectedAt: String(meta.selectedAt || '')
+  });
+}
+
+function readPngMetadataFromBuffer(fileBuffer) {
+  const pngSignature = '89504e470d0a1a0a';
+
+  if (fileBuffer.length < 24 || fileBuffer.subarray(0, 8).toString('hex') !== pngSignature) {
+    throw new Error('Die Datei ist keine gültige PNG-Datei.');
+  }
+
+  return {
+    width: fileBuffer.readUInt32BE(16),
+    height: fileBuffer.readUInt32BE(20),
+    fileSize: fileBuffer.length
+  };
+}
+
+function readPngMetadata(filePath) {
+  return readPngMetadataFromBuffer(fs.readFileSync(filePath));
+}
+
+function readPngChunks(fileBuffer) {
+  const chunks = [];
+  let offset = 8;
+
+  while (offset + 12 <= fileBuffer.length) {
+    const length = fileBuffer.readUInt32BE(offset);
+    const type = fileBuffer.subarray(offset + 4, offset + 8).toString('ascii');
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > fileBuffer.length) {
+      break;
+    }
+
+    chunks.push({
+      type,
+      data: fileBuffer.subarray(dataStart, dataEnd)
+    });
+    offset = dataEnd + 4;
+
+    if (type === 'IEND') {
+      break;
+    }
+  }
+
+  return chunks;
+}
+
+function getPngChannelCount(colorType) {
+  if (colorType === 0 || colorType === 3) {
+    return 1;
+  }
+  if (colorType === 2) {
+    return 3;
+  }
+  if (colorType === 4) {
+    return 2;
+  }
+  if (colorType === 6) {
+    return 4;
+  }
+  return 0;
+}
+
+function paethPredictor(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const upDistance = Math.abs(estimate - up);
+  const upLeftDistance = Math.abs(estimate - upLeft);
+
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) {
+    return left;
+  }
+  return upDistance <= upLeftDistance ? up : upLeft;
+}
+
+function decodePngImage(filePath) {
+  const fileBuffer = fs.readFileSync(filePath);
+  const metadata = readPngMetadata(filePath);
+  const chunks = readPngChunks(fileBuffer);
+  const ihdr = chunks.find((chunk) => chunk.type === 'IHDR')?.data;
+  if (!ihdr || ihdr.length < 13) {
+    return null;
+  }
+
+  const bitDepth = ihdr[8];
+  const colorType = ihdr[9];
+  const interlaceMethod = ihdr[12];
+  const channels = getPngChannelCount(colorType);
+  if (bitDepth !== 8 || !channels || interlaceMethod !== 0) {
+    return null;
+  }
+
+  const idatChunks = chunks.filter((chunk) => chunk.type === 'IDAT').map((chunk) => chunk.data);
+  if (!idatChunks.length) {
+    return null;
+  }
+
+  const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
+  const rowLength = metadata.width * channels;
+  const bytesPerPixel = Math.max(1, channels);
+  const pixels = Buffer.alloc(rowLength * metadata.height);
+  let sourceOffset = 0;
+  let previousRow = Buffer.alloc(rowLength);
+
+  for (let y = 0; y < metadata.height; y += 1) {
+    if (sourceOffset >= inflated.length) {
+      return null;
+    }
+
+    const filterType = inflated[sourceOffset];
+    sourceOffset += 1;
+    const row = Buffer.alloc(rowLength);
+
+    for (let x = 0; x < rowLength; x += 1) {
+      if (sourceOffset >= inflated.length) {
+        return null;
+      }
+
+      const rawValue = inflated[sourceOffset];
+      sourceOffset += 1;
+      const left = x >= bytesPerPixel ? row[x - bytesPerPixel] : 0;
+      const up = previousRow[x] || 0;
+      const upLeft = x >= bytesPerPixel ? previousRow[x - bytesPerPixel] || 0 : 0;
+      let value = rawValue;
+
+      if (filterType === 1) {
+        value += left;
+      } else if (filterType === 2) {
+        value += up;
+      } else if (filterType === 3) {
+        value += Math.floor((left + up) / 2);
+      } else if (filterType === 4) {
+        value += paethPredictor(left, up, upLeft);
+      } else if (filterType !== 0) {
+        return null;
+      }
+
+      row[x] = value & 0xff;
+    }
+
+    row.copy(pixels, y * rowLength);
+    previousRow = row;
+  }
+
+  const paletteAlpha = Buffer.alloc(256, 255);
+  const transparency = chunks.find((chunk) => chunk.type === 'tRNS')?.data || null;
+  if (colorType === 3 && transparency) {
+    transparency.copy(paletteAlpha, 0, 0, Math.min(transparency.length, paletteAlpha.length));
+  }
+
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    colorType,
+    channels,
+    rowLength,
+    pixels,
+    transparency,
+    paletteAlpha
+  };
+}
+
+function getDecodedPngAlpha(decodedPng, x, y) {
+  if (!decodedPng || x < 0 || y < 0 || x >= decodedPng.width || y >= decodedPng.height) {
+    return 255;
+  }
+
+  const offset = (y * decodedPng.width + x) * decodedPng.channels;
+  if (decodedPng.colorType === 6) {
+    return decodedPng.pixels[offset + 3];
+  }
+  if (decodedPng.colorType === 4) {
+    return decodedPng.pixels[offset + 1];
+  }
+  if (decodedPng.colorType === 3) {
+    return decodedPng.paletteAlpha[decodedPng.pixels[offset]] ?? 255;
+  }
+
+  return 255;
+}
+
+function getTransparentPixelRatio(decodedPng, region) {
+  let transparentPixels = 0;
+  let totalPixels = 0;
+
+  for (let y = region.y; y < region.y + region.height; y += 1) {
+    for (let x = region.x; x < region.x + region.width; x += 1) {
+      totalPixels += 1;
+      if (getDecodedPngAlpha(decodedPng, x, y) < 16) {
+        transparentPixels += 1;
+      }
+    }
+  }
+
+  return totalPixels ? transparentPixels / totalPixels : 0;
+}
+
+function detectSkinVariantFromPixels(filePath, skinInfo) {
+  if (skinInfo?.height !== 64) {
+    return skinInfo?.height === 32 ? 'classic' : '';
+  }
+
+  try {
+    const decodedPng = decodePngImage(filePath);
+    if (!decodedPng) {
+      return '';
+    }
+
+    const slimUnusedRegions = [
+      { x: 54, y: 16, width: 2, height: 16 },
+      { x: 46, y: 48, width: 2, height: 16 }
+    ];
+    const usedArmRegions = [
+      { x: 52, y: 20, width: 2, height: 12 },
+      { x: 44, y: 52, width: 2, height: 12 }
+    ];
+    const unusedTransparent = slimUnusedRegions
+      .map((region) => getTransparentPixelRatio(decodedPng, region))
+      .filter((ratio) => ratio >= 0.85).length;
+    const usedTransparent = usedArmRegions
+      .map((region) => getTransparentPixelRatio(decodedPng, region))
+      .filter((ratio) => ratio >= 0.85).length;
+
+    if (unusedTransparent >= 1 && usedTransparent === 0) {
+      return 'slim';
+    }
+  } catch (_error) {
+    return '';
+  }
+
+  return '';
+}
+
+function isSupportedMinecraftSkinSize(width, height) {
+  return width === 64 && (height === 64 || height === 32);
+}
+
+function createSkinPreviewDataUrl(filePath) {
+  return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
+}
+
+function sanitizeSkinVariant(variant) {
+  return String(variant || '').trim().toLowerCase() === 'slim' ? 'slim' : 'classic';
+}
+
+function sanitizeSkinName(name) {
+  const compact = String(name || '')
+    .replace(/\.[^.]+$/u, '')
+    .replace(/[_-]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+  return compact.slice(0, 48) || 'Skin';
+}
+
+function inferSkinVariant(fileName, skinInfo) {
+  if (skinInfo?.height === 32) {
+    return 'classic';
+  }
+
+  const pixelVariant = skinInfo?.sourcePath ? detectSkinVariantFromPixels(skinInfo.sourcePath, skinInfo) : '';
+  if (pixelVariant) {
+    return pixelVariant;
+  }
+
+  const normalizedName = String(fileName || '').toLowerCase();
+  return normalizedName.includes('slim') || normalizedName.includes('alex') ? 'slim' : 'classic';
+}
+
+function detectSkinVariant(filePath, skinInfo, fileName) {
+  if (skinInfo?.height === 32) {
+    return 'classic';
+  }
+
+  return detectSkinVariantFromPixels(filePath, skinInfo)
+    || inferSkinVariant(fileName, { ...skinInfo, sourcePath: '' });
+}
+
+function createSkinId() {
+  return `skin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getSkinLibraryFilePath(fileName) {
+  return path.join(SKIN_LIBRARY_DIR, String(fileName || '').trim());
+}
+
+function normalizeSavedSkinEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const id = String(entry.id || '').trim();
+  const fileName = String(entry.fileName || '').trim();
+  if (!id || !fileName) {
+    return null;
+  }
+
+  return {
+    id,
+    name: sanitizeSkinName(entry.name || fileName),
+    fileName,
+    variant: sanitizeSkinVariant(entry.variant),
+    sourcePath: String(entry.sourcePath || ''),
+    createdAt: String(entry.createdAt || entry.selectedAt || new Date().toISOString()),
+    updatedAt: String(entry.updatedAt || entry.selectedAt || entry.createdAt || new Date().toISOString()),
+    width: Number(entry.width) || 64,
+    height: Number(entry.height) || 64,
+    fileSize: Number(entry.fileSize) || 0
+  };
+}
+
+function persistSkinLibraryState(skins, activeSkinId) {
+  writeLauncherConfig({
+    savedSkins: skins,
+    activeSkinId: String(activeSkinId || '').trim()
+  });
+}
+
+function migrateLegacySelectedSkin() {
+  if (!fs.existsSync(SELECTED_SKIN_FILE)) {
+    return null;
+  }
+
+  ensureDir(SKIN_LIBRARY_DIR);
+
+  const legacyMeta = readSkinSelectionMeta();
+  const skinInfo = readPngMetadata(SELECTED_SKIN_FILE);
+  const id = createSkinId();
+  const fileName = `${id}.png`;
+  const destinationPath = getSkinLibraryFilePath(fileName);
+
+  fs.copyFileSync(SELECTED_SKIN_FILE, destinationPath);
+  fs.unlinkSync(SELECTED_SKIN_FILE);
+
+  const savedAt = legacyMeta.selectedAt || new Date().toISOString();
+  const migratedSkin = {
+    id,
+    name: sanitizeSkinName(legacyMeta.originalFileName || 'Gespeicherter Skin'),
+    fileName,
+    variant: inferSkinVariant(legacyMeta.originalFileName || fileName, skinInfo),
+    sourcePath: legacyMeta.sourcePath,
+    createdAt: savedAt,
+    updatedAt: savedAt,
+    width: skinInfo.width,
+    height: skinInfo.height,
+    fileSize: skinInfo.fileSize
+  };
+
+  writeSkinSelectionMeta({
+    sourcePath: '',
+    originalFileName: '',
+    selectedAt: ''
+  });
+
+  persistSkinLibraryState([migratedSkin], migratedSkin.id);
+
+  return {
+    skins: [migratedSkin],
+    activeSkinId: migratedSkin.id,
+    activeSkin: migratedSkin
+  };
+}
+
+function readSkinLibraryState() {
+  ensureDir(SKINS_DIR);
+  ensureDir(SKIN_LIBRARY_DIR);
+
+  const config = readLauncherConfig();
+  let skins = Array.isArray(config.savedSkins)
+    ? config.savedSkins.map((entry) => normalizeSavedSkinEntry(entry)).filter(Boolean)
+    : [];
+  let activeSkinId = String(config.activeSkinId || '').trim();
+
+  if (!skins.length) {
+    const migratedState = migrateLegacySelectedSkin();
+    if (migratedState) {
+      return migratedState;
+    }
+  }
+
+  let changed = false;
+  skins = skins.filter((entry) => {
+    const exists = fs.existsSync(getSkinLibraryFilePath(entry.fileName));
+    if (!exists) {
+      changed = true;
+    }
+    return exists;
+  });
+
+  if (activeSkinId && !skins.some((entry) => entry.id === activeSkinId)) {
+    activeSkinId = '';
+    changed = true;
+  }
+
+  if (!activeSkinId && skins.length) {
+    activeSkinId = skins[0].id;
+    changed = true;
+  }
+
+  if (changed) {
+    persistSkinLibraryState(skins, activeSkinId);
+  }
+
+  return {
+    skins,
+    activeSkinId,
+    activeSkin: skins.find((entry) => entry.id === activeSkinId) || null
+  };
+}
+
+function serializeSavedSkin(entry, activeSkinId) {
+  const filePath = getSkinLibraryFilePath(entry.fileName);
+  const metadata = readPngMetadata(filePath);
+
+  return {
+    ...entry,
+    width: metadata.width,
+    height: metadata.height,
+    fileSize: metadata.fileSize,
+    skinPath: filePath,
+    previewDataUrl: createSkinPreviewDataUrl(filePath),
+    active: entry.id === activeSkinId
+  };
+}
+
+function getSkinConfig() {
+  const skinState = readSkinLibraryState();
+  let skins;
+  try {
+    skins = skinState.skins.map((entry) => serializeSavedSkin(entry, skinState.activeSkinId));
+  } catch (error) {
+    return {
+      success: true,
+      configured: false,
+      skins: [],
+      activeSkinId: '',
+      activeSkin: null,
+      warning: `Gespeicherter Skin konnte nicht gelesen werden: ${error.message}`
+    };
+  }
+
+  const activeSkin = skins.find((entry) => entry.id === skinState.activeSkinId) || null;
+
+  return {
+    success: true,
+    configured: Boolean(activeSkin),
+    skins,
+    activeSkinId: skinState.activeSkinId,
+    activeSkin,
+    skinCount: skins.length
+  };
+}
+
+function readCapeState() {
+  return ROBUSTNESS.readJsonFile(CAPES_STATE_FILE, { activeCapeId: '', activeCapes: {}, customCapes: [] }, {
+    label: 'capes-state',
+    normalize: (raw) => ({
+      activeCapeId: String(raw?.activeCapeId || '').trim(),
+      activeCapes: Object.fromEntries(Object.entries(raw?.activeCapes && typeof raw.activeCapes === 'object' ? raw.activeCapes : {})
+        .map(([uuid, capeId]) => [normalizeMinecraftUuid(uuid), String(capeId || '').trim()])
+        .filter(([uuid, capeId]) => uuid && capeId)),
+      customCapes: (Array.isArray(raw?.customCapes) ? raw.customCapes : []).map((cape) => ({
+        id: String(cape?.id || '').trim(), name: String(cape?.name || 'Custom Cape').trim().slice(0, 40),
+        fileName: path.basename(String(cape?.fileName || '')), createdAt: String(cape?.createdAt || ''),
+        updatedAt: String(cape?.updatedAt || cape?.createdAt || ''), ownerUuid: normalizeMinecraftUuid(cape?.ownerUuid || ''),
+        useAsElytra: Boolean(cape?.useAsElytra)
+      })).filter((cape) => cape.id && cape.fileName)
+    })
+  });
+}
+
+function writeCapeState(state) {
+  ensureDir(CAPES_DIR);
+  ROBUSTNESS.writeJsonFileAtomic(CAPES_STATE_FILE, state, { label: 'capes-state', metadata: { operation: 'writeCapeState' } });
+  const accountUuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  const activeCapeId = String(state.activeCapes?.[accountUuid] || state.activeCapeId || '').trim();
+  const custom = state.customCapes.find((cape) => cape.id === activeCapeId && (!cape.ownerUuid || cape.ownerUuid === accountUuid));
+  const officialPath = activeCapeId ? getOfficialCapeCachePath(activeCapeId) : '';
+  const capePath = custom ? path.join(CAPES_DIR, custom.fileName) : officialPath;
+  const availablePath = activeCapeId && fs.existsSync(capePath) ? capePath : '';
+  const useAsElytra = Boolean(custom?.useAsElytra);
+  fs.writeFileSync(ACTIVE_CAPE_DESCRIPTOR_FILE, availablePath ? `${activeCapeId}\n${availablePath}\n${accountUuid}\n${useAsElytra}\n` : '', 'utf8');
+  return state;
+}
+
+async function cosmeticsApiRequest(pathname, options = {}) {
+  if (!COSMETICS_API_URL) return { success: false, configured: false, error: 'Cosmetics API is not configured.' };
+  let user = getCurrentUser();
+  if (!user?.accessToken || user.accessToken === 'offline-token') {
+    return { success: false, configured: true, error: 'Online cosmetics require a Microsoft Minecraft account.' };
+  }
+  try {
+    const send = (sessionToken) => fetchImpl(`${COSMETICS_API_URL}${pathname}`, {
+        ...options,
+        headers: { 'X-XClient-Session': sessionToken, ...(options.headers || {}) },
+        timeout: 10000
+      });
+    if (!cosmeticsBackendSessionToken) cosmeticsBackendSessionToken = await authenticateCosmeticsSession(user);
+    let response = await send(cosmeticsBackendSessionToken);
+    if (response.status === 401) {
+      cosmeticsBackendSessionToken = '';
+      user = getCurrentUser();
+      cosmeticsBackendSessionToken = await authenticateCosmeticsSession(user);
+      response = await send(cosmeticsBackendSessionToken);
+    }
+    const body = await response.json().catch(() => ({}));
+    return response.ok ? { success: true, configured: true, ...body } : {
+      success: false, configured: true, error: body?.error || `Cosmetics API rejected the request (${response.status}).`
+    };
+  } catch (error) {
+    return { success: false, configured: true, error: `Cosmetics API is unavailable: ${error.message}` };
+  }
+}
+
+async function authenticateCosmeticsSession(initialUser) {
+  let user = initialUser;
+  const authenticate = (account) => fetchImpl(`${COSMETICS_API_URL}/v1/auth/token`, {
+    method: 'POST', headers: { Authorization: `Bearer ${account.accessToken}` }, timeout: 10000
+  });
+  let completeResponse = await authenticate(user);
+  if (completeResponse.status === 401 && String(user.loginSource || '').toLowerCase() === 'official-sisu') {
+    user = await refreshOfficialMinecraftSession(user);
+    completeResponse = await authenticate(user);
+  }
+  const complete = await completeResponse.json().catch(() => ({}));
+  if (!completeResponse.ok || !complete.sessionToken) throw new Error(complete.error || `XClient authentication failed (${completeResponse.status}).`);
+  return String(complete.sessionToken);
+}
+
+async function getCapeConfig() {
+  const state = readCapeState();
+  const accountUuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  const custom = state.customCapes.filter((cape) => !cape.ownerUuid || cape.ownerUuid === accountUuid).map((cape) => {
+    const capePath = path.join(CAPES_DIR, cape.fileName);
+    return { ...cape, type: 'custom', owned: true, previewDataUrl: fs.existsSync(capePath) ? `data:image/png;base64,${fs.readFileSync(capePath).toString('base64')}` : '' };
+  }).filter((cape) => cape.previewDataUrl);
+  const official = await getOwnedMinecraftCapes();
+  const activeOfficial = official.find((cape) => cape.state === 'ACTIVE');
+  if (activeOfficial) {
+    try {
+      await cacheOfficialMinecraftCape(activeOfficial);
+    } catch (error) {
+      logger.warn('Could not cache active official Minecraft cape', { message: error.message });
+    }
+  }
+  const selectedCapeId = String(state.activeCapes?.[accountUuid] || state.activeCapeId || '').trim();
+  const activeCapeId = custom.some((cape) => cape.id === selectedCapeId)
+    ? selectedCapeId
+    : (activeOfficial?.id || '');
+  if (activeCapeId !== selectedCapeId || (accountUuid && state.activeCapeId)) {
+    state.activeCapes = { ...(state.activeCapes || {}) };
+    if (accountUuid && activeCapeId) state.activeCapes[accountUuid] = activeCapeId;
+    state.activeCapeId = '';
+    writeCapeState(state);
+  }
+  return {
+    success: true,
+    activeCapeId,
+    custom,
+    official,
+    canCreateCustomCapes: true
+  };
+}
+
+async function getOwnedMinecraftCapes() {
+  let user = getCurrentUser();
+  if (!user?.accessToken || user.accessToken === 'offline-token') return [];
+  try {
+    const loadProfile = (accessToken) => fetchImpl('https://api.minecraftservices.com/minecraft/profile', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json'
+      }
+    });
+    let response = await loadProfile(user.accessToken);
+    if (response.status === 401 && String(user.loginSource || '').toLowerCase() === 'official-sisu') {
+      user = await refreshOfficialMinecraftSession(user);
+      response = await loadProfile(user.accessToken);
+    }
+    if (!response.ok) {
+      logger.warn('Could not load owned Minecraft capes', { status: response.status });
+      return [];
+    }
+    const profile = await response.json();
+    return (Array.isArray(profile?.capes) ? profile.capes : []).map((cape) => ({
+      id: String(cape?.id || '').trim(),
+      name: String(cape?.alias || cape?.name || 'Minecraft Cape').trim().slice(0, 40),
+      url: normalizeMinecraftTextureUrl(cape?.url),
+      state: String(cape?.state || '').toUpperCase(),
+      type: 'official'
+    })).filter((cape) => cape.id && cape.url);
+  } catch (error) {
+    logger.warn('Could not load owned Minecraft capes', { message: error.message });
+    return [];
+  }
+}
+
+async function setOfficialMinecraftCape(capeId) {
+  let user = getCurrentUser();
+  if (!user?.accessToken || user.accessToken === 'offline-token') {
+    return { success: false, error: 'Official capes require a signed-in Microsoft account.' };
+  }
+  const id = String(capeId || '').trim();
+  const url = 'https://api.minecraftservices.com/minecraft/profile/capes/active';
+  try {
+    const updateCape = (accessToken) => fetchImpl(url, {
+        method: id ? 'PUT' : 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          ...(id ? { 'Content-Type': 'application/json' } : {})
+        },
+        ...(id ? { body: JSON.stringify({ capeId: id }) } : {})
+      });
+    let response = await updateCape(user.accessToken);
+    if (response.status === 401 && String(user.loginSource || '').toLowerCase() === 'official-sisu') {
+      user = await refreshOfficialMinecraftSession(user);
+      response = await updateCape(user.accessToken);
+    }
+    if (!response.ok) return { success: false, error: `Minecraft rejected the cape change (${response.status}).` };
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `The Minecraft cape could not be changed: ${error.message}` };
+  }
+}
+
+function getOfficialCapeCachePath(capeId) {
+  const key = crypto.createHash('sha256').update(String(capeId || '')).digest('hex').slice(0, 24);
+  return path.join(CAPES_DIR, `official-${key}.png`);
+}
+
+async function cacheOfficialMinecraftCape(cape) {
+  const capePath = getOfficialCapeCachePath(cape?.id);
+  if (fs.existsSync(capePath)) return capePath;
+  const textureUrl = normalizeMinecraftTextureUrl(cape?.url);
+  if (!textureUrl) throw new Error('The official cape texture is invalid.');
+  const response = await fetchImpl(textureUrl);
+  if (!response.ok) throw new Error(`The cape texture could not be downloaded (${response.status}).`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const metadata = readPngMetadataFromBuffer(buffer);
+  if (!metadata.width || !metadata.height) throw new Error('The cape texture is not a valid PNG file.');
+  ensureDir(CAPES_DIR);
+  fs.writeFileSync(capePath, buffer);
+  return capePath;
+}
+
+async function validateAndSaveCustomCape(dataUrl, name, useAsElytra = false, existingCapeId = '') {
+  const match = String(dataUrl || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/u);
+  if (!match) return { success: false, error: 'The cape is not a valid PNG file.' };
+  const buffer = Buffer.from(match[1], 'base64');
+  const metadata = readPngMetadataFromBuffer(buffer);
+  if (metadata.width !== 64 || metadata.height !== 32) return { success: false, error: 'Custom capes must be exactly 64 × 32 pixels.' };
+  const state = readCapeState();
+  const capeName = String(name || '').trim().slice(0, 40);
+  if (!capeName) return { success: false, error: 'Please enter a name for the cape.' };
+  const ownerUuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  const now = new Date().toISOString();
+  const requestedId = String(existingCapeId || '').trim();
+  const existing = requestedId
+    ? state.customCapes.find((cape) => cape.id === requestedId && (!cape.ownerUuid || cape.ownerUuid === ownerUuid))
+    : null;
+  if (requestedId && !existing) return { success: false, error: 'Custom cape not found or cannot be edited.' };
+  ensureDir(CAPES_DIR);
+  if (existing) {
+    const capePath = path.join(CAPES_DIR, existing.fileName);
+    fs.writeFileSync(capePath, buffer);
+    existing.name = capeName;
+    existing.updatedAt = now;
+    existing.useAsElytra = Boolean(useAsElytra);
+    state.activeCapes = { ...(state.activeCapes || {}) };
+    if (ownerUuid) state.activeCapes[ownerUuid] = existing.id;
+    state.activeCapeId = '';
+    writeCapeState(state);
+    const cloud = await syncCustomCapeOnline(buffer, capeName);
+    return { success: true, id: existing.id, updated: true, activated: true, cloudSynced: cloud.success, warning: cloud.success ? '' : cloud.error };
+  }
+  const id = `custom-${crypto.randomUUID()}`;
+  const fileName = `${id}.png`;
+  const capePath = path.join(CAPES_DIR, fileName);
+  fs.writeFileSync(capePath, buffer);
+  state.customCapes.push({ id, name: capeName, fileName, createdAt: now, updatedAt: now, ownerUuid, useAsElytra: Boolean(useAsElytra) });
+  state.activeCapes = { ...(state.activeCapes || {}) };
+  if (ownerUuid) state.activeCapes[ownerUuid] = id;
+  state.activeCapeId = '';
+  writeCapeState(state);
+  const cloud = await syncCustomCapeOnline(buffer, capeName);
+  return { success: true, id, activated: true, cloudSynced: cloud.success, warning: cloud.success ? '' : cloud.error };
+}
+
+async function syncCustomCapeOnline(buffer, name = '') {
+  const capeType = /elite[\s_-]*ra/iu.test(String(name || '')) ? 'elite-ra' : 'xclient';
+  return cosmeticsApiRequest('/v1/me/cape', { method: 'PUT', headers: { 'Content-Type': 'image/png', 'X-Cape-Type': capeType }, body: buffer });
+}
+
+async function clearCustomCapeOnline() {
+  return cosmeticsApiRequest('/v1/me/cape', { method: 'DELETE' });
+}
+
+async function setActiveCape(capeId) {
+  const id = String(capeId || '').trim();
+  const state = readCapeState();
+  const accountUuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  if (!accountUuid) return { success: false, error: 'A Minecraft account is required to equip a cape.' };
+  state.activeCapes = { ...(state.activeCapes || {}) };
+  if (!id) {
+    const officialResult = await setOfficialMinecraftCape('');
+    if (!officialResult.success && getCurrentUser()?.accessToken && getCurrentUser()?.accessToken !== 'offline-token') return officialResult;
+    delete state.activeCapes[accountUuid];
+    state.activeCapeId = '';
+    writeCapeState(state);
+    const cloud = await clearCustomCapeOnline();
+    return { success: true, cloudSynced: cloud.success, warning: cloud.success ? '' : cloud.error };
+  }
+  const custom = state.customCapes.find((cape) => cape.id === id && (!cape.ownerUuid || cape.ownerUuid === accountUuid));
+  if (custom) {
+    await setOfficialMinecraftCape('');
+    state.activeCapes[accountUuid] = id;
+    state.activeCapeId = '';
+    writeCapeState(state);
+    const capePath = path.join(CAPES_DIR, custom.fileName);
+    const cloud = fs.existsSync(capePath) ? await syncCustomCapeOnline(fs.readFileSync(capePath), custom.name) : { success: false, error: 'Cape file is missing.' };
+    return { success: true, cloudSynced: cloud.success, warning: cloud.success ? '' : cloud.error };
+  }
+  const official = (await getOwnedMinecraftCapes()).find((cape) => cape.id === id);
+  if (official) {
+    try {
+      await cacheOfficialMinecraftCape(official);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+    const result = await setOfficialMinecraftCape(id);
+    if (!result.success) return result;
+    state.activeCapes[accountUuid] = id;
+    state.activeCapeId = '';
+    writeCapeState(state);
+    return { success: true };
+  }
+  return { success: false, error: 'Cape not found.' };
+}
+
+async function deleteCustomCape(capeId) {
+  const id = String(capeId || '').trim();
+  const state = readCapeState();
+  const accountUuid = normalizeMinecraftUuid(getCurrentUser()?.uuid);
+  const index = state.customCapes.findIndex((cape) => cape.id === id && (!cape.ownerUuid || cape.ownerUuid === accountUuid));
+  if (index < 0) return { success: false, error: 'Custom cape not found.' };
+  const [cape] = state.customCapes.splice(index, 1);
+  state.activeCapes = { ...(state.activeCapes || {}) };
+  const wasActive = state.activeCapes[accountUuid] === id || state.activeCapeId === id;
+  if (wasActive) { delete state.activeCapes[accountUuid]; state.activeCapeId = ''; }
+  writeCapeState(state);
+  const capePath = path.join(CAPES_DIR, cape.fileName);
+  try {
+    if (fs.existsSync(capePath)) fs.unlinkSync(capePath);
+  } catch (error) {
+    state.customCapes.splice(index, 0, cape);
+    if (wasActive) state.activeCapes[accountUuid] = id;
+    writeCapeState(state);
+    return { success: false, error: `Cape texture could not be deleted: ${error.message}` };
+  }
+  const cloud = wasActive ? await clearCustomCapeOnline() : { success: true };
+  return { success: true, unequipped: wasActive, cloudSynced: cloud.success, warning: cloud.success ? '' : cloud.error };
+}
+
+function getActiveCapeLaunchConfig(accountUuid) {
+  const state = readCapeState();
+  const uuid = normalizeMinecraftUuid(accountUuid);
+  const activeCapeId = String(state.activeCapes?.[uuid] || state.activeCapeId || '').trim();
+  const custom = state.customCapes.find((cape) => cape.id === activeCapeId && (!cape.ownerUuid || cape.ownerUuid === uuid));
+  const officialPath = activeCapeId ? getOfficialCapeCachePath(activeCapeId) : '';
+  const capePath = custom ? path.join(CAPES_DIR, custom.fileName) : officialPath;
+  return activeCapeId && fs.existsSync(capePath) ? { id: activeCapeId, path: capePath, uuid, useAsElytra: Boolean(custom?.useAsElytra) } : null;
+}
+
+async function getSkinConfigWithAccountImport() {
+  const currentConfig = getSkinConfig();
+  if (!currentConfig.success || (currentConfig.skins || []).length) {
+    return currentConfig;
+  }
+
+  let savedUser = null;
+  try {
+    savedUser = readSavedUserFile();
+  } catch (_error) {
+    return currentConfig;
+  }
+
+  const uuid = normalizeMinecraftUuid(savedUser?.uuid);
+  const username = normalizeMinecraftProfileName(savedUser?.username);
+  const loginSource = String(savedUser?.loginSource || '').trim().toLowerCase();
+  if (!uuid || !username || loginSource === 'offline') {
+    return currentConfig;
+  }
+
+  try {
+    // NameMC shows the same current texture published by Minecraft's signed
+    // session profile. Using the source texture avoids scraping NameMC pages.
+    const texture = await fetchMinecraftProfileTexture(uuid);
+    if (!texture?.sourceUrl) {
+      return currentConfig;
+    }
+    const skinBuffer = await fetchBinary(texture.sourceUrl, {
+      maxBytes: ONLINE_SKIN_MAX_BYTES,
+      allowedHosts: TRUSTED_MINECRAFT_TEXTURE_HOSTS
+    });
+    const imported = saveDownloadedSkinBuffer({
+      skinBuffer,
+      displayName: `${username} - aktueller Skin`,
+      sourcePath: texture.sourceUrl,
+      variantHint: texture.variant
+    });
+    if (imported?.success) {
+      return {
+        ...imported,
+        message: `Der aktuelle Skin von ${username} wurde automatisch importiert.`,
+        autoImportedAccountSkin: true
+      };
+    }
+    return {
+      ...currentConfig,
+      warning: imported?.error || 'Der aktuelle Account-Skin konnte nicht importiert werden.'
+    };
+  } catch (error) {
+    logger.warn('Automatic account skin import skipped', {
+      username,
+      error: serializeError(error)
+    });
+    return currentConfig;
+  }
+}
+
+function normalizeSkinSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_ -]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitSkinNameTerms(value) {
+  return normalizeSkinSearchText(
+    String(value || '')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\d+/g, ' ')
+  )
+    .split(' ')
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+}
+
+function addUniqueSkinTerm(terms, seen, value) {
+  const normalized = normalizeSkinSearchText(value);
+  if (!normalized || seen.has(normalized)) {
+    return;
+  }
+
+  seen.add(normalized);
+  terms.push(normalized);
+}
+
+function getNameHashByte(value, offset) {
+  const digest = crypto.createHash('sha1').update(String(value || 'skin')).digest();
+  return digest[offset % digest.length];
+}
+
+function getNameBasedSkinTerms(query) {
+  const normalizedQuery = normalizeSkinSearchText(query);
+  const tokens = splitSkinNameTerms(query);
+  const terms = [];
+  const seen = new Set();
+
+  if (normalizedQuery.length >= 2) {
+    addUniqueSkinTerm(terms, seen, tokens.length > 1 ? tokens.join(' ') : normalizedQuery);
+  }
+
+  tokens.forEach((token) => {
+    if (NAME_SKIN_DIRECT_TAGS.has(token)) {
+      addUniqueSkinTerm(terms, seen, token);
+    }
+  });
+
+  const hashSource = normalizedQuery || 'x launcher';
+  const color = NAME_SKIN_COLOR_TAGS[getNameHashByte(hashSource, 0) % NAME_SKIN_COLOR_TAGS.length];
+  const style = NAME_SKIN_STYLE_TAGS[getNameHashByte(hashSource, 1) % NAME_SKIN_STYLE_TAGS.length];
+  const theme = NAME_SKIN_THEME_TAGS[getNameHashByte(hashSource, 2) % NAME_SKIN_THEME_TAGS.length];
+
+  addUniqueSkinTerm(terms, seen, `${color} ${style}`);
+  addUniqueSkinTerm(terms, seen, `${theme} ${style}`);
+  addUniqueSkinTerm(terms, seen, theme);
+  addUniqueSkinTerm(terms, seen, style);
+  addUniqueSkinTerm(terms, seen, color);
+
+  if (!terms.length) {
+    addUniqueSkinTerm(terms, seen, 'pvp');
+    addUniqueSkinTerm(terms, seen, 'hoodie');
+  }
+
+  return terms.slice(0, ONLINE_SKIN_PAGE_LIMIT);
+}
+
+function getSkinMcRawSkinUrl(skinId) {
+  return `${SKINMC_BASE_URL}/api/v1/renders/skins/${encodeURIComponent(skinId)}/skin`;
+}
+
+function normalizeSkinMcSkinId(value) {
+  const match = String(value || '').match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+  return match ? match[0].toLowerCase() : '';
+}
+
+function getSkinMcSearchPages(query) {
+  const terms = getNameBasedSkinTerms(query);
+  const pages = [];
+  const seen = new Set();
+
+  const addPage = (url, label, matchLabel) => {
+    const key = String(url || '').trim();
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    pages.push({
+      url: key,
+      label: sanitizeSkinName(`${label} Skin`),
+      matchLabel
+    });
+  };
+
+  terms.forEach((term, index) => {
+    const searchUrl = new URL('/s', SKINMC_BASE_URL);
+    searchUrl.searchParams.set('search', term);
+    addPage(
+      searchUrl.toString(),
+      term,
+      index === 0 ? 'Skin-Vorschlag' : 'Namensstil'
+    );
+
+    if (term.indexOf(' ') === -1 && NAME_SKIN_DIRECT_TAGS.has(term)) {
+      addPage(
+        `${SKINMC_BASE_URL}/skins/tagged/${encodeURIComponent(term)}`,
+        term,
+        'Skin-Tag'
+      );
+    }
+  });
+
+  return pages.slice(0, ONLINE_SKIN_PAGE_LIMIT);
+}
+
+function extractSkinMcSkinIds(html) {
+  const ids = [];
+  const seen = new Set();
+  const matcher = /\/skins\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/g;
+  let match;
+
+  while ((match = matcher.exec(String(html || ''))) !== null) {
+    const skinId = normalizeSkinMcSkinId(match[1]);
+    if (!skinId || seen.has(skinId)) {
+      continue;
+    }
+
+    seen.add(skinId);
+    ids.push(skinId);
+  }
+
+  return ids;
+}
+
+async function fetchText(url, options = {}) {
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      ...options,
+      headers: {
+        ...SKIN_LIBRARY_API_HEADERS,
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    const detail = error?.cause?.message || error?.message || String(error);
+    throw new Error(`Netzwerkfehler für ${url}: ${detail}`);
+  }
+
+  const body = await safeReadText(response);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} für ${url}${body ? `: ${body}` : ''}`);
+  }
+
+  return body;
+}
+
+async function fetchBinary(url, options = {}) {
+  const { maxBytes: configuredMaxBytes, headers = {}, allowedHosts = null, ...fetchOptions } = options;
+  if (allowedHosts) {
+    assertTrustedHttpsUrl(url, allowedHosts);
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      ...fetchOptions,
+      headers: {
+        ...SKIN_LIBRARY_API_HEADERS,
+        ...headers
+      }
+    });
+  } catch (error) {
+    const detail = error?.cause?.message || error?.message || String(error);
+    throw new Error(`Download-Fehler für ${url}: ${detail}`);
+  }
+
+  if (!response.ok) {
+    const body = await safeReadText(response);
+    throw new Error(`Download fehlgeschlagen (${response.status}) für ${url}${body ? `: ${body}` : ''}`);
+  }
+
+  const buffer = typeof response.arrayBuffer === 'function'
+    ? Buffer.from(await response.arrayBuffer())
+    : await response.buffer();
+  const maxBytes = Number(configuredMaxBytes) || 0;
+  if (maxBytes > 0 && buffer.length > maxBytes) {
+    throw new Error('Skin-Datei ist zu groß.');
+  }
+
+  return buffer;
+}
+
+function buildOnlineSkinResultFromSkinMc({ skinId, label, matchLabel, skinBuffer, index }) {
+  const skinInfo = readPngMetadataFromBuffer(skinBuffer);
+  if (!isSupportedMinecraftSkinSize(skinInfo.width, skinInfo.height)) {
+    return null;
+  }
+
+  const rawSkinUrl = getSkinMcRawSkinUrl(skinId);
+  const resultName = sanitizeSkinName(`${label || 'SkinMC Skin'} ${index || ''}`.trim());
+
+  return {
+    id: `skinmc-${skinId}`,
+    skinId,
+    name: resultName,
+    sourceLabel: 'SkinMC',
+    variant: skinInfo.height === 32 ? 'classic' : detectSkinVariantFromPixelsBufferSafe(skinBuffer, skinInfo),
+    width: skinInfo.width,
+    height: skinInfo.height,
+    fileSize: skinInfo.fileSize,
+    sourceUrl: rawSkinUrl,
+    detailUrl: `${SKINMC_BASE_URL}/skins/${skinId}`,
+    matchLabel: matchLabel || 'Skin-Treffer',
+    previewDataUrl: `data:image/png;base64,${skinBuffer.toString('base64')}`
+  };
+}
+
+function normalizeMinecraftProfileName(value) {
+  const name = String(value || '').trim();
+  return /^[A-Za-z0-9_]{3,16}$/.test(name) ? name : '';
+}
+
+function normalizeMinecraftTextureUrl(rawUrl) {
+  const value = String(rawUrl || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.toLowerCase() !== 'textures.minecraft.net') {
+      return '';
+    }
+    parsed.protocol = 'https:';
+    return parsed.toString();
+  } catch (_error) {
+    return '';
+  }
+}
+
+async function fetchMinecraftProfileByName(username) {
+  const normalizedName = normalizeMinecraftProfileName(username);
+  if (!normalizedName) {
+    return null;
+  }
+
+  const encodedName = encodeURIComponent(normalizedName);
+  const lookupUrls = [
+    `https://api.minecraftservices.com/minecraft/profile/lookup/name/${encodedName}`,
+    `https://api.mojang.com/users/profiles/minecraft/${encodedName}`
+  ];
+  let lastError = null;
+
+  for (const lookupUrl of lookupUrls) {
+    try {
+      const profile = await fetchJson(lookupUrl, {
+        allowedHosts: TRUSTED_MINECRAFT_PROFILE_HOSTS,
+        retries: 0,
+        headers: { Accept: 'application/json' }
+      });
+      const uuid = normalizeMinecraftUuid(profile?.id);
+      const name = normalizeMinecraftProfileName(profile?.name) || normalizedName;
+      if (uuid && name) {
+        return { id: uuid, name };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  return null;
+}
+
+async function fetchMinecraftProfileTexture(profileId) {
+  const uuid = normalizeMinecraftUuid(profileId);
+  if (!uuid) {
+    return null;
+  }
+
+  const profile = await fetchJson(`https://sessionserver.mojang.com/session/minecraft/profile/${encodeURIComponent(uuid)}?unsigned=false`, {
+    allowedHosts: TRUSTED_MINECRAFT_PROFILE_HOSTS,
+    retries: 0,
+    headers: { Accept: 'application/json' }
+  });
+  const texturesProperty = Array.isArray(profile?.properties)
+    ? profile.properties.find((property) => property?.name === 'textures' && property?.value)
+    : null;
+  if (!texturesProperty?.value) {
+    return null;
+  }
+
+  const texturePayload = JSON.parse(Buffer.from(String(texturesProperty.value), 'base64').toString('utf8'));
+  const skin = texturePayload?.textures?.SKIN;
+  const sourceUrl = normalizeMinecraftTextureUrl(skin?.url);
+  if (!sourceUrl) {
+    return null;
+  }
+
+  return {
+    sourceUrl,
+    variant: String(skin?.metadata?.model || '').toLowerCase() === 'slim' ? 'slim' : 'classic'
+  };
+}
+
+async function buildOnlineSkinResultFromMinecraftProfile(query) {
+  const profile = await fetchMinecraftProfileByName(query);
+  if (!profile) {
+    return null;
+  }
+
+  const texture = await fetchMinecraftProfileTexture(profile.id);
+  if (!texture?.sourceUrl) {
+    return null;
+  }
+
+  const skinBuffer = await fetchBinary(texture.sourceUrl, {
+    maxBytes: ONLINE_SKIN_MAX_BYTES,
+    allowedHosts: TRUSTED_MINECRAFT_TEXTURE_HOSTS
+  });
+  const skinInfo = readPngMetadataFromBuffer(skinBuffer);
+  if (!isSupportedMinecraftSkinSize(skinInfo.width, skinInfo.height)) {
+    return null;
+  }
+
+  return {
+    id: `minecraft-${profile.id}`,
+    skinId: '',
+    profileId: profile.id,
+    name: sanitizeSkinName(`${profile.name} Skin`),
+    sourceLabel: 'Minecraft',
+    variant: skinInfo.height === 32 ? 'classic' : (texture.variant || detectSkinVariantFromPixelsBufferSafe(skinBuffer, skinInfo)),
+    width: skinInfo.width,
+    height: skinInfo.height,
+    fileSize: skinInfo.fileSize,
+    sourceUrl: texture.sourceUrl,
+    detailUrl: '',
+    matchLabel: 'Minecraft-Profil',
+    previewDataUrl: `data:image/png;base64,${skinBuffer.toString('base64')}`
+  };
+}
+
+function detectSkinVariantFromPixelsBufferSafe(skinBuffer, skinInfo) {
+  if (skinInfo?.height === 32) {
+    return 'classic';
+  }
+
+  const tempFilePath = path.join(SKINS_DIR, `variant-check-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  try {
+    ensureDir(SKINS_DIR);
+    fs.writeFileSync(tempFilePath, skinBuffer);
+    return detectSkinVariant(tempFilePath, skinInfo, '') || 'classic';
+  } catch (_error) {
+    return 'classic';
+  } finally {
+    try {
+      if (fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath);
+      }
+    } catch (_error) {
+      // ignore cleanup failure
+    }
+  }
+}
+
+async function searchOnlineSkins(query) {
+  const normalizedQuery = String(query || '').trim();
+  const searchPages = getSkinMcSearchPages(normalizedQuery);
+  const results = [];
+  const seenSkinIds = new Set();
+  const seenSourceUrls = new Set();
+  let firstError = null;
+
+  if (normalizeMinecraftProfileName(normalizedQuery)) {
+    try {
+      const minecraftResult = await buildOnlineSkinResultFromMinecraftProfile(normalizedQuery);
+      if (minecraftResult) {
+        results.push(minecraftResult);
+        seenSourceUrls.add(String(minecraftResult.sourceUrl || '').trim());
+      }
+    } catch (error) {
+      firstError = firstError || error;
+      console.warn(`Minecraft-Skin-Suche fehlgeschlagen (${normalizedQuery}):`, error.message);
+    }
+  }
+
+  for (const page of searchPages) {
+    if (results.length >= ONLINE_SKIN_SEARCH_LIMIT) {
+      break;
+    }
+
+    try {
+      const html = await fetchText(page.url);
+      const skinIds = extractSkinMcSkinIds(html);
+      for (const skinId of skinIds) {
+        if (results.length >= ONLINE_SKIN_SEARCH_LIMIT) {
+          break;
+        }
+        if (seenSkinIds.has(skinId)) {
+          continue;
+        }
+
+        seenSkinIds.add(skinId);
+        const skinBuffer = await fetchBinary(getSkinMcRawSkinUrl(skinId), { maxBytes: ONLINE_SKIN_MAX_BYTES });
+        const sourceUrl = getSkinMcRawSkinUrl(skinId);
+        if (seenSourceUrls.has(sourceUrl)) {
+          continue;
+        }
+        const result = buildOnlineSkinResultFromSkinMc({
+          skinId,
+          label: page.label,
+          matchLabel: page.matchLabel,
+          skinBuffer,
+          index: results.length + 1
+        });
+        if (result) {
+          results.push(result);
+          seenSourceUrls.add(sourceUrl);
+        }
+      }
+    } catch (error) {
+      firstError = firstError || error;
+      console.warn(`SkinMC-Suche fehlgeschlagen (${page.url}):`, error.message);
+    }
+  }
+
+  if (!results.length && firstError) {
+    return {
+      success: false,
+      error: `Online-Skins konnten nicht geladen werden: ${firstError.message}`,
+      query: normalizedQuery,
+      results: []
+    };
+  }
+
+  return {
+    success: true,
+    query: normalizedQuery,
+    source: results.some((entry) => entry?.sourceLabel === 'Minecraft') ? 'minecraft+skinmc' : 'skinmc',
+    results
+  };
+}
+
+function saveDownloadedSkinBuffer({ skinBuffer, displayName, sourcePath, variantHint }) {
+  ensureDir(SKINS_DIR);
+  ensureDir(SKIN_LIBRARY_DIR);
+
+  const skinInfo = readPngMetadataFromBuffer(skinBuffer);
+  if (!isSupportedMinecraftSkinSize(skinInfo.width, skinInfo.height)) {
+    return {
+      success: false,
+      error: 'Der heruntergeladene Skin ist keine Minecraft-Skin in 64x64 oder 64x32 Pixeln.'
+    };
+  }
+
+  const skinState = readSkinLibraryState();
+  const id = createSkinId();
+  const fileName = `${id}.png`;
+  const destinationPath = getSkinLibraryFilePath(fileName);
+  fs.writeFileSync(destinationPath, skinBuffer);
+
+  const variant = skinInfo.height === 32
+    ? 'classic'
+    : (String(variantHint || '').toLowerCase() === 'slim' ? 'slim' : detectSkinVariant(destinationPath, skinInfo, displayName));
+  const savedAt = new Date().toISOString();
+  const skinEntry = {
+    id,
+    name: sanitizeSkinName(displayName),
+    fileName,
+    variant,
+    sourcePath: String(sourcePath || ''),
+    createdAt: savedAt,
+    updatedAt: savedAt,
+    width: skinInfo.width,
+    height: skinInfo.height,
+    fileSize: skinInfo.fileSize
+  };
+  const sourceKey = String(sourcePath || '').trim();
+  const skins = [
+    skinEntry,
+    ...skinState.skins.filter((entry) => !sourceKey || String(entry.sourcePath || '').trim() !== sourceKey)
+  ];
+
+  persistSkinLibraryState(skins, id);
+
+  return {
+    ...getSkinConfig(),
+    message: `Skin ${skinEntry.name} heruntergeladen und aktiviert.`
+  };
+}
+
+async function downloadOnlineSkin(onlineSkin) {
+  const reference = onlineSkin && typeof onlineSkin === 'object' ? onlineSkin : {};
+  const minecraftTextureUrl = normalizeMinecraftTextureUrl(reference.sourceUrl || '');
+  if (minecraftTextureUrl) {
+    try {
+      const skinBuffer = await fetchBinary(minecraftTextureUrl, {
+        maxBytes: ONLINE_SKIN_MAX_BYTES,
+        allowedHosts: TRUSTED_MINECRAFT_TEXTURE_HOSTS
+      });
+      return saveDownloadedSkinBuffer({
+        skinBuffer,
+        displayName: reference.name || 'Minecraft Skin',
+        sourcePath: minecraftTextureUrl,
+        variantHint: reference.variant
+      });
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  const skinId = normalizeSkinMcSkinId(reference.skinId || reference.id || reference.sourceUrl || '');
+  if (!skinId) {
+    return { success: false, error: 'Keine gültige Skin-ID übergeben.' };
+  }
+
+  try {
+    const sourceUrl = getSkinMcRawSkinUrl(skinId);
+    const skinBuffer = await fetchBinary(sourceUrl, { maxBytes: ONLINE_SKIN_MAX_BYTES });
+    return saveDownloadedSkinBuffer({
+      skinBuffer,
+      displayName: reference.name || 'SkinMC Skin',
+      sourcePath: sourceUrl,
+      variantHint: reference.variant
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function chooseSkinFile() {
+  ensureDir(SKINS_DIR);
+  ensureDir(SKIN_LIBRARY_DIR);
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    defaultPath: fs.existsSync(DEFAULT_DOWNLOADS_DIR) ? DEFAULT_DOWNLOADS_DIR : DEFAULT_MINECRAFT_DIR,
+    filters: [
+      { name: 'Minecraft Skin PNG', extensions: ['png'] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, canceled: true };
+  }
+
+  const sourcePath = result.filePaths[0];
+  const skinInfo = readPngMetadata(sourcePath);
+  if (!isSupportedMinecraftSkinSize(skinInfo.width, skinInfo.height)) {
+    return {
+      success: false,
+      error: 'Bitte wähle eine Minecraft-Skin in 64x64 oder 64x32 Pixeln.'
+    };
+  }
+
+  const variant = detectSkinVariant(sourcePath, skinInfo, path.basename(sourcePath));
+  const skinState = readSkinLibraryState();
+  const id = createSkinId();
+  const fileName = `${id}.png`;
+  fs.copyFileSync(sourcePath, getSkinLibraryFilePath(fileName));
+
+  const savedAt = new Date().toISOString();
+  const skinEntry = {
+    id,
+    name: sanitizeSkinName(path.basename(sourcePath)),
+    fileName,
+    variant,
+    sourcePath,
+    createdAt: savedAt,
+    updatedAt: savedAt,
+    width: skinInfo.width,
+    height: skinInfo.height,
+    fileSize: skinInfo.fileSize
+  };
+
+  const skins = [skinEntry, ...skinState.skins];
+  persistSkinLibraryState(skins, id);
+
+  return {
+    ...getSkinConfig(),
+    message: `Skin ${skinEntry.name} gespeichert und als ${variant === 'slim' ? 'Slim' : 'Wide'} erkannt.`
+  };
+}
+
+function clearSkinFile() {
+  const skinState = readSkinLibraryState();
+  if (!skinState.activeSkin) {
+    return {
+      success: false,
+      error: 'Es ist kein aktiver Skin gespeichert.'
+    };
+  }
+
+  return removeSkinFile(skinState.activeSkin.id);
+}
+
+function setActiveSkin(skinId) {
+  const normalizedId = String(skinId || '').trim();
+  if (!normalizedId) {
+    return { success: false, error: 'Keine Skin-ID übergeben.' };
+  }
+
+  const skinState = readSkinLibraryState();
+  const skinEntry = skinState.skins.find((entry) => entry.id === normalizedId);
+  if (!skinEntry) {
+    return { success: false, error: 'Skin wurde nicht gefunden.' };
+  }
+
+  persistSkinLibraryState(skinState.skins, normalizedId);
+
+  return {
+    ...getSkinConfig(),
+    message: `Skin ${skinEntry.name} ist jetzt aktiv.`
+  };
+}
+
+function removeSkinFile(skinId) {
+  const normalizedId = String(skinId || '').trim();
+  if (!normalizedId) {
+    return { success: false, error: 'Keine Skin-ID übergeben.' };
+  }
+
+  const skinState = readSkinLibraryState();
+  const skinEntry = skinState.skins.find((entry) => entry.id === normalizedId);
+  if (!skinEntry) {
+    return { success: false, error: 'Skin wurde nicht gefunden.' };
+  }
+
+  const nextSkins = skinState.skins.filter((entry) => entry.id !== normalizedId);
+  const filePath = getSkinLibraryFilePath(skinEntry.fileName);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+
+  const nextActiveSkinId = skinState.activeSkinId === normalizedId
+    ? (nextSkins[0]?.id || '')
+    : skinState.activeSkinId;
+
+  persistSkinLibraryState(nextSkins, nextActiveSkinId);
+
+  return {
+    ...getSkinConfig(),
+    message: `Skin ${skinEntry.name} entfernt.`
+  };
+}
+
+function setSkinVariant(skinId, variant) {
+  const normalizedId = String(skinId || '').trim();
+  if (!normalizedId) {
+    return { success: false, error: 'Keine Skin-ID übergeben.' };
+  }
+
+  const skinState = readSkinLibraryState();
+  const skinIndex = skinState.skins.findIndex((entry) => entry.id === normalizedId);
+  if (skinIndex === -1) {
+    return { success: false, error: 'Skin wurde nicht gefunden.' };
+  }
+
+  const currentSkin = skinState.skins[skinIndex];
+  if (currentSkin.height !== 64) {
+    return { success: false, error: '64x32-Skins unterstützen nur das Wide-Modell.' };
+  }
+
+  const nextVariant = sanitizeSkinVariant(variant);
+  const nextSkins = [...skinState.skins];
+  nextSkins[skinIndex] = {
+    ...currentSkin,
+    variant: nextVariant,
+    updatedAt: new Date().toISOString()
+  };
+
+  persistSkinLibraryState(nextSkins, skinState.activeSkinId);
+
+  return {
+    ...getSkinConfig(),
+    message: `Modell für ${currentSkin.name} auf ${nextVariant === 'slim' ? 'Slim' : 'Wide'} gesetzt.`
+  };
+}
+
+function formatSkinApiError(statusCode, responseText) {
+  if (!responseText) {
+    return `HTTP ${statusCode}`;
+  }
+
+  try {
+    const parsed = JSON.parse(responseText);
+    const detail = parsed.errorMessage || parsed.message || parsed.error || parsed.detail || responseText;
+    return `HTTP ${statusCode}: ${detail}`;
+  } catch (_error) {
+    return `HTTP ${statusCode}: ${responseText}`;
+  }
+}
+
+async function uploadMinecraftSkin(accessToken, skinEntry) {
+  const skinPath = getSkinLibraryFilePath(skinEntry.fileName);
+  const skinBuffer = fs.readFileSync(skinPath);
+  const boundary = `----XLauncherSkin${Date.now().toString(16)}`;
+  const variant = sanitizeSkinVariant(skinEntry.variant);
+  const headerBuffer = Buffer.from(
+    `--${boundary}\r\n`
+      + `Content-Disposition: form-data; name="variant"\r\n\r\n`
+      + `${variant}\r\n`
+      + `--${boundary}\r\n`
+      + `Content-Disposition: form-data; name="file"; filename="${path.basename(skinPath)}"\r\n`
+      + `Content-Type: image/png\r\n\r\n`,
+    'utf8'
+  );
+  const footerBuffer = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+  const bodyBuffer = Buffer.concat([headerBuffer, skinBuffer, footerBuffer]);
+
+  await new Promise((resolve, reject) => {
+    const request = https.request(MINECRAFT_SKIN_UPLOAD_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': bodyBuffer.length,
+        'User-Agent': 'XClient/1.0.0'
+      }
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const responseText = Buffer.concat(chunks).toString('utf8');
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(formatSkinApiError(response.statusCode, responseText)));
+      });
+    });
+
+    request.on('error', reject);
+    request.write(bodyBuffer);
+    request.end();
+  });
+}
+
+async function syncActiveSkinForLaunch({ accessToken, isOfflineMode }) {
+  const skinState = readSkinLibraryState();
+  if (!skinState.activeSkin) {
+    return null;
+  }
+
+  if (isOfflineMode || !accessToken || accessToken === '0') {
+    return {
+      localApplied: true,
+      skinName: skinState.activeSkin.name
+    };
+  }
+
+  try {
+    await uploadMinecraftSkin(accessToken, skinState.activeSkin);
+    return {
+      applied: true,
+      localApplied: true,
+      skinName: skinState.activeSkin.name
+    };
+  } catch (error) {
+    console.warn('Skin sync warning:', error);
+    return {
+      localApplied: true,
+      warning: `Der aktive Skin "${skinState.activeSkin.name}" konnte nicht auf dein Konto hochgeladen werden, wird aber lokal im X Client gesetzt: ${error.message}`
+    };
+  }
+}
+
+function formatSkinLaunchMessage(skinSyncResult) {
+  if (!skinSyncResult) {
+    return '';
+  }
+
+  if (skinSyncResult.applied) {
+    return ` Skin "${skinSyncResult.skinName}" wurde vor dem Start auf dein Konto gesetzt und lokal im X Client vorbereitet.`;
+  }
+
+  if (skinSyncResult.localApplied && skinSyncResult.skinName) {
+    return ` Skin "${skinSyncResult.skinName}" wird lokal im X Client gesetzt.`;
+  }
+
+  if (skinSyncResult.warning) {
+    return ` Hinweis: ${skinSyncResult.warning}`;
+  }
+
+  return '';
+}
+
+function getActiveSkinLaunchConfig() {
+  const skinState = readSkinLibraryState();
+  const activeSkin = skinState.activeSkin;
+  if (!activeSkin) {
+    return null;
+  }
+
+  const skinPath = getSkinLibraryFilePath(activeSkin.fileName);
+  if (!fs.existsSync(skinPath)) {
+    return null;
+  }
+
+  return {
+    id: activeSkin.id,
+    name: activeSkin.name,
+    model: sanitizeSkinVariant(activeSkin.variant) === 'slim' ? 'slim' : 'classic',
+    path: skinPath
+  };
+}
+
+async function setSelectedVersion(versionId) {
+  const requestedVersionId = String(versionId || '').trim();
+  if (!requestedVersionId) {
+    return { success: false, error: 'Keine Version ausgewählt.' };
+  }
+
+  if (isFabricVersionId(requestedVersionId) && !isFullFabricReleaseVersionId(requestedVersionId)) {
+    return { success: false, error: 'Es können nur normale Minecraft-Vollversionen ausgewählt werden.' };
+  }
+
+  const activePack = getActivePack();
+  if (!activePack || !isProfileVersionAllowed(requestedVersionId)) {
+    return { success: false, error: getProfileMinecraftVersionsError() };
+  }
+
+  persistEffectiveSelectedVersionId(requestedVersionId);
+  const localVersion = readLocalVersion(requestedVersionId);
+  const syncResult = isFabricVersionId(requestedVersionId)
+    ? await syncManagedModsForVersion(requestedVersionId, {
+        refreshAll: true,
+        refreshDisabledProjects: true,
+        preserveMods: true
+      })
+    : { warnings: [] };
+
+  return {
+    success: true,
+    selectedVersionId: requestedVersionId,
+    installed: Boolean(localVersion),
+    syncPending: false,
+    warning: formatManagedModsWarning(syncResult.warnings)
+  };
+}
+
+async function setStandardVersion(versionId) {
+  const requestedVersionId = String(versionId || '').trim();
+  if (!requestedVersionId) {
+    return { success: false, error: 'Keine Version ausgewählt.' };
+  }
+
+  if (!isFabricVersionId(requestedVersionId)) {
+    return { success: false, error: 'Es können nur Fabric-Versionen ausgewählt werden.' };
+  }
+
+  if (!isFullFabricReleaseVersionId(requestedVersionId)) {
+    return { success: false, error: 'Es können nur normale Minecraft-Vollversionen ausgewählt werden.' };
+  }
+
+  if (!isSupportedFabricVersionAllowed(requestedVersionId)) {
+    return { success: false, error: getSupportedMinecraftVersionsError() };
+  }
+
+  persistStandardSelectedVersionId(requestedVersionId);
+  const localVersion = readLocalVersion(requestedVersionId);
+  const standardContext = getStandardModContext(requestedVersionId);
+  const syncResult = await syncManagedModsForVersion(requestedVersionId, {
+    modContext: standardContext,
+    refreshDisabledProjects: true
+  });
+
+  return {
+    success: true,
+    selectedVersionId: requestedVersionId,
+    installed: Boolean(localVersion),
+    syncPending: false,
+    warning: formatManagedModsWarning(syncResult.warnings)
+  };
+}
+
+function scheduleManagedModsSync(versionId, options = {}) {
+  const normalizedVersionId = String(versionId || '').trim();
+  if (!normalizedVersionId) {
+    return;
+  }
+
+  setTimeout(() => {
+    syncManagedModsForVersion(normalizedVersionId, options).catch((error) => {
+      logger.warn('Background managed mod sync failed after version change', {
+        versionId: normalizedVersionId,
+        error: serializeError(error)
+      });
+    });
+  }, 0);
+}
+
+async function selectPreferredFabricVersion() {
+  const localFabricVersion = getPreferredLocalFabricVersion(getEffectiveSelectedVersionId());
+  if (!localFabricVersion) {
+    return {
+      success: false,
+      error: 'Es wurde keine lokale Fabric-Version gefunden.'
+    };
+  }
+
+  const fabricJarPath = path.join(
+    DEFAULT_MINECRAFT_DIR,
+    'versions',
+    localFabricVersion.id,
+    `${localFabricVersion.id}.jar`
+  );
+
+  if (!fs.existsSync(fabricJarPath)) {
+    return {
+      success: false,
+      error: `Fabric-JAR fehlt: ${fabricJarPath}`
+    };
+  }
+
+  const modContext = getActiveModContext(localFabricVersion.id);
+  const minecraftVersion = String(modContext.minecraftVersion || '').trim();
+  if (!minecraftVersion) {
+    return {
+      success: false,
+      error: `Minecraft-Version konnte nicht aus ${localFabricVersion.id} gelesen werden.`
+    };
+  }
+
+  try {
+    await ensureFabricApiForMod(modContext, minecraftVersion, { forceRefresh: true });
+  } catch (error) {
+    return {
+      success: false,
+      error: `Fabric API konnte nicht für Minecraft ${minecraftVersion} installiert werden: ${error.message}`
+    };
+  }
+
+  persistEffectiveSelectedVersionId(localFabricVersion.id);
+  const syncResult = await syncManagedModsForVersion(localFabricVersion.id);
+
+  return {
+    success: true,
+    selectedVersionId: localFabricVersion.id,
+    jarPath: fabricJarPath,
+    warning: formatManagedModsWarning(syncResult.warnings),
+    message: `Fabric ${getMinecraftVersionName(localFabricVersion.id, localFabricVersion.data)} wurde ausgewählt. Pfad: ${fabricJarPath}`
+  };
+}
+
+function getMicrosoftClientId() {
+  return DEFAULT_MICROSOFT_CLIENT_ID;
+}
+
+function readSavedUserFile() {
+  if (!fs.existsSync(USER_FILE)) {
+    clearCurrentUser();
+    return null;
+  }
+
+  try {
+    const savedUser = JSON.parse(fs.readFileSync(USER_FILE, 'utf8'));
+    return savedUser && typeof savedUser === 'object' ? setCurrentUser(savedUser) : null;
+  } catch (error) {
+    logger.warn('Could not read user session, backing up corrupt file', {
+      filePath: USER_FILE,
+      error: serializeError(error)
+    });
+    try {
+      ROBUSTNESS.createFileBackup(USER_FILE, 'corrupt-user-session', {
+        error: serializeError(error)
+      });
+      fs.unlinkSync(USER_FILE);
+    } catch (cleanupError) {
+      logger.warn('Could not remove corrupt user session', {
+        filePath: USER_FILE,
+        error: serializeError(cleanupError)
+      });
+    }
+    return null;
+  }
+}
+
+function writeSavedUserFile(userInfo, reason = 'write-user-session') {
+  const persistedUser = { ...userInfo };
+  delete persistedUser.isAdmin;
+  const loginSource = String(persistedUser.loginSource || '').trim().toLowerCase();
+  if (!persistedUser.email && loginSource !== 'offline') {
+    persistedUser.email = readOfficialLauncherAccountEmail(persistedUser.uuid) || null;
+  }
+  ROBUSTNESS.writeJsonFileAtomic(USER_FILE, persistedUser, {
+    label: 'user-session',
+    metadata: { reason }
+  });
+  upsertSavedAccount(persistedUser);
+  return setCurrentUser(persistedUser);
+}
+
+function getDefaultAccountsState() {
+  return {
+    activeAccountId: '',
+    accounts: []
+  };
+}
+
+function accountIdForUser(userInfo) {
+  const loginSource = String(userInfo?.loginSource || userInfo?.userType || '').trim().toLowerCase();
+  const userType = String(userInfo?.userType || '').trim().toLowerCase();
+  const username = String(userInfo?.username || '').trim();
+  const uuid = normalizeMinecraftUuid(userInfo?.uuid || '');
+  if (loginSource === 'offline') {
+    return `offline:${username.toLowerCase() || 'player'}`;
+  }
+  if (loginSource === 'official-launcher' || userType === 'launcher-import') {
+    return `launcher:${uuid || username.toLowerCase() || 'player'}`;
+  }
+  if (uuid) {
+    return `msa:${uuid}`;
+  }
+  if (String(userInfo?.accessToken || '') === 'offline-token') {
+    return `offline:${username.toLowerCase() || 'player'}`;
+  }
+  const fingerprint = crypto.createHash('sha1')
+    .update(`${loginSource}:${username}:${String(userInfo?.email || '')}`)
+    .digest('hex')
+    .slice(0, 16);
+  return `account:${fingerprint}`;
+}
+
+function shouldRegenerateStoredAccountId(rawId, user) {
+  const id = String(rawId || '').trim();
+  if (!id) {
+    return true;
+  }
+  const loginSource = String(user?.loginSource || '').trim().toLowerCase();
+  const userType = String(user?.userType || '').trim().toLowerCase();
+  return id.startsWith('offline:')
+    && (loginSource === 'official-launcher' || userType === 'launcher-import');
+}
+
+function normalizeAccountEntry(rawAccount) {
+  const rawUser = rawAccount?.user && typeof rawAccount.user === 'object'
+    ? rawAccount.user
+    : rawAccount;
+  let username = String(rawUser?.username || rawAccount?.username || '').trim().slice(0, 32);
+  if (!username) {
+    return null;
+  }
+  const user = {
+    ...rawUser,
+    username,
+    email: String(rawUser?.email || rawAccount?.email || '').trim(),
+    uuid: String(rawUser?.uuid || rawAccount?.uuid || '').trim(),
+    accessToken: String(rawUser?.accessToken || rawAccount?.accessToken || '').trim(),
+    microsoftAccessToken: String(rawUser?.microsoftAccessToken || rawAccount?.microsoftAccessToken || '').trim(),
+    userType: String(rawUser?.userType || rawAccount?.userType || '').trim() || 'msa',
+    loginSource: String(rawUser?.loginSource || rawAccount?.loginSource || '').trim(),
+    tokenSource: String(rawUser?.tokenSource || rawAccount?.tokenSource || '').trim(),
+    authCacheId: String(rawUser?.authCacheId || rawAccount?.authCacheId || '').trim()
+  };
+  delete user.isAdmin;
+  if (String(user.loginSource || '').trim().toLowerCase() === 'offline') {
+    username = normalizeOfflineUsername(username, 'OfflinePlayer');
+    user.username = username;
+    user.uuid = createOfflineUuid(username);
+    user.accessToken = 'offline-token';
+    user.userType = 'legacy';
+    user.loginSource = 'offline';
+  }
+  const generatedId = accountIdForUser(user);
+  const rawId = String(rawAccount?.id || '').trim();
+  const id = shouldRegenerateStoredAccountId(rawId, user) ? generatedId : rawId || generatedId;
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    user,
+    username,
+    uuid: user.uuid,
+    userType: user.userType,
+    loginSource: user.loginSource,
+    addedAt: String(rawAccount?.addedAt || rawUser?.loginTime || '').trim() || new Date().toISOString(),
+    updatedAt: String(rawAccount?.updatedAt || rawUser?.loginTime || '').trim() || new Date().toISOString()
+  };
+}
+
+function normalizeAccountsState(rawState) {
+  const accounts = (Array.isArray(rawState?.accounts) ? rawState.accounts : [])
+    .map(normalizeAccountEntry)
+    .filter(Boolean);
+  const seen = new Set();
+  const uniqueAccounts = [];
+  for (const account of accounts) {
+    if (seen.has(account.id)) {
+      continue;
+    }
+    seen.add(account.id);
+    uniqueAccounts.push(account);
+  }
+  const activeAccountId = String(rawState?.activeAccountId || '').trim();
+  return {
+    activeAccountId: uniqueAccounts.some((account) => account.id === activeAccountId) ? activeAccountId : '',
+    accounts: uniqueAccounts
+  };
+}
+
+function readAccountsState() {
+  return ROBUSTNESS.readJsonFile(ACCOUNTS_STATE_FILE, getDefaultAccountsState(), {
+    label: 'accounts-state',
+    normalize: normalizeAccountsState
+  });
+}
+
+function writeAccountsState(state) {
+  const normalizedState = normalizeAccountsState(state);
+  ROBUSTNESS.writeJsonFileAtomic(ACCOUNTS_STATE_FILE, {
+    activeAccountId: normalizedState.activeAccountId,
+    accounts: normalizedState.accounts
+  }, {
+    label: 'accounts-state',
+    metadata: { operation: 'writeAccountsState' }
+  });
+  return normalizedState;
+}
+
+function accountForUi(account) {
+  const user = deriveCurrentUser(account.user);
+  const email = String(user?.email || readOfficialLauncherAccountEmail(account.uuid) || '').trim();
+  return {
+    id: account.id,
+    username: account.username,
+    email,
+    uuid: account.uuid,
+    userType: account.userType,
+    loginSource: account.loginSource,
+    addedAt: account.addedAt,
+    updatedAt: account.updatedAt,
+    isAdmin: user?.isAdmin === true
+  };
+}
+
+function accountsConfigFromState(state) {
+  const normalizedState = normalizeAccountsState(state);
+  return {
+    success: true,
+    activeAccountId: normalizedState.activeAccountId,
+    accounts: normalizedState.accounts
+      .slice()
+      .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))
+      .map(accountForUi)
+  };
+}
+
+function getAccountsConfig() {
+  const savedUser = readSavedUserFile();
+  if (savedUser?.username) {
+    upsertSavedAccount(savedUser);
+  }
+  return accountsConfigFromState(readAccountsState());
+}
+
+function upsertSavedAccount(userInfo) {
+  const account = normalizeAccountEntry({
+    user: userInfo,
+    updatedAt: new Date().toISOString()
+  });
+  if (!account) {
+    return readAccountsState();
+  }
+  const state = readAccountsState();
+  const existing = state.accounts.find((entry) => entry.id === account.id);
+  const nextAccount = {
+    ...(existing || {}),
+    ...account,
+    addedAt: existing?.addedAt || account.addedAt,
+    updatedAt: new Date().toISOString()
+  };
+  state.accounts = [
+    nextAccount,
+    ...state.accounts.filter((entry) => entry.id !== account.id)
+  ];
+  state.activeAccountId = account.id;
+  return writeAccountsState(state);
+}
+
+function setActiveAccountId(accountId) {
+  const state = readAccountsState();
+  state.activeAccountId = state.accounts.some((account) => account.id === accountId) ? accountId : '';
+  return writeAccountsState(state);
+}
+
+function switchAccount(accountId) {
+  const normalizedAccountId = String(accountId || '').trim();
+  const state = readAccountsState();
+  const account = state.accounts.find((entry) => entry.id === normalizedAccountId);
+  if (!account) {
+    return { success: false, error: 'Account was not found.' };
+  }
+  const user = writeSavedUserFile(account.user, 'switch-account');
+  return {
+    success: true,
+    activeAccountId: normalizedAccountId,
+    user,
+    accounts: getAccountsConfig().accounts,
+    message: `${account.username} is now active.`
+  };
+}
+
+function removeAccount(accountId) {
+  const normalizedAccountId = String(accountId || '').trim();
+  const state = readAccountsState();
+  const removed = state.accounts.find((entry) => entry.id === normalizedAccountId);
+  if (!removed) {
+    return { success: false, error: 'Account was not found.' };
+  }
+  const savedUser = readSavedUserFile();
+  const savedUserAccountId = savedUser?.username ? accountIdForUser(savedUser) : '';
+  const removedActive = state.activeAccountId === normalizedAccountId || savedUserAccountId === normalizedAccountId;
+  state.accounts = state.accounts.filter((entry) => entry.id !== normalizedAccountId);
+  let nextUser = removedActive ? null : savedUser;
+
+  if (removedActive) {
+    const nextActiveAccount = state.accounts
+      .slice()
+      .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))[0] || null;
+    state.activeAccountId = nextActiveAccount?.id || '';
+    let writtenState = writeAccountsState(state);
+    if (nextActiveAccount) {
+      nextUser = writeSavedUserFile(nextActiveAccount.user, 'remove-account-activate-next');
+      writtenState = readAccountsState();
+    } else if (fs.existsSync(USER_FILE)) {
+      fs.unlinkSync(USER_FILE);
+      clearCurrentUser();
+    } else {
+      clearCurrentUser();
+    }
+    const config = accountsConfigFromState(writtenState);
+    return {
+      success: true,
+      removedActive,
+      user: nextUser,
+      activeAccountId: config.activeAccountId,
+      accounts: config.accounts,
+      message: nextActiveAccount
+        ? `${removed.username} was removed. ${nextActiveAccount.username} is now active.`
+        : `${removed.username} was removed.`
+    };
+  }
+
+  if (!state.activeAccountId && savedUserAccountId && state.accounts.some((entry) => entry.id === savedUserAccountId)) {
+    state.activeAccountId = savedUserAccountId;
+  }
+  const writtenState = writeAccountsState(state);
+  const config = accountsConfigFromState(writtenState);
+  return {
+    success: true,
+    removedActive,
+    user: nextUser,
+    activeAccountId: config.activeAccountId,
+    accounts: config.accounts,
+    message: `${removed.username} was removed.`
+  };
+}
+
+function createOfflineAccount(username) {
+  const requestedUsername = String(username || '').trim();
+  if (!isValidOfflineUsername(requestedUsername)) {
+    return {
+      success: false,
+      error: 'Offline-Spielername muss 3 bis 16 Zeichen lang sein und darf nur Buchstaben, Zahlen und Unterstriche enthalten.'
+    };
+  }
+  const existingUser = readSavedUserFile();
+  const offlineUser = writeSavedUserFile(createOfflineUser(requestedUsername, existingUser), 'offline-account-login');
+  const config = accountsConfigFromState(readAccountsState());
+  return {
+    success: true,
+    user: offlineUser,
+    accounts: config.accounts,
+    activeAccountId: config.activeAccountId,
+    warning: 'Offline-Account aktiv. Multiplayer geht damit nur auf Offline-Mode-Servern.'
+  };
+}
+
+function getDefaultServerFavoritesState() {
+  return {
+    servers: []
+  };
+}
+
+function normalizeServerPort(port = 25565) {
+  const normalizedPort = Math.round(Number(port) || 25565);
+  return Math.min(65535, Math.max(1, normalizedPort));
+}
+
+function normalizeServerHost(value) {
+  let host = String(value || '').trim();
+  host = host.replace(/^minecraft:\/\//iu, '').replace(/^https?:\/\//iu, '');
+  host = host.split(/[/?#]/u)[0] || host;
+  return host.replace(/[\s<>"]/gu, '').slice(0, 253);
+}
+
+function sanitizeServerIconDataUrl(value) {
+  const dataUrl = String(value || '').trim();
+  if (!dataUrl || dataUrl.length > MAX_SERVER_ICON_DATA_URL_LENGTH) {
+    return '';
+  }
+  if (!/^data:image\/png;base64,[a-z0-9+/=]+$/iu.test(dataUrl)) {
+    return '';
+  }
+  return dataUrl;
+}
+
+function sanitizeServerText(value) {
+  return String(value || '').replace(/\s+/gu, ' ').trim().slice(0, 180);
+}
+
+function parseServerAddress(rawHost, _rawPort = '') {
+  let host = normalizeServerHost(rawHost);
+  let port = normalizeServerPort(_rawPort);
+  const bracketMatch = host.match(/^\[([^\]]+)\]:(\d+)$/u);
+  if (bracketMatch) {
+    host = bracketMatch[1];
+    port = normalizeServerPort(bracketMatch[2]);
+  } else {
+    const colonParts = host.split(':');
+    if (colonParts.length === 2 && /^\d+$/u.test(colonParts[1])) {
+      host = colonParts[0];
+      port = normalizeServerPort(colonParts[1]);
+    }
+  }
+  return { host: normalizeServerHost(host), port };
+}
+
+function serverIdFor(host, port) {
+  return crypto.createHash('sha1')
+    .update(`${String(host || '').toLowerCase()}:${normalizeServerPort(port)}`)
+    .digest('hex')
+    .slice(0, 18);
+}
+
+function normalizeServerFavorite(rawServer) {
+  const parsed = parseServerAddress(rawServer?.host || rawServer?.address || '', rawServer?.port);
+  if (!parsed.host) {
+    return null;
+  }
+  const id = String(rawServer?.id || serverIdFor(parsed.host, parsed.port)).trim();
+  const name = String(rawServer?.name || parsed.host).trim().replace(/\s+/gu, ' ').slice(0, 42) || parsed.host;
+  return {
+    id,
+    name,
+    host: parsed.host,
+    port: parsed.port,
+    iconDataUrl: sanitizeServerIconDataUrl(rawServer?.iconDataUrl || rawServer?.favicon),
+    motd: sanitizeServerText(rawServer?.motd || rawServer?.descriptionText),
+    iconUpdatedAt: String(rawServer?.iconUpdatedAt || '').trim(),
+    createdAt: String(rawServer?.createdAt || '').trim() || new Date().toISOString(),
+    updatedAt: String(rawServer?.updatedAt || '').trim() || new Date().toISOString()
+  };
+}
+
+function normalizeServerFavoritesState(rawState) {
+  const servers = (Array.isArray(rawState?.servers) ? rawState.servers : [])
+    .map(normalizeServerFavorite)
+    .filter(Boolean);
+  const seen = new Set();
+  return {
+    servers: servers.filter((server) => {
+      if (seen.has(server.id)) {
+        return false;
+      }
+      seen.add(server.id);
+      return true;
+    })
+  };
+}
+
+function readServerFavoritesState() {
+  return ROBUSTNESS.readJsonFile(SERVER_FAVORITES_STATE_FILE, getDefaultServerFavoritesState(), {
+    label: 'server-favorites-state',
+    normalize: normalizeServerFavoritesState
+  });
+}
+
+function writeServerFavoritesState(state) {
+  const normalizedState = normalizeServerFavoritesState(state);
+  ROBUSTNESS.writeJsonFileAtomic(SERVER_FAVORITES_STATE_FILE, normalizedState, {
+    label: 'server-favorites-state',
+    metadata: { operation: 'writeServerFavoritesState' }
+  });
+  return normalizedState;
+}
+
+function encodeMinecraftVarInt(value) {
+  const bytes = [];
+  let nextValue = Number(value) | 0;
+  do {
+    let byte = nextValue & 0x7F;
+    nextValue >>>= 7;
+    if (nextValue !== 0) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+  } while (nextValue !== 0);
+  return Buffer.from(bytes);
+}
+
+function decodeMinecraftVarInt(buffer, offset = 0) {
+  let result = 0;
+  let shift = 0;
+  let cursor = offset;
+  while (cursor < buffer.length) {
+    const byte = buffer[cursor];
+    result |= (byte & 0x7F) << shift;
+    cursor += 1;
+    if ((byte & 0x80) === 0) {
+      return { value: result, nextOffset: cursor };
+    }
+    shift += 7;
+    if (shift > 35) {
+      throw new Error('Serverstatus-VarInt ist ungültig.');
+    }
+  }
+  return null;
+}
+
+function encodeMinecraftString(value) {
+  const bytes = Buffer.from(String(value || ''), 'utf8');
+  return Buffer.concat([encodeMinecraftVarInt(bytes.length), bytes]);
+}
+
+function encodeMinecraftPacket(payload) {
+  return Buffer.concat([encodeMinecraftVarInt(payload.length), payload]);
+}
+
+function createMinecraftStatusRequest(host, port) {
+  const portBuffer = Buffer.allocUnsafe(2);
+  portBuffer.writeUInt16BE(normalizeServerPort(port), 0);
+  const handshake = encodeMinecraftPacket(Buffer.concat([
+    encodeMinecraftVarInt(0),
+    encodeMinecraftVarInt(-1),
+    encodeMinecraftString(host),
+    portBuffer,
+    encodeMinecraftVarInt(1)
+  ]));
+  const statusRequest = encodeMinecraftPacket(encodeMinecraftVarInt(0));
+  return Buffer.concat([handshake, statusRequest]);
+}
+
+function parseMinecraftStatusResponse(buffer) {
+  const packetLength = decodeMinecraftVarInt(buffer, 0);
+  if (!packetLength) {
+    return null;
+  }
+  const packetEnd = packetLength.nextOffset + packetLength.value;
+  if (buffer.length < packetEnd) {
+    return null;
+  }
+  const packetId = decodeMinecraftVarInt(buffer, packetLength.nextOffset);
+  if (!packetId) {
+    return null;
+  }
+  const jsonLength = decodeMinecraftVarInt(buffer, packetId.nextOffset);
+  if (!jsonLength) {
+    return null;
+  }
+  const jsonStart = jsonLength.nextOffset;
+  const jsonEnd = jsonStart + jsonLength.value;
+  if (buffer.length < jsonEnd) {
+    return null;
+  }
+  return JSON.parse(buffer.toString('utf8', jsonStart, jsonEnd));
+}
+
+function minecraftDescriptionToText(description) {
+  if (!description) {
+    return '';
+  }
+  if (typeof description === 'string') {
+    return description;
+  }
+  if (Array.isArray(description)) {
+    return description.map(minecraftDescriptionToText).join('');
+  }
+  if (typeof description === 'object') {
+    return [
+      description.text || '',
+      ...(Array.isArray(description.extra) ? description.extra.map(minecraftDescriptionToText) : [])
+    ].join('');
+  }
+  return '';
+}
+
+function pingMinecraftServerStatus(host, port) {
+  return new Promise((resolve, reject) => {
+    const normalizedHost = normalizeServerHost(host);
+    const normalizedPort = normalizeServerPort(port);
+    if (!normalizedHost) {
+      reject(new Error('Server-Adresse fehlt.'));
+      return;
+    }
+
+    const chunks = [];
+    let settled = false;
+    const socket = net.createConnection({ host: normalizedHost, port: normalizedPort });
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      reject(new Error('Serverstatus-Timeout.'));
+    }, MINECRAFT_SERVER_STATUS_TIMEOUT_MS);
+
+    const finish = (error, value = null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value);
+      }
+    };
+
+    socket.on('connect', () => {
+      socket.write(createMinecraftStatusRequest(normalizedHost, normalizedPort));
+    });
+    socket.on('data', (chunk) => {
+      chunks.push(chunk);
+      try {
+        const parsed = parseMinecraftStatusResponse(Buffer.concat(chunks));
+        if (parsed) {
+          finish(null, parsed);
+        }
+      } catch (error) {
+        finish(error);
+      }
+    });
+    socket.on('error', (error) => finish(error));
+    socket.on('end', () => {
+      if (!settled) {
+        finish(new Error('Serverstatus konnte nicht gelesen werden.'));
+      }
+    });
+  });
+}
+
+async function enrichServerFavoriteMetadata(server, { force = false } = {}) {
+  const normalizedServer = normalizeServerFavorite(server);
+  if (!normalizedServer) {
+    return server;
+  }
+  if (!force && normalizedServer.iconDataUrl) {
+    return normalizedServer;
+  }
+  try {
+    const status = await pingMinecraftServerStatus(normalizedServer.host, normalizedServer.port);
+    const iconDataUrl = sanitizeServerIconDataUrl(status?.favicon);
+    const motd = sanitizeServerText(minecraftDescriptionToText(status?.description));
+    return {
+      ...normalizedServer,
+      ...(iconDataUrl ? { iconDataUrl } : {}),
+      ...(motd ? { motd } : {}),
+      iconUpdatedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    logger.warn('Could not read Minecraft server icon', {
+      host: normalizedServer.host,
+      port: normalizedServer.port,
+      error: serializeError(error)
+    });
+    return normalizedServer;
+  }
+}
+
+async function refreshServerFavoriteIcons(state, { force = false } = {}) {
+  const normalizedState = normalizeServerFavoritesState(state);
+  let changed = false;
+  const servers = await Promise.all(normalizedState.servers.map(async (server) => {
+    const enriched = await enrichServerFavoriteMetadata(server, { force });
+    if (enriched.iconDataUrl !== server.iconDataUrl || enriched.motd !== server.motd || enriched.iconUpdatedAt !== server.iconUpdatedAt) {
+      changed = true;
+    }
+    return enriched;
+  }));
+  const nextState = { servers };
+  if (changed) {
+    writeServerFavoritesState(nextState);
+  }
+  return nextState;
+}
+
+async function getServerFavoritesConfig() {
+  const state = readServerFavoritesState();
+  return {
+    success: true,
+    // Only explicitly saved favorites belong in the launcher favorites UI.
+    // Minecraft's servers.dat may contain many normal multiplayer entries and
+    // must not be merged into this list automatically.
+    servers: state.servers
+      .slice()
+      .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))
+  };
+}
+
+async function addServerFavorite(server) {
+  const favorite = normalizeServerFavorite(server);
+  if (!favorite) {
+    return { success: false, error: 'Bitte gib eine gültige Server-Adresse ein.' };
+  }
+  const state = readServerFavoritesState();
+  const existing = state.servers.find((entry) => entry.id === favorite.id);
+  const nextServer = await enrichServerFavoriteMetadata({
+    ...(existing || {}),
+    ...favorite,
+    iconDataUrl: favorite.iconDataUrl || existing?.iconDataUrl || '',
+    motd: favorite.motd || existing?.motd || '',
+    iconUpdatedAt: favorite.iconUpdatedAt || existing?.iconUpdatedAt || '',
+    createdAt: existing?.createdAt || favorite.createdAt,
+    updatedAt: new Date().toISOString()
+  }, { force: true });
+  state.servers = [
+    nextServer,
+    ...state.servers.filter((entry) => entry.id !== favorite.id)
+  ];
+  writeServerFavoritesState(state);
+  return {
+    success: true,
+    server: nextServer,
+    servers: (await getServerFavoritesConfig()).servers,
+    message: `${nextServer.name} wurde gespeichert.`
+  };
+}
+
+async function removeServerFavorite(serverId) {
+  const normalizedServerId = String(serverId || '').trim();
+  const state = readServerFavoritesState();
+  const removed = state.servers.find((server) => server.id === normalizedServerId);
+  if (!removed) {
+    return { success: false, error: 'Server wurde nicht gefunden.' };
+  }
+  state.servers = state.servers.filter((server) => server.id !== normalizedServerId);
+  writeServerFavoritesState(state);
+  return {
+    success: true,
+    servers: (await getServerFavoritesConfig()).servers,
+    message: `${removed.name} wurde entfernt.`
+  };
+}
+
+function resolveLaunchServer(launchOptions = {}) {
+  const serverId = String(launchOptions?.serverId || '').trim();
+  if (serverId) {
+    const favorite = readServerFavoritesState().servers.find((server) => server.id === serverId);
+    if (favorite) {
+      return favorite;
+    }
+    if (serverId.startsWith('official-')) {
+      try {
+        const officialServer = listServers(DEFAULT_MINECRAFT_DIR).map((server) => normalizeServerFavorite({
+          name: server.name,
+          address: server.address
+        })).find((server) => server && `official-${serverIdFor(server.host, server.port)}` === serverId);
+        if (officialServer) return officialServer;
+      } catch (_error) {
+        // A malformed servers.dat entry must not break normal launching.
+      }
+    }
+  }
+  const direct = normalizeServerFavorite(launchOptions?.server || launchOptions);
+  return direct ? {
+    id: direct.id,
+    name: direct.name,
+    host: direct.host,
+    port: direct.port
+  } : null;
+}
+
+function createHostedServerId(name = '') {
+  return crypto.createHash('sha1')
+    .update(`${Date.now()}:${crypto.randomBytes(8).toString('hex')}:${name}`)
+    .digest('hex')
+    .slice(0, 14);
+}
+
+function normalizeHostedServerName(value) {
+  let normalized = String(value || '').trim().toLowerCase();
+  normalized = normalized.replace(/^https?:\/\//u, '');
+  normalized = normalized.replace(/:\d+$/u, '');
+  return normalized
+    .replace(/[^a-z0-9-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .replace(/-{2,}/gu, '-')
+    .slice(0, 32);
+}
+
+function getHostedServerHostName(serverName) {
+  return normalizeHostedServerName(serverName);
+}
+
+function getHostedServerDomain(server) {
+  const customDomain = String(server?.customDomain || '').trim();
+  if (customDomain) {
+    return customDomain;
+  }
+  const hostName = getHostedServerHostName(server?.hostName || server?.name || '');
+  return hostName ? `${hostName}.x.gg` : '';
+}
+
+function getHostedServerAutoDnsDomain(server, publicIp = '') {
+  const hostName = getHostedServerHostName(server?.hostName || server?.name || 'server') || 'server';
+  const ip = String(publicIp || '').trim();
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(ip) || isPrivateIpv4Address(ip)) {
+    return '';
+  }
+  return `${hostName}-${ip.replace(/\./gu, '-')}.${HOSTED_SERVER_AUTO_DNS_SUFFIX}`;
+}
+
+function getDefaultHostedServer(name = '') {
+  const now = new Date().toISOString();
+  const normalizedName = normalizeHostedServerName(name);
+  return {
+    id: createHostedServerId(normalizedName),
+    name: normalizedName,
+    hostName: getHostedServerHostName(normalizedName),
+    directoryName: normalizedName,
+    minecraftVersion: 'latest',
+    edition: 'java',
+    software: 'vanilla',
+    serverSoftware: 'vanilla',
+    softwareLabel: 'Vanilla',
+    networkProtocol: 'TCP',
+    fabricLoaderVersion: '',
+    ramGb: 2,
+    port: 25565,
+    maxPlayers: 20,
+    difficulty: 'normal',
+    gamemode: 'survival',
+    motd: '',
+    pvp: true,
+    whitelist: false,
+    onlineMode: true,
+    enableCommandBlock: false,
+    spawnProtection: 16,
+    viewDistance: 10,
+    simulationDistance: 10,
+    eulaAccepted: false,
+    ownerUsername: '',
+    ownerUuid: '',
+    createdAt: now,
+    updatedAt: now,
+    installedAt: '',
+    resolvedMinecraftVersion: '',
+    resolvedLoaderVersion: '',
+    resolvedInstallerVersion: ''
+  };
+}
+
+function getDefaultHostedServerState() {
+  return {
+    activeServerId: '',
+    servers: []
+  };
+}
+
+function normalizeHostedServerPort(value, fallback = 25565) {
+  const port = Math.round(Number(value) || fallback);
+  return Math.min(65535, Math.max(1024, port));
+}
+
+function normalizeHostedServerInt(value, fallback, min, max) {
+  const number = Math.round(Number(value) || fallback);
+  return Math.min(max, Math.max(min, number));
+}
+
+function normalizeHostedServerBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function normalizeHostedServerEdition(value = 'java') {
+  return String(value || '').trim().toLowerCase() === 'bedrock' ? 'bedrock' : 'java';
+}
+
+function normalizeHostedServerSoftware(value = 'vanilla', edition = 'java') {
+  const normalizedEdition = normalizeHostedServerEdition(edition);
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalizedEdition === 'bedrock') {
+    return 'bedrock';
+  }
+  return normalized === 'paper' ? 'paper' : 'vanilla';
+}
+
+function getHostedServerDefaultPort(serverOrEdition = 'java') {
+  const edition = typeof serverOrEdition === 'object'
+    ? normalizeHostedServerEdition(serverOrEdition?.edition)
+    : normalizeHostedServerEdition(serverOrEdition);
+  return edition === 'bedrock' ? 19132 : 25565;
+}
+
+function getHostedServerProtocol(serverOrEdition = 'java') {
+  const edition = typeof serverOrEdition === 'object'
+    ? normalizeHostedServerEdition(serverOrEdition?.edition)
+    : normalizeHostedServerEdition(serverOrEdition);
+  return edition === 'bedrock' ? 'UDP' : 'TCP';
+}
+
+function isHostedServerBedrock(server) {
+  return normalizeHostedServerEdition(server?.edition) === 'bedrock';
+}
+
+function isHostedServerJava(server) {
+  return !isHostedServerBedrock(server);
+}
+
+function getHostedServerSoftwareLabel(server) {
+  const software = normalizeHostedServerSoftware(server?.software || server?.serverSoftware, server?.edition);
+  if (software === 'paper') {
+    return 'Paper';
+  }
+  if (software === 'bedrock') {
+    return 'Bedrock Dedicated Server';
+  }
+  return 'Vanilla';
+}
+
+function normalizeHostedServerEntry(rawServer = {}, fallbackPort = 25565) {
+  const name = normalizeHostedServerName(rawServer.name);
+  const id = String(rawServer.id || createHostedServerId(name)).replace(/[^\w.-]/gu, '').slice(0, 40) || createHostedServerId(name);
+  const edition = normalizeHostedServerEdition(rawServer.edition || rawServer.serverEdition || 'java');
+  const software = normalizeHostedServerSoftware(rawServer.software || rawServer.serverSoftware || rawServer.type || 'vanilla', edition);
+  const defaultPort = normalizeHostedServerPort(fallbackPort || getHostedServerDefaultPort(edition), getHostedServerDefaultPort(edition));
+  const minecraftVersion = String(rawServer.minecraftVersion || rawServer.versionId || 'latest').trim().slice(0, 24) || 'latest';
+  const difficulty = ['peaceful', 'easy', 'normal', 'hard'].includes(String(rawServer.difficulty || '').toLowerCase())
+    ? String(rawServer.difficulty).toLowerCase()
+    : 'normal';
+  const gamemode = ['survival', 'creative', 'adventure', 'spectator'].includes(String(rawServer.gamemode || '').toLowerCase())
+    ? String(rawServer.gamemode).toLowerCase()
+    : 'survival';
+  return {
+    id,
+    name,
+    hostName: getHostedServerHostName(name),
+    directoryName: String(rawServer.directoryName || rawServer.folderName || (rawServer.installedAt ? id : getHostedServerHostName(name)) || id)
+      .replace(/[^\w.-]/gu, '-')
+      .replace(/^-+|-+$/gu, '')
+      .slice(0, 40) || id,
+    minecraftVersion,
+    edition,
+    software,
+    serverSoftware: software,
+    softwareLabel: getHostedServerSoftwareLabel({ edition, software }),
+    networkProtocol: getHostedServerProtocol(edition),
+    fabricLoaderVersion: String(rawServer.fabricLoaderVersion || '').trim().slice(0, 32),
+    ramGb: Math.min(16, Math.max(1, Math.round(Number(rawServer.ramGb) || 2))),
+    port: normalizeHostedServerPort(rawServer.port, defaultPort),
+    maxPlayers: Math.min(100, Math.max(1, Math.round(Number(rawServer.maxPlayers) || 20))),
+    difficulty,
+    gamemode,
+    motd: String(rawServer.motd || '').trim().slice(0, 120),
+    pvp: normalizeHostedServerBoolean(rawServer.pvp, true),
+    whitelist: normalizeHostedServerBoolean(rawServer.whitelist, false),
+    onlineMode: normalizeHostedServerBoolean(rawServer.onlineMode, true),
+    enableCommandBlock: normalizeHostedServerBoolean(rawServer.enableCommandBlock, false),
+    spawnProtection: normalizeHostedServerInt(rawServer.spawnProtection, 16, 0, 64),
+    viewDistance: normalizeHostedServerInt(rawServer.viewDistance, 10, 2, 32),
+    simulationDistance: normalizeHostedServerInt(rawServer.simulationDistance, 10, 2, 32),
+    eulaAccepted: Boolean(rawServer.eulaAccepted),
+    ownerUsername: String(rawServer.ownerUsername || '').trim().slice(0, 16),
+    ownerUuid: normalizeMinecraftUuid(rawServer.ownerUuid || ''),
+    createdAt: String(rawServer.createdAt || '').trim() || new Date().toISOString(),
+    updatedAt: String(rawServer.updatedAt || '').trim() || new Date().toISOString(),
+    installedAt: String(rawServer.installedAt || '').trim(),
+    resolvedMinecraftVersion: String(rawServer.resolvedMinecraftVersion || '').trim(),
+    resolvedLoaderVersion: String(rawServer.resolvedLoaderVersion || '').trim(),
+    resolvedInstallerVersion: String(rawServer.resolvedInstallerVersion || '').trim()
+  };
+}
+
+function normalizeHostedServerState(rawState = {}) {
+  let rawServers = Array.isArray(rawState.servers) ? rawState.servers : [];
+  if (!rawServers.length && (rawState.name || rawState.ramGb || rawState.eulaAccepted || rawState.versionId)) {
+    rawServers = [{
+      id: 'default',
+      name: rawState.name,
+      minecraftVersion: rawState.versionId || 'latest',
+      ramGb: rawState.ramGb,
+      port: rawState.port,
+      eulaAccepted: rawState.eulaAccepted,
+      maxPlayers: rawState.maxPlayers,
+      difficulty: rawState.difficulty,
+      gamemode: rawState.gamemode,
+      installedAt: rawState.installedAt,
+      updatedAt: rawState.updatedAt
+    }];
+  }
+
+  const seen = new Set();
+  const seenPorts = new Set();
+  const servers = rawServers
+    .map((server, index) => {
+      const edition = normalizeHostedServerEdition(server?.edition || server?.serverEdition || 'java');
+      return normalizeHostedServerEntry(server, getHostedServerDefaultPort(edition) + index);
+    })
+    .filter((server) => server.name)
+    .filter((server) => !(server.name === 'x-server' && !server.installedAt && !server.eulaAccepted))
+    .filter((server) => {
+      const key = server.hostName.toLowerCase();
+      if (seen.has(server.id) || seen.has(key)) {
+        return false;
+      }
+      seen.add(server.id);
+      seen.add(key);
+      return true;
+    })
+    .map((server) => {
+      let port = normalizeHostedServerPort(server.port);
+      while (seenPorts.has(port) && port < 65535) {
+        port += 1;
+      }
+      seenPorts.add(port);
+      return port === server.port ? server : { ...server, port };
+    });
+
+  const activeServerId = servers.some((server) => server.id === rawState.activeServerId)
+    ? rawState.activeServerId
+    : servers[0]?.id || '';
+  return { activeServerId, servers };
+}
+
+function readHostedServerState() {
+  return ROBUSTNESS.readJsonFile(HOSTED_SERVER_STATE_FILE, getDefaultHostedServerState(), {
+    label: 'hosted-server-state',
+    normalize: normalizeHostedServerState
+  });
+}
+
+function writeHostedServerState(state) {
+  ensureDir(HOSTED_SERVER_DIR);
+  ensureDir(HOSTED_SERVER_INSTANCES_DIR);
+  const normalizedState = normalizeHostedServerState(state);
+  ROBUSTNESS.writeJsonFileAtomic(HOSTED_SERVER_STATE_FILE, normalizedState, {
+    label: 'hosted-server-state',
+    metadata: { operation: 'writeHostedServerState' }
+  });
+  return normalizedState;
+}
+
+function getHostedServerById(state, serverId = '') {
+  const normalizedId = String(serverId || state.activeServerId || '').trim();
+  return state.servers.find((server) => server.id === normalizedId) || state.servers[0] || null;
+}
+
+function getHostedServerDir(server) {
+  const folderName = String(server?.directoryName || server?.hostName || server?.id || 'default')
+    .replace(/[^\w.-]/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 40) || 'default';
+  return path.join(HOSTED_SERVER_INSTANCES_DIR, folderName);
+}
+
+function getHostedServerJarPath(server) {
+  return path.join(getHostedServerDir(server), 'server.jar');
+}
+
+function getHostedServerBedrockExecutablePath(server) {
+  return path.join(getHostedServerDir(server), process.platform === 'win32' ? 'bedrock_server.exe' : 'bedrock_server');
+}
+
+function getHostedServerModsDir(server) {
+  return path.join(getHostedServerDir(server), 'mods');
+}
+
+function getHostedServerLogPath(server) {
+  return path.join(getHostedServerDir(server), 'server.log');
+}
+
+function isHostedServerRuntimeAlive(runtime) {
+  return Boolean(runtime?.process && !runtime.process.killed && runtime.process.exitCode === null);
+}
+
+function getHostedServerRuntime(serverId = '') {
+  const id = String(serverId || hostedServerRunningId || '').trim();
+  if (!id) {
+    return null;
+  }
+  const runtime = hostedServerProcesses.get(id) || null;
+  return isHostedServerRuntimeAlive(runtime) ? runtime : null;
+}
+
+function getHostedServerRunningIds() {
+  for (const [serverId, runtime] of hostedServerProcesses.entries()) {
+    if (!isHostedServerRuntimeAlive(runtime)) {
+      hostedServerProcesses.delete(serverId);
+    }
+  }
+  return Array.from(hostedServerProcesses.keys());
+}
+
+function syncLegacyHostedServerRuntime() {
+  const runningIds = getHostedServerRunningIds();
+  const preferredId = hostedServerRunningId && runningIds.includes(hostedServerRunningId)
+    ? hostedServerRunningId
+    : runningIds[0] || '';
+  const runtime = preferredId ? hostedServerProcesses.get(preferredId) : null;
+  hostedServerProcess = runtime?.process || null;
+  hostedServerStartedAt = runtime?.startedAt || '';
+  hostedServerRunningId = preferredId;
+  if (!runningIds.length) {
+    stopHostedServerPowerBlocker();
+  }
+  return runtime || null;
+}
+
+function readHostedServerConsoleTail(server, maxChars = 12000) {
+  if (!server) {
+    return '';
+  }
+  const logPath = getHostedServerLogPath(server);
+  try {
+    if (!fs.existsSync(logPath)) {
+      return '';
+    }
+    const stats = fs.statSync(logPath);
+    const size = Math.min(stats.size, maxChars);
+    const buffer = Buffer.alloc(size);
+    const fd = fs.openSync(logPath, 'r');
+    try {
+      fs.readSync(fd, buffer, 0, size, Math.max(0, stats.size - size));
+    } finally {
+      fs.closeSync(fd);
+    }
+    return buffer.toString('utf8').replace(/\u0000/gu, '').trim();
+  } catch (error) {
+    logger.warn('Could not read hosted server log', { error: serializeError(error) });
+    return '';
+  }
+}
+
+function hasHostedServerReadyLog(consoleOutput = '', server = null) {
+  const output = String(consoleOutput || '');
+  if (isHostedServerBedrock(server)) {
+    return /Server started\.|IPv4 supported, port:|IPv4 supported/iu.test(output);
+  }
+  return /Done \([\d.]+s\)! For help, type "help"/iu.test(output);
+}
+
+function readHostedServerProperties(server) {
+  if (!server) {
+    return { exists: false, serverIp: '', serverPort: 0, protocol: 'TCP' };
+  }
+  const propertiesPath = path.join(getHostedServerDir(server), 'server.properties');
+  try {
+    if (!fs.existsSync(propertiesPath)) {
+      return { exists: false, serverIp: '', serverPort: 0, path: propertiesPath, protocol: getHostedServerProtocol(server) };
+    }
+    const raw = fs.readFileSync(propertiesPath, 'utf8');
+    const values = {};
+    String(raw || '').split(/\r?\n/u).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        return;
+      }
+      const separator = trimmed.indexOf('=');
+      if (separator < 0) {
+        return;
+      }
+      values[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim();
+    });
+    return {
+      exists: true,
+      path: propertiesPath,
+      serverIp: isHostedServerBedrock(server) ? '' : (values['server-ip'] || ''),
+      serverPort: normalizeHostedServerPort(values['server-port'] || server.port, getHostedServerDefaultPort(server)),
+      serverPortV6: normalizeHostedServerPort(values['server-portv6'] || (Number(server.port) + 1), getHostedServerDefaultPort(server) + 1),
+      protocol: getHostedServerProtocol(server),
+      raw
+    };
+  } catch (error) {
+    logger.warn('Could not read hosted server.properties', { error: serializeError(error) });
+    return { exists: false, serverIp: '', serverPort: 0, path: propertiesPath, protocol: getHostedServerProtocol(server), error: error.message || String(error) };
+  }
+}
+
+function getHostedServerProcessStats(runtime = syncLegacyHostedServerRuntime()) {
+  const processRef = runtime?.process || null;
+  if (!processRef || !processRef.pid) {
+    return { memoryMb: 0, cpuTime: '', cpuSeconds: 0, pid: null };
+  }
+  if (process.platform !== 'win32') {
+    return { memoryMb: 0, cpuTime: '', cpuSeconds: 0, pid: processRef.pid };
+  }
+  try {
+    const output = execFileSync('tasklist', [
+      '/FI',
+      `PID eq ${processRef.pid}`,
+      '/FO',
+      'CSV',
+      '/NH'
+    ], { encoding: 'utf8', windowsHide: true, timeout: 2500 }).trim();
+    const match = output.match(/^"[^"]*","[^"]*","[^"]*","[^"]*","([^"]*)"/u);
+    const memoryKb = match ? Number(String(match[1]).replace(/[^\d]/gu, '')) : 0;
+    let cpuSeconds = 0;
+    try {
+      const cpuOutput = execFileSync('powershell', [
+        '-NoProfile',
+        '-Command',
+        `(Get-Process -Id ${processRef.pid} -ErrorAction SilentlyContinue).CPU`
+      ], { encoding: 'utf8', windowsHide: true, timeout: 2500 }).trim();
+      cpuSeconds = Math.max(0, Number(cpuOutput.replace(',', '.')) || 0);
+    } catch (_cpuError) {
+      cpuSeconds = 0;
+    }
+    return {
+      memoryMb: memoryKb ? Math.round(memoryKb / 1024) : 0,
+      cpuTime: cpuSeconds ? `${Math.round(cpuSeconds)}s` : '',
+      cpuSeconds,
+      pid: processRef.pid
+    };
+  } catch (_error) {
+    return { memoryMb: 0, cpuTime: '', cpuSeconds: 0, pid: processRef.pid };
+  }
+}
+
+function parseHostedServerPlayerCount(consoleOutput = '') {
+  const matches = Array.from(String(consoleOutput || '').matchAll(/There are (\d+) of a max of (\d+) players online/giu));
+  const last = matches[matches.length - 1];
+  if (!last) {
+    return null;
+  }
+  return {
+    online: Number(last[1]) || 0,
+    max: Number(last[2]) || 0
+  };
+}
+
+function requestHostedServerPlayerList(runtime) {
+  if (!isHostedServerRuntimeAlive(runtime) || !runtime.process?.stdin) {
+    return;
+  }
+  const now = Date.now();
+  if (runtime.lastPlayerListAt && now - runtime.lastPlayerListAt < 30000) {
+    return;
+  }
+  runtime.lastPlayerListAt = now;
+  try {
+    runtime.process.stdin.write('list\n');
+  } catch (_error) {
+    // Player polling is best-effort; server process monitoring continues without it.
+  }
+}
+
+function listHostedServerMods(server) {
+  const modsDir = getHostedServerModsDir(server);
+  if (!fs.existsSync(modsDir)) {
+    return [];
+  }
+  return fs.readdirSync(modsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.jar$/iu.test(entry.name))
+    .map((entry) => {
+      const filePath = path.join(modsDir, entry.name);
+      let size = 0;
+      try {
+        size = fs.statSync(filePath).size;
+      } catch (_error) {
+        size = 0;
+      }
+      return { fileName: entry.name, size };
+    })
+    .sort((left, right) => left.fileName.localeCompare(right.fileName));
+}
+
+function getLocalLanIpAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal && entry.address) {
+        return entry.address;
+      }
+    }
+  }
+  return '';
+}
+
+function getLocalLanAddress(port = 25565) {
+  const address = getLocalLanIpAddress();
+  return address ? `${address}:${normalizeHostedServerPort(port)}` : '';
+}
+
+function isPrivateIpv4Address(value = '') {
+  const parts = String(value || '').trim().split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [first, second] = parts;
+  return first === 10
+    || first === 127
+    || first === 192 && second === 168
+    || first === 172 && second >= 16 && second <= 31
+    || first === 169 && second === 254;
+}
+
+async function fetchPublicIpAddress() {
+  try {
+    const url = 'https://api.ipify.org?format=json';
+    assertTrustedHttpsUrl(url, TRUSTED_PUBLIC_IP_HOSTS);
+    const response = await fetchImpl(url, {
+      headers: { Accept: 'application/json' },
+      timeout: 4000
+    });
+    if (!response.ok) {
+      return '';
+    }
+    const body = await response.json();
+    const ip = String(body?.ip || '').trim();
+    return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(ip) && !isPrivateIpv4Address(ip) ? ip : '';
+  } catch (error) {
+    logger.warn('Could not read public IP for hosted server', { error: serializeError(error) });
+    return '';
+  }
+}
+
+function withTimeout(promise, timeoutMs, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs))
+  ]);
+}
+
+function checkTcpPortOpen(host, port = 25565, timeoutMs = 1800) {
+  return new Promise((resolve) => {
+    const normalizedHost = String(host || '').trim();
+    if (!normalizedHost) {
+      resolve(false);
+      return;
+    }
+    const socket = new net.Socket();
+    const finish = (open) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(Boolean(open));
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+    socket.connect(normalizeHostedServerPort(port), normalizedHost);
+  });
+}
+
+function getHostedServerPortListeners(port = 25565, protocol = 'TCP') {
+  if (process.platform !== 'win32') {
+    return [];
+  }
+  const normalizedPort = normalizeHostedServerPort(port);
+  const normalizedProtocol = String(protocol || 'TCP').toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
+  try {
+    const output = execFileSync('netstat', ['-ano', '-p', normalizedProtocol.toLowerCase()], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 3000
+    });
+    return String(output || '').split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith(normalizedProtocol))
+      .map((line) => line.split(/\s+/u))
+      .filter((parts) => normalizedProtocol === 'UDP' ? parts.length >= 4 : parts.length >= 5)
+      .map((parts) => normalizedProtocol === 'UDP'
+        ? {
+          protocol: parts[0],
+          localAddress: parts[1],
+          state: '',
+          pid: Number(parts[3]) || null
+        }
+        : {
+          protocol: parts[0],
+          localAddress: parts[1],
+          state: parts[3],
+          pid: Number(parts[4]) || null
+        })
+      .filter((entry) => {
+        const portMatch = entry.localAddress.match(/:(\d+)$/u);
+        return portMatch
+          && Number(portMatch[1]) === normalizedPort
+          && (normalizedProtocol === 'UDP' || entry.state === 'LISTENING');
+      });
+  } catch (error) {
+    logger.warn('Could not inspect hosted server port listeners', { port: normalizedPort, protocol: normalizedProtocol, error: serializeError(error) });
+    return [];
+  }
+}
+
+function isHostedServerListeningOnAllInterfaces(listeners = []) {
+  return listeners.some((entry) => {
+    const address = String(entry.localAddress || '').toLowerCase();
+    return address.startsWith('0.0.0.0:') || address.startsWith('[::]:') || address.startsWith(':::');
+  });
+}
+
+async function checkHostedServerPublicPort(publicIp = '', port = 25565, protocol = 'TCP') {
+  const normalizedProtocol = String(protocol || 'TCP').toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
+  const normalizedPort = normalizeHostedServerPort(port);
+  if (!publicIp || isPrivateIpv4Address(publicIp)) {
+    return { attempted: false, open: false, port: normalizedPort, protocol: normalizedProtocol, reason: 'Keine öffentliche IPv4 vorhanden.' };
+  }
+  if (normalizedProtocol === 'UDP') {
+    return {
+      attempted: true,
+      open: false,
+      port: normalizedPort,
+      protocol: normalizedProtocol,
+      reason: 'UDP-Port wird über den externen Bedrock-Verbindungstest geprüft.'
+    };
+  }
+  const open = await checkTcpPortOpen(publicIp, normalizedPort, 1800);
+  return {
+    attempted: true,
+    open,
+    port: normalizedPort,
+    protocol: normalizedProtocol,
+    reason: open ? 'TCP-Port ist über die öffentliche IPv4 erreichbar.' : 'TCP-Port ist über die öffentliche IPv4 nicht erreichbar.'
+  };
+}
+
+function splitHostedServerAddress(address = '', fallbackPort = 25565) {
+  const normalized = String(address || '').trim();
+  if (!normalized) {
+    return { host: '', port: normalizeHostedServerPort(fallbackPort) };
+  }
+  const match = normalized.match(/^([^:]+):(\d+)$/u);
+  if (match) {
+    return { host: match[1], port: normalizeHostedServerPort(match[2], fallbackPort) };
+  }
+  return { host: normalized, port: normalizeHostedServerPort(fallbackPort) };
+}
+
+async function checkHostedServerJoinAddress(address = '', server = null, options = {}) {
+  const fallbackPort = normalizeHostedServerPort(server?.port, getHostedServerDefaultPort(server));
+  const { host, port } = splitHostedServerAddress(address, fallbackPort);
+  if (!host) {
+    return { attempted: false, open: false, address: '', reason: 'Keine Adresse vorhanden.' };
+  }
+  const protocol = getHostedServerProtocol(server);
+  if (protocol === 'TCP') {
+    const open = await checkTcpPortOpen(host, port, options.timeoutMs || 1200);
+    return {
+      attempted: true,
+      open,
+      online: open,
+      address: `${host}:${port}`,
+      protocol,
+      reason: open ? 'TCP-Verbindung erfolgreich.' : 'TCP-Verbindung fehlgeschlagen.'
+    };
+  }
+  const localHosts = new Set(['localhost', '127.0.0.1', getLocalLanIpAddress()]);
+  if (localHosts.has(host)) {
+    const open = getHostedServerPortListeners(port, 'UDP').length > 0;
+    return {
+      attempted: true,
+      open,
+      online: open,
+      address: `${host}:${port}`,
+      protocol,
+      reason: open ? 'UDP-Port lauscht lokal.' : 'UDP-Port lauscht lokal nicht.'
+    };
+  }
+  const external = await checkExternalMinecraftStatus(`${host}:${port}`, server);
+  return {
+    attempted: external.attempted,
+    open: Boolean(external.online),
+    online: Boolean(external.online),
+    address: `${host}:${port}`,
+    protocol,
+    reason: external.reason
+  };
+}
+
+async function buildHostedServerConnectionTests(server, { running, publicIp, domainInfo } = {}) {
+  if (!server) {
+    return [];
+  }
+  const port = normalizeHostedServerPort(server.port, getHostedServerDefaultPort(server));
+  const lanIp = getLocalLanIpAddress();
+  const tests = [
+    { name: 'localhost', address: `localhost:${port}` },
+    { name: 'LAN', address: lanIp ? `${lanIp}:${port}` : '' },
+    { name: 'öffentliche IP', address: publicIp ? `${publicIp}:${port}` : '' },
+    { name: 'Domain', address: domainInfo?.joinAddress || domainInfo?.domain || '' }
+  ];
+  const results = [];
+  for (const test of tests) {
+    if (!running || !test.address) {
+      results.push({
+        name: test.name,
+        address: test.address,
+        attempted: false,
+        open: false,
+        reason: !running ? 'Server läuft nicht.' : 'Adresse nicht verfügbar.'
+      });
+      continue;
+    }
+    results.push({
+      name: test.name,
+      ...(await checkHostedServerJoinAddress(test.address, server))
+    });
+  }
+  return results;
+}
+
+async function checkExternalMinecraftStatus(address = '', server = null) {
+  const target = String(address || '').trim();
+  if (!target) {
+    return { attempted: false, online: false, reason: 'Keine externe Join-Adresse vorhanden.' };
+  }
+  try {
+    const editionPath = isHostedServerBedrock(server) ? 'bedrock/3' : '3';
+    const url = `https://api.mcsrvstat.us/${editionPath}/${encodeURIComponent(target)}`;
+    const result = await fetchJson(url, {
+      allowedHosts: TRUSTED_MINECRAFT_STATUS_HOSTS,
+      retries: 0,
+      timeoutMs: 4500,
+      headers: { Accept: 'application/json' }
+    });
+    return {
+      attempted: true,
+      online: Boolean(result?.online),
+      address: target,
+      ip: result?.ip || '',
+      port: result?.port || null,
+      edition: isHostedServerBedrock(server) ? 'bedrock' : 'java',
+      players: result?.players || null,
+      reason: result?.online ? 'Externer Minecraft-Statusdienst sieht den Server.' : 'Externer Minecraft-Statusdienst sieht den Server nicht online.'
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      online: false,
+      address: target,
+      reason: `Externe Minecraft-Prüfung fehlgeschlagen: ${error.message || String(error)}`
+    };
+  }
+}
+
+async function resolveHostedServerDomain(server, publicIp = '') {
+  const domain = getHostedServerDomain(server);
+  const autoDomain = getHostedServerAutoDnsDomain(server, publicIp);
+  const port = normalizeHostedServerPort(server?.port, getHostedServerDefaultPort(server));
+  const protocol = getHostedServerProtocol(server);
+  const srvProtocol = protocol === 'UDP' ? 'udp' : 'tcp';
+  const defaultPort = getHostedServerDefaultPort(server);
+  if (!domain) {
+    return {
+      domain,
+      joinAddress: '',
+      status: 'Keine Domain vergeben.',
+      ok: false
+    };
+  }
+
+  const result = {
+    domain,
+    joinAddress: domain,
+    status: `${domain} ist noch nicht verbunden. Erforderlich: A-Record ${domain} -> öffentliche IPv4, Port ${port} ${protocol} zum PC weiterleiten.${port === defaultPort ? '' : ` Für Port ungleich ${defaultPort} zusätzlich SRV _minecraft._${srvProtocol}.${domain}.`}`,
+    ok: false,
+    aRecords: [],
+    srvRecords: [],
+    requiredRecords: [],
+    protocol,
+    port,
+    configuredDomain: domain,
+    autoDomain,
+    autoDns: false
+  };
+  if (publicIp) {
+    result.requiredRecords.push({ type: 'A', name: domain, value: publicIp });
+  }
+  if (port !== defaultPort) {
+    result.requiredRecords.push({ type: 'SRV', name: `_minecraft._${srvProtocol}.${domain}`, value: `0 5 ${port} ${domain}` });
+  }
+
+  try {
+    const srvRecords = await withTimeout(dns.resolveSrv(`_minecraft._${srvProtocol}.${domain}`), 1800, []);
+    result.srvRecords = Array.isArray(srvRecords) ? srvRecords : [];
+    const matchingSrv = result.srvRecords.find((entry) => normalizeHostedServerPort(entry.port) === port && String(entry.name || '').replace(/\.$/u, '') === domain);
+    if (matchingSrv) {
+      result.joinAddress = domain;
+      result.status = `${domain} nutzt einen Minecraft-SRV-Record für Port ${port} ${protocol}.`;
+      result.ok = Boolean(publicIp);
+    }
+  } catch (_error) {
+    result.srvRecords = [];
+  }
+
+  try {
+    const aRecords = await withTimeout(dns.resolve4(domain), 1800, []);
+    result.aRecords = Array.isArray(aRecords) ? aRecords : [];
+    const matchesPublicIp = publicIp && result.aRecords.includes(publicIp);
+    if (matchesPublicIp && port === defaultPort) {
+      result.status = `${domain} zeigt auf deine öffentliche IP. Minecraft kann ohne Port beitreten.`;
+      result.ok = true;
+      return result;
+    }
+    if (matchesPublicIp && result.ok) {
+      result.joinAddress = domain;
+      result.status = `${domain} zeigt auf deine öffentliche IP und SRV nutzt Port ${port}.`;
+      result.ok = true;
+      return result;
+    }
+    if (matchesPublicIp) {
+      result.joinAddress = `${domain}:${port}`;
+      result.status = `${domain} zeigt auf deine öffentliche IP. Ohne SRV-Record braucht Minecraft den Port: ${result.joinAddress}`;
+      result.ok = true;
+      return result;
+    }
+  } catch (_error) {
+    result.aRecords = [];
+  }
+
+  if (!publicIp) {
+    result.status = `${domain} kann noch nicht geprüft werden. Erforderlich: öffentliche IPv4 ermitteln, A-Record ${domain} darauf setzen, Port ${port} ${protocol} zum PC weiterleiten.`;
+  } else {
+    if (!server?.customDomain && autoDomain) {
+      try {
+        const autoARecords = await withTimeout(dns.resolve4(autoDomain), 1800, []);
+        const autoMatchesPublicIp = Array.isArray(autoARecords) && autoARecords.includes(publicIp);
+        if (autoMatchesPublicIp) {
+          result.domain = autoDomain;
+          result.joinAddress = port === defaultPort ? autoDomain : `${autoDomain}:${port}`;
+          result.status = `DNS automatisch verbunden. ${autoDomain} zeigt auf ${publicIp}.`;
+          result.ok = true;
+          result.autoDns = true;
+          result.aRecords = autoARecords;
+          result.requiredRecords = [];
+          return result;
+        }
+      } catch (_error) {
+        // Automatic wildcard DNS is best-effort. Manual DNS guidance remains below.
+      }
+    }
+    result.status = `${domain} ist nicht aktiv verbunden. Erforderlich: A-Record ${domain} -> ${publicIp}; Port ${port} ${protocol} im Router auf diesen PC;${port === defaultPort ? '' : ` SRV _minecraft._${srvProtocol}.${domain} -> ${domain}:${port};`} danach extern mit mobilen Daten testen.`;
+  }
+  return result;
+}
+
+function checkLocalPortOpen(port = 25565, timeoutMs = 750, protocol = 'TCP') {
+  if (String(protocol || 'TCP').toUpperCase() === 'UDP') {
+    return Promise.resolve(getHostedServerPortListeners(port, 'UDP').length > 0);
+  }
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const finish = (open) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(Boolean(open));
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+    socket.connect(normalizeHostedServerPort(port), '127.0.0.1');
+  });
+}
+
+function ensureHostedServerFirewallRule(server) {
+  if (process.platform !== 'win32' || !server) {
+    return { attempted: false, success: false };
+  }
+  const port = normalizeHostedServerPort(server.port, getHostedServerDefaultPort(server));
+  const protocol = getHostedServerProtocol(server);
+  const ruleName = `X Client Minecraft ${getHostedServerSoftwareLabel(server)} ${protocol} ${port}`;
+  try {
+    const result = spawnSync('netsh', [
+      'advfirewall',
+      'firewall',
+      'add',
+      'rule',
+      `name=${ruleName}`,
+      'dir=in',
+      'action=allow',
+      `protocol=${protocol}`,
+      `localport=${port}`
+    ], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+    const success = result.status === 0 || /ok|exists|vorhanden|bereits/iu.test(output);
+    if (!success) {
+      logger.warn('Could not add hosted server firewall rule', { port, output });
+    }
+    return { attempted: true, success, protocol, port, output };
+  } catch (error) {
+    logger.warn('Could not add hosted server firewall rule', { port, protocol, error: serializeError(error) });
+    return { attempted: true, success: false, protocol, port, error: error.message || String(error) };
+  }
+}
+
+function ensureHostedServerUpnpPortMapping(server) {
+  if (process.platform !== 'win32' || !server) {
+    return { attempted: false, success: false, reason: 'UPnP wird nur unter Windows automatisch versucht.' };
+  }
+  const port = normalizeHostedServerPort(server.port, getHostedServerDefaultPort(server));
+  const protocol = getHostedServerProtocol(server);
+  const localIp = getLocalLanIpAddress();
+  if (!localIp) {
+    return { attempted: false, success: false, reason: 'Keine LAN-IP gefunden.' };
+  }
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(localIp)) {
+    return { attempted: false, success: false, reason: 'LAN-IP ist nicht IPv4.' };
+  }
+
+  const description = `X Client Minecraft ${getHostedServerSoftwareLabel(server)} ${protocol} ${port}`.replace(/'/gu, '');
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$port = ${port}`,
+    `$client = '${localIp}'`,
+    `$protocol = '${protocol}'`,
+    `$description = '${description}'`,
+    "$nat = New-Object -ComObject HNetCfg.NATUPnP",
+    "$maps = $nat.StaticPortMappingCollection",
+    "if ($null -eq $maps) { throw 'Router-UPnP ist nicht verfügbar oder deaktiviert.' }",
+    "$existingOk = $false",
+    "foreach ($mapping in $maps) {",
+    "  if ($mapping.ExternalPort -eq $port -and $mapping.Protocol -eq $protocol) {",
+    "    if ($mapping.InternalClient -eq $client -and $mapping.InternalPort -eq $port) { $existingOk = $true }",
+    "  }",
+    "}",
+    "if ($existingOk) { Write-Output 'UPNP_EXISTS'; exit 0 }",
+    "$maps.Add($port, $protocol, $port, $client, $true, $description) | Out-Null",
+    "Write-Output 'UPNP_ADDED'"
+  ].join('; ');
+
+  try {
+    const result = spawnSync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script
+    ], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+    const success = result.status === 0 && /UPNP_(?:ADDED|EXISTS)/u.test(output);
+    if (!success) {
+      logger.warn('Could not add hosted server UPnP mapping', { port, protocol, localIp, output });
+    }
+    return { attempted: true, success, port, protocol, localIp, output };
+  } catch (error) {
+    logger.warn('Could not add hosted server UPnP mapping', { port, protocol, localIp, error: serializeError(error) });
+    return { attempted: true, success: false, port, protocol, localIp, error: error.message || String(error) };
+  }
+}
+
+function getRouterWanIpViaUpnp() {
+  if (process.platform !== 'win32') {
+    return { attempted: false, ip: '', reason: 'Router-WAN-IP wird automatisch nur unter Windows-UPnP geprüft.' };
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$nat = New-Object -ComObject HNetCfg.NATUPnP",
+    "$ip = ''",
+    "try { if ($nat.NATEventManager -and $nat.NATEventManager.ExternalIPAddress) { $ip = [string]$nat.NATEventManager.ExternalIPAddress } } catch {}",
+    "if (-not $ip -and $nat.StaticPortMappingCollection) {",
+    "  foreach ($mapping in $nat.StaticPortMappingCollection) {",
+    "    try { if ($mapping.ExternalIPAddress) { $ip = [string]$mapping.ExternalIPAddress; break } } catch {}",
+    "  }",
+    "}",
+    "if ($ip) { Write-Output $ip; exit 0 }",
+    "Write-Output 'NO_WAN_IP'; exit 2"
+  ].join('; ');
+  try {
+    const result = spawnSync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script
+    ], { encoding: 'utf8', windowsHide: true, timeout: 6000 });
+    const output = String(result.stdout || '').trim().split(/\r?\n/u).pop() || '';
+    const ip = /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(output) ? output : '';
+    return {
+      attempted: true,
+      ip,
+      cgnatLikely: Boolean(ip && isPrivateIpv4Address(ip)),
+      reason: ip ? 'Router-WAN-IP per UPnP erkannt.' : 'Router-WAN-IP konnte per UPnP nicht gelesen werden.',
+      output: `${result.stdout || ''}\n${result.stderr || ''}`.trim()
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ip: '',
+      cgnatLikely: false,
+      reason: `Router-WAN-IP konnte nicht gelesen werden: ${error.message || String(error)}`
+    };
+  }
+}
+
+function getHostedServerNetworkStatus({ running, domainInfo, publicIp, publicPort, externalMinecraft, firewall, upnp, localReachable, protocol = 'TCP' }) {
+  const normalizedProtocol = String(protocol || 'TCP').toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
+  if (!running) {
+    return {
+      code: 'offline',
+      label: 'Offline',
+      detail: 'Server ist nicht gestartet.'
+    };
+  }
+  if (!publicIp) {
+    return {
+      code: 'lan-only',
+      label: 'Nur LAN erreichbar',
+      detail: 'Keine öffentliche IPv4 erkannt. Bei CGNAT/DS-Lite brauchst du einen Tunnel oder Hoster.'
+    };
+  }
+  if (!domainInfo?.ok) {
+    return {
+      code: 'dns-missing',
+      label: 'DNS fehlt',
+      detail: domainInfo?.status || 'Domain zeigt nicht auf deine öffentliche IP.'
+    };
+  }
+  if (externalMinecraft?.online) {
+    return {
+      code: 'internet-ok',
+      label: 'Internet erreichbar',
+      detail: `${externalMinecraft.address} wurde extern als Minecraft-Server erkannt.`
+    };
+  }
+  if (firewall?.attempted && firewall.success === false) {
+    return {
+      code: 'firewall-blocked',
+      label: 'Firewall blockiert',
+      detail: `Windows-Firewall-Regel für Port ${publicPort?.port || domainInfo?.port || 'unbekannt'} ${normalizedProtocol} konnte nicht automatisch erstellt werden.`
+    };
+  }
+  if (publicPort?.attempted && !publicPort.open && !upnp?.success) {
+    return {
+      code: 'port-closed',
+      label: 'Port geschlossen',
+      detail: `Port ${publicPort.port || 25565} ${normalizedProtocol} ist nicht öffentlich erreichbar. Router-Portfreigabe auf diesen PC einrichten.`
+    };
+  }
+  if (publicPort?.open || upnp?.success) {
+    return {
+      code: 'internet-ok',
+      label: 'Internet erreichbar',
+      detail: externalMinecraft?.online
+        ? `${externalMinecraft.address} wurde extern als Minecraft-Server erkannt.`
+        : (domainInfo?.joinAddress ? `${domainInfo.joinAddress} ist die Join-Adresse.` : 'Server ist über das Internet erreichbar.')
+    };
+  }
+  return {
+    code: localReachable ? 'lan-only' : 'port-closed',
+    label: localReachable ? 'Nur LAN erreichbar' : 'Port geschlossen',
+    detail: localReachable
+      ? 'Server läuft lokal. Externe Portprüfung konnte Internet-Erreichbarkeit nicht bestätigen.'
+      : 'Server-Port ist lokal noch nicht erreichbar.'
+  };
+}
+
+function buildHostedServerDiagnostics({
+  activeServer,
+  running,
+  runtime,
+  serverReady,
+  properties,
+  listeners,
+  bindsAllInterfaces,
+  localReachable,
+  publicIp,
+  publicPort,
+  externalMinecraft,
+  domainInfo,
+  firewall,
+  upnp,
+  networkStatus,
+  routerWan,
+  connectionTests = []
+}) {
+  const port = normalizeHostedServerPort(activeServer?.port || getHostedServerDefaultPort(activeServer), getHostedServerDefaultPort(activeServer));
+  const protocol = getHostedServerProtocol(activeServer);
+  const findings = [];
+  const requiredChanges = [];
+  const checks = {
+    processRunning: Boolean(running && runtime?.process && !runtime.process.killed),
+    serverReady: Boolean(serverReady),
+    serverPropertiesExists: Boolean(properties?.exists),
+    serverIpBlank: properties?.exists ? !properties.serverIp : false,
+    portListening: listeners.length > 0,
+    bindsAllInterfaces,
+    localPortReachable: Boolean(localReachable),
+    firewallConfigured: firewall?.success === true || firewall?.attempted === true && firewall?.success === true,
+    publicIpDetected: Boolean(publicIp),
+    domainPointsToPublicIp: Boolean(domainInfo?.ok),
+    publicPortReachable: Boolean(publicPort?.open),
+    upnpPortMapping: Boolean(upnp?.success),
+    externalMinecraftClientVerified: Boolean(externalMinecraft?.online),
+    routerWanIpDetected: Boolean(routerWan?.ip),
+    cgnatDetected: Boolean(routerWan?.ip && publicIp && routerWan.ip !== publicIp) || Boolean(routerWan?.ip && isPrivateIpv4Address(routerWan.ip))
+  };
+
+  if (!checks.processRunning) {
+    findings.push('Minecraft-Server-Prozess läuft nicht.');
+    requiredChanges.push('Server starten und EULA akzeptieren.');
+  }
+  if (checks.processRunning && !checks.serverReady) {
+    findings.push('Serverlog enthält noch kein "Done (...s)! For help, type \"help\"".');
+    requiredChanges.push('Warten bis der Server vollständig gestartet ist oder Konsolenfehler prüfen.');
+  }
+  if (isHostedServerJava(activeServer) && properties?.exists && properties.serverIp) {
+    findings.push(`server.properties server-ip ist nicht leer: ${properties.serverIp}`);
+    requiredChanges.push('server.properties muss server-ip= leer enthalten.');
+  }
+  if (properties?.exists && properties.serverPort !== port) {
+    findings.push(`server.properties server-port ist ${properties.serverPort}, erwartet ${port}.`);
+    requiredChanges.push(`server.properties server-port=${port} setzen.`);
+  }
+  if (running && !checks.portListening) {
+    findings.push(`Port ${port} lauscht nicht.`);
+    requiredChanges.push(`Server muss auf Port ${port} starten; server.properties server-port prüfen.`);
+  }
+  if (checks.portListening && !checks.bindsAllInterfaces) {
+    findings.push(`Server lauscht nicht auf 0.0.0.0, sondern auf: ${listeners.map((entry) => entry.localAddress).join(', ')}`);
+    requiredChanges.push(isHostedServerJava(activeServer)
+      ? 'server.properties: server-ip leer lassen, damit Minecraft auf allen Interfaces lauscht.'
+      : 'Bedrock muss server-port auf dem UDP-Port dieses Servers nutzen und darf nicht durch Firewall/Router geblockt werden.');
+  }
+  if (!checks.publicIpDetected) {
+    findings.push('Keine öffentliche IPv4 erkannt.');
+    requiredChanges.push('Bei CGNAT/DS-Lite öffentliche IPv4 beim ISP buchen oder Tunnel/Hosting nutzen.');
+  }
+  if (publicIp && isPrivateIpv4Address(publicIp)) {
+    findings.push('Erkannte WAN-IP ist privat. Hinweis auf CGNAT/Double NAT.');
+    requiredChanges.push('Router-WAN-IP mit öffentlicher IP vergleichen; bei CGNAT Tunnel/öffentliche IPv4 nötig.');
+  }
+  if (checks.cgnatDetected) {
+    findings.push('CGNAT erkannt. Direkte Portweiterleitung wahrscheinlich nicht möglich.');
+    requiredChanges.push('Öffentliche IPv4 beim Anbieter buchen oder Tunnel/VPS/Hosting verwenden.');
+  } else if (routerWan?.attempted && !routerWan.ip) {
+    findings.push(`Router-WAN-IP konnte nicht automatisch verglichen werden: ${routerWan.reason || 'UPnP liefert keine WAN-IP.'}`);
+  }
+  if (domainInfo?.domain && !checks.domainPointsToPublicIp) {
+    findings.push(`DNS fehlt oder ist falsch für ${domainInfo.domain}.`);
+    (domainInfo.requiredRecords || []).forEach((record) => {
+      requiredChanges.push(`DNS ${record.type}: ${record.name} -> ${record.value}`);
+    });
+  }
+  if (running && publicIp && !checks.publicPortReachable && !checks.upnpPortMapping) {
+    findings.push(`Port ${port} ist von außen nicht bestätigt erreichbar.`);
+    requiredChanges.push(`Router-Portweiterleitung: ${protocol} extern ${port} -> ${getLocalLanIpAddress() || 'LAN-IP dieses PCs'}:${port}`);
+    requiredChanges.push(`Windows-Firewall muss eingehend ${protocol} erlauben.`);
+  }
+  if (upnp?.attempted && !upnp.success) {
+    findings.push(`Automatische UPnP-Portfreigabe fehlgeschlagen: ${upnp.reason || upnp.output || upnp.error || 'unbekannt'}`);
+    requiredChanges.push('UPnP im Router aktivieren oder Port manuell weiterleiten.');
+  }
+  if (externalMinecraft?.attempted && !externalMinecraft.online) {
+    findings.push(externalMinecraft.reason);
+  }
+  if (!findings.length && (networkStatus?.code === 'internet-ok' || checks.externalMinecraftClientVerified)) {
+    findings.push('Keine Netzwerkfehler gefunden. Internet-Erreichbarkeit ist bestätigt oder automatisch freigegeben.');
+  }
+
+  return {
+    checks,
+    status: networkStatus,
+    externalMinecraft,
+    findings,
+    requiredChanges,
+    listeners,
+    connectionTests,
+    properties: properties ? {
+      exists: properties.exists,
+      path: properties.path,
+      serverIp: properties.serverIp,
+      serverPort: properties.serverPort,
+      protocol: properties.protocol
+    } : null,
+    affectedFiles: ['src/main.js', 'app.js', 'index.html'],
+    testedAddress: domainInfo?.ok ? domainInfo.joinAddress : (domainInfo?.domain || ''),
+    publicAddress: publicIp ? `${publicIp}:${port}` : '',
+    routerWanIp: routerWan?.ip || '',
+    cgnatDetected: checks.cgnatDetected,
+    router: {
+      protocol,
+      externalPort: port,
+      internalAddress: getLocalLanIpAddress(),
+      internalPort: port
+    }
+  };
+}
+
+async function getHostedServerStatus() {
+  ensureDir(HOSTED_SERVER_DIR);
+  const state = readHostedServerState();
+  const activeServer = getHostedServerById(state);
+  syncLegacyHostedServerRuntime();
+  const activeRuntime = activeServer ? getHostedServerRuntime(activeServer.id) : null;
+  const runningIds = getHostedServerRunningIds();
+  const running = Boolean(activeRuntime);
+  const upnp = activeServer ? (hostedServerUpnpMappings.get(activeServer.id) || null) : null;
+  const firewall = activeServer ? (hostedServerFirewallRules.get(activeServer.id) || null) : null;
+  const protocol = activeServer ? getHostedServerProtocol(activeServer) : 'TCP';
+  const publicIp = activeServer ? await fetchPublicIpAddress() : '';
+  const routerWan = activeServer ? getRouterWanIpViaUpnp() : { attempted: false, ip: '' };
+  if (running && activeRuntime) {
+    requestHostedServerPlayerList(activeRuntime);
+  }
+  const consoleOutput = readHostedServerConsoleTail(activeServer);
+  const serverReady = hasHostedServerReadyLog(consoleOutput, activeServer);
+  const properties = readHostedServerProperties(activeServer);
+  const players = parseHostedServerPlayerCount(consoleOutput) || {
+    online: 0,
+    max: activeServer?.maxPlayers || 0
+  };
+  const processStats = getHostedServerProcessStats(activeRuntime);
+  const localReachable = running && activeServer ? await checkLocalPortOpen(activeServer.port, 750, protocol) : false;
+  const listeners = activeServer ? getHostedServerPortListeners(activeServer.port, protocol) : [];
+  const bindsAllInterfaces = isHostedServerListeningOnAllInterfaces(listeners);
+  const localAddress = activeServer ? `localhost:${activeServer.port}` : '';
+  const lanAddress = activeServer ? getLocalLanAddress(activeServer.port) : '';
+  const publicAddress = publicIp && activeServer ? `${publicIp}:${activeServer.port}` : '';
+  const domainInfo = activeServer ? await resolveHostedServerDomain(activeServer, publicIp) : null;
+  const publicPort = running && activeServer ? await checkHostedServerPublicPort(publicIp, activeServer.port, protocol) : { attempted: false, open: false, protocol };
+  const address = activeServer
+    ? (domainInfo?.joinAddress || domainInfo?.domain || publicAddress || (running ? (lanAddress || localAddress) : localAddress))
+    : '';
+  const externalMinecraft = running && activeServer && (domainInfo?.domain || publicAddress)
+    ? await checkExternalMinecraftStatus(domainInfo?.joinAddress || domainInfo?.domain || publicAddress, activeServer)
+    : { attempted: false, online: false, reason: 'Server läuft nicht oder keine externe Adresse vorhanden.' };
+  const connectionTests = activeServer ? await buildHostedServerConnectionTests(activeServer, {
+    running,
+    publicIp,
+    domainInfo
+  }) : [];
+  const networkStatus = getHostedServerNetworkStatus({
+    running,
+    domainInfo,
+    publicIp,
+    publicPort,
+    externalMinecraft,
+    firewall,
+    upnp,
+    localReachable,
+    protocol
+  });
+  const diagnostics = buildHostedServerDiagnostics({
+    activeServer,
+    running,
+    runtime: activeRuntime,
+    serverReady,
+    properties,
+    listeners,
+    bindsAllInterfaces,
+    localReachable,
+    publicIp,
+    publicPort,
+    externalMinecraft,
+    domainInfo,
+    firewall,
+    upnp,
+    networkStatus,
+    routerWan,
+    connectionTests
+  });
+  const portForwardingRequired = running && activeServer
+    ? ['dns-missing', 'port-closed', 'lan-only', 'firewall-blocked'].includes(networkStatus.code)
+    : true;
+  const servers = state.servers.map((server) => ({
+    ...server,
+    domain: getHostedServerDomain(server),
+    joinAddress: getHostedServerDomain(server) || `localhost:${server.port}`,
+    softwareLabel: getHostedServerSoftwareLabel(server),
+    networkProtocol: getHostedServerProtocol(server)
+  }));
+  return {
+    success: true,
+    activeServerId: state.activeServerId,
+    activeServer,
+    servers,
+    mods: activeServer && isHostedServerJava(activeServer) ? listHostedServerMods(activeServer) : [],
+    running,
+    runningServerId: running ? activeServer.id : '',
+    runningServerIds: runningIds,
+    pid: running ? activeRuntime.process.pid : null,
+    startedAt: running ? activeRuntime.startedAt : '',
+    uptimeMs: running && activeRuntime.startedAt ? Math.max(0, Date.now() - Date.parse(activeRuntime.startedAt)) : 0,
+    resources: running ? processStats : { memoryMb: 0, cpuTime: '', cpuSeconds: 0, pid: null },
+    localReachable,
+    serverReady,
+    serverProperties: properties ? {
+      exists: properties.exists,
+      path: properties.path,
+      serverIp: properties.serverIp,
+      serverPort: properties.serverPort,
+      protocol: properties.protocol
+    } : null,
+    players,
+    consoleOutput,
+    installed: activeServer
+      ? (isHostedServerBedrock(activeServer) ? fs.existsSync(getHostedServerBedrockExecutablePath(activeServer)) : fs.existsSync(getHostedServerJarPath(activeServer)))
+      : false,
+    address,
+    localAddress,
+    lanAddress,
+    rawPublicAddress: publicAddress,
+    publicAddress,
+    domain: domainInfo?.domain || '',
+    domainAddress: domainInfo?.joinAddress || '',
+    domainStatus: domainInfo?.status || '',
+    domainReady: Boolean(domainInfo?.ok),
+    networkStatus,
+    diagnostics,
+    publicPort,
+    externalMinecraft,
+    connectionTests,
+    firewall,
+    requiredDnsRecords: domainInfo?.requiredRecords || [],
+    requiredRouterSettings: activeServer ? {
+      protocol,
+      externalPort: activeServer.port,
+      internalPort: activeServer.port,
+      internalAddress: getLocalLanIpAddress()
+    } : null,
+    upnp,
+    publicIp,
+    routerWanIp: routerWan.ip || '',
+    routerWan,
+    cgnatDetected: diagnostics.cgnatDetected,
+    networkAddresses: {
+      local: localAddress,
+      lan: lanAddress,
+      public: publicAddress,
+      domain: domainInfo?.domain || '',
+      recommended: address
+    },
+    portForwardingRequired,
+    folder: activeServer ? getHostedServerDir(activeServer) : HOSTED_SERVER_DIR,
+    modsFolder: activeServer && isHostedServerJava(activeServer) ? getHostedServerModsDir(activeServer) : ''
+  };
+}
+
+async function getHostedServerVanillaInfo(server) {
+  const requestedMinecraftVersion = String(server.minecraftVersion || 'latest').trim();
+  const manifest = await fetchJson(VERSION_MANIFEST_URL, { allowedHosts: TRUSTED_MOJANG_DOWNLOAD_HOSTS });
+  const minecraftVersion = requestedMinecraftVersion.toLowerCase() === 'latest'
+    ? manifest.latest?.release
+    : requestedMinecraftVersion;
+  const versionMeta = (manifest.versions || []).find((entry) => entry.id === minecraftVersion);
+  if (!versionMeta?.id) {
+    throw new Error(`Minecraft-Version ${requestedMinecraftVersion} wurde nicht gefunden.`);
+  }
+  const versionData = await fetchJson(versionMeta.url, { allowedHosts: TRUSTED_MOJANG_DOWNLOAD_HOSTS });
+  const serverDownload = versionData.downloads?.server;
+  if (!serverDownload?.url) {
+    throw new Error(`Für Minecraft ${versionMeta.id} wurde keine Vanilla-Server-JAR gefunden.`);
+  }
+  return {
+    minecraftVersion: versionMeta.id,
+    url: serverDownload.url,
+    sha1: serverDownload.sha1 || '',
+    size: serverDownload.size || 0,
+    javaComponent: versionData.javaVersion?.component || '',
+    requiredJava: versionData.javaVersion?.majorVersion || 21
+  };
+}
+
+async function getHostedServerPaperInfo(server) {
+  const requestedMinecraftVersion = String(server.minecraftVersion || 'latest').trim();
+  const headers = {
+    Accept: 'application/json',
+    'User-Agent': 'XClient/1.0 (Minecraft Hosting)'
+  };
+  const project = await fetchJson(`${PAPER_API_BASE_URL}/projects/paper`, {
+    allowedHosts: TRUSTED_PAPER_DOWNLOAD_HOSTS,
+    headers
+  });
+  const availableVersions = Array.isArray(project?.versions) ? project.versions : [];
+  const minecraftVersion = requestedMinecraftVersion.toLowerCase() === 'latest'
+    ? availableVersions[availableVersions.length - 1]
+    : requestedMinecraftVersion;
+  if (!minecraftVersion || !availableVersions.includes(minecraftVersion)) {
+    throw new Error(`Paper unterstützt Minecraft ${requestedMinecraftVersion} aktuell nicht über die PaperMC-API.`);
+  }
+  const versionInfo = await fetchJson(`${PAPER_API_BASE_URL}/projects/paper/versions/${encodeURIComponent(minecraftVersion)}`, {
+    allowedHosts: TRUSTED_PAPER_DOWNLOAD_HOSTS,
+    headers
+  });
+  const builds = Array.isArray(versionInfo?.builds) ? versionInfo.builds : [];
+  const build = builds[builds.length - 1];
+  const buildNumber = typeof build === 'object' ? build.build : build;
+  if (!buildNumber) {
+    throw new Error(`Für Paper ${minecraftVersion} wurde kein Build gefunden.`);
+  }
+  const buildInfo = await fetchJson(`${PAPER_API_BASE_URL}/projects/paper/versions/${encodeURIComponent(minecraftVersion)}/builds/${encodeURIComponent(buildNumber)}`, {
+    allowedHosts: TRUSTED_PAPER_DOWNLOAD_HOSTS,
+    headers
+  });
+  const downloadName = buildInfo?.downloads?.application?.name || `paper-${minecraftVersion}-${buildNumber}.jar`;
+  return {
+    minecraftVersion,
+    build: buildNumber,
+    url: `${PAPER_API_BASE_URL}/projects/paper/versions/${encodeURIComponent(minecraftVersion)}/builds/${encodeURIComponent(buildNumber)}/downloads/${encodeURIComponent(downloadName)}`,
+    sha256: buildInfo?.downloads?.application?.sha256 || '',
+    size: buildInfo?.downloads?.application?.size || 0,
+    javaComponent: '',
+    requiredJava: 21
+  };
+}
+
+async function fetchTrustedText(url, options = {}) {
+  const {
+    allowedHosts = null,
+    timeoutMs = 30000,
+    ...fetchOptions
+  } = options;
+  if (allowedHosts) {
+    assertTrustedHttpsUrl(url, allowedHosts);
+  } else {
+    assertTrustedHttpsUrl(url);
+  }
+  const response = await fetchWithTimeout(url, fetchOptions, timeoutMs);
+  if (!response.ok) {
+    const body = await safeReadText(response);
+    throw new Error(`HTTP ${response.status} für ${url}${body ? `: ${body}` : ''}`);
+  }
+  return response.text();
+}
+
+async function getHostedServerBedrockInfo(_server) {
+  if (process.platform !== 'win32') {
+    throw new Error('Bedrock Dedicated Server wird in diesem Launcher automatisch für Windows verwaltet.');
+  }
+  const headers = {
+    Accept: 'application/json',
+    'User-Agent': 'XClient/1.0 (Minecraft Hosting)'
+  };
+  try {
+    const downloadLinks = await fetchJson(BEDROCK_DOWNLOAD_LINKS_URL, {
+      allowedHosts: TRUSTED_BEDROCK_DOWNLOAD_HOSTS,
+      headers,
+      timeoutMs: 15000
+    });
+    const links = Array.isArray(downloadLinks?.result?.links) ? downloadLinks.result.links : [];
+    const windowsLink = links.find((entry) => entry?.downloadType === 'serverBedrockWindows' && entry?.downloadUrl);
+    const downloadUrl = String(windowsLink?.downloadUrl || '').trim();
+    if (downloadUrl) {
+      assertTrustedHttpsUrl(downloadUrl, TRUSTED_BEDROCK_DOWNLOAD_HOSTS);
+      const versionMatch = downloadUrl.match(/bedrock-server-([0-9.]+)\.zip/iu);

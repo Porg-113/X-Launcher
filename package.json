@@ -1,18 +1,19 @@
 {
-  "name": "x-launcher",
-  "version": "1.4.5",
-  "description": "Minecraft Fabric launcher for Windows",
+  "name": "x-client",
+  "version": "1.5.0",
+  "description": "Minecraft Fabric client for Windows",
   "author": "X",
   "main": "src/main.js",
   "homepage": "./",
   "scripts": {
     "start": "set ELECTRON_RUN_AS_NODE=&& electron .",
     "dev": "set ELECTRON_RUN_AS_NODE=&& electron . --dev",
-    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis portable --publish never",
-    "build:installer": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish never",
-    "build:portable": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win portable --publish never",
-    "release:github": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish always",
-    "pack": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --dir",
+    "build": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis portable --publish never",
+    "build:installer": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish never",
+    "build:portable": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win portable --publish never",
+    "release:github": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish always",
+    "pack": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --dir",
+    "release:hashes": "powershell -NoProfile -File scripts/write-release-hashes.ps1",
     "test": "node --test",
     "download:fabric-mods": "node scripts/modrinth-fabric-downloader.js",
     "build:x-menu-mod": "node scripts/build-x-launcher-menu-mod.js",
@@ -30,8 +31,8 @@
   },
   "build": {
     "appId": "com.x.launcher.app",
-    "productName": "X Launcher",
-    "artifactName": "X-Launcher-${version}-${arch}.${ext}",
+    "productName": "X Client",
+    "artifactName": "X-Client-${version}-${arch}.${ext}",
     "asar": true,
     "npmRebuild": false,
     "electronUpdaterCompatibility": ">=2.16",
@@ -47,6 +48,7 @@
       "src/**/*",
       "index.html",
       "app.js",
+      "app.parts/**/*",
       "styles.css",
       "modern-launcher.css",
       "package.json",
@@ -60,7 +62,8 @@
     },
     "win": {
       "icon": "icon.ico",
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",
@@ -77,16 +80,19 @@
       ]
     },
     "nsis": {
+      "include": "scripts/installer.nsh",
       "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico",
-      "shortcutName": "X Launcher"
+      "shortcutName": "X Client"
     },
     "portable": {
-      "artifactName": "X-Launcher-Portable-${version}.${ext}"
+      "artifactName": "X-Client-Portable-${version}.${ext}"
     }
   }
 }

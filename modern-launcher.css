@@ -1,5 +1,5 @@
 /*
- * X Launcher — modern client visual system
+ * X Client — modern client visual system
  * A focused override layer that keeps the existing launcher behavior intact.
  */
 
@@ -25,6 +25,129 @@
   --xl-sidebar-width: 220px;
 }
 
+.loader-work {
+  width: min(440px, calc(100vw - 64px));
+  margin-top: 24px;
+}
+
+.action-spinner {
+  display: none;
+}
+
+.loading-overlay.is-action-loading {
+  padding: 0;
+  background: rgba(1, 3, 5, 0.62);
+  backdrop-filter: blur(18px) brightness(0.55);
+  -webkit-backdrop-filter: blur(18px) brightness(0.55);
+}
+
+.loading-overlay.is-action-loading::before,
+.loading-overlay.is-action-loading::after {
+  display: none;
+}
+
+.loading-overlay.is-action-loading .loader-shell {
+  width: 65px;
+  height: 65px;
+  min-width: 65px;
+  min-height: 65px;
+  max-width: 65px;
+  max-height: 65px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.loading-overlay.is-action-loading .loader-shell::before,
+.loading-overlay.is-action-loading .loader-brand-stack,
+.loading-overlay.is-action-loading .loader-welcome-line,
+.loading-overlay.is-action-loading .loader-work,
+.loading-overlay.is-action-loading .loading-dismiss-btn {
+  display: none;
+}
+
+.loading-overlay.is-action-loading .action-spinner {
+  display: block;
+  overflow: visible;
+  animation: action-spinner-rotator 1.4s linear infinite !important;
+  will-change: transform;
+}
+
+.loading-overlay.is-action-loading .action-spinner-path {
+  stroke: var(--primary-color);
+  stroke-dasharray: 187;
+  stroke-dashoffset: 0;
+  transform-origin: center;
+  animation: action-spinner-dash 1.4s ease-in-out infinite !important;
+  will-change: stroke-dashoffset, transform;
+}
+
+@keyframes action-spinner-rotator {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(270deg); }
+}
+
+@keyframes action-spinner-dash {
+  0% { stroke-dashoffset: 187; }
+  50% {
+    stroke-dashoffset: 46.75;
+    transform: rotate(135deg);
+  }
+  100% {
+    stroke-dashoffset: 187;
+    transform: rotate(450deg);
+  }
+}
+
+.loader-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 9px;
+  color: rgba(255, 255, 255, .76);
+  font-size: 12px;
+  letter-spacing: .03em;
+}
+
+.loader-progress-track {
+  height: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .32);
+}
+
+.loader-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary-color), rgba(var(--primary-rgb), .62));
+  box-shadow: 0 0 14px rgba(var(--primary-rgb), .34);
+  transition: width 160ms ease-out;
+}
+
+.mods-loading-state {
+  display: grid;
+  gap: 10px;
+}
+
+.mods-loading-row {
+  height: 72px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  background: linear-gradient(105deg, rgba(255,255,255,.035) 25%, rgba(255,255,255,.075) 40%, rgba(255,255,255,.035) 55%);
+  background-size: 220% 100%;
+  animation: mods-loading-sheen 1.25s linear infinite;
+}
+
+@keyframes mods-loading-sheen { to { background-position-x: -220%; } }
+
 html,
 body {
   font-family:
@@ -37,14 +160,12 @@ body {
   color: var(--xl-copy);
 }
 
-body {
-  letter-spacing: -0.01em;
-}
-
+body,
 .container,
 #login-screen,
 html:not(.theme-light) .container,
 html:not(.theme-light) #login-screen {
+  letter-spacing: -0.01em;
   background:
     radial-gradient(circle at 82% 22%, rgba(var(--primary-rgb), 0.09), transparent 28%),
     linear-gradient(145deg, var(--xl-bg-1), var(--xl-bg-0) 58%);
@@ -1137,8 +1258,87 @@ input:checked + .setting-switch,
 }
 
 .login-info #offline-btn {
+  margin-top: 10px;
   background: rgba(255, 255, 255, 0.04) !important;
   color: #cbd1de !important;
+}
+
+.login-info #login-info-secondary,
+.login-info #login-info-tertiary {
+  overflow-wrap: anywhere;
+}
+
+.account-switch-card.active,
+html.theme-light .account-switch-card.active {
+  box-shadow: none;
+}
+
+.account-identity {
+  min-width: 0;
+}
+
+.account-switch-card {
+  min-height: 0;
+  padding: 9px 11px;
+  gap: 10px;
+}
+
+.account-identity-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.account-identity-heading h4 {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.account-switch-card .account-email {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--xl-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-switch-card .account-meta {
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.account-actions {
+  flex-wrap: nowrap;
+}
+
+.account-actions .btn {
+  min-height: 34px;
+  padding: 6px 10px;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.account-actions .account-icon-button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  flex: 0 0 34px;
+}
+
+.account-action-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Scrollbars */
@@ -1413,6 +1613,9 @@ html.theme-light .nav-item.active {
 .nav-item[data-section="skins"] { --nav-icon: url("assets/icons/nav-skins.svg"); }
 .nav-item[data-section="settings"] { --nav-icon: url("assets/icons/nav-settings.svg"); }
 
+#admin-nav-item::before { display: none; }
+#admin-nav-item .admin-nav-code-icon { display: block; }
+
 .nav-item[data-section]::before {
   -webkit-mask-image: var(--nav-icon);
   mask-image: var(--nav-icon);
@@ -1679,6 +1882,112 @@ textarea {
     sans-serif;
 }
 
+/* Keep controls readable and centered while the frameless window is resized. */
+.btn,
+.username-button,
+.btn-logout {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.btn {
+  padding-inline: clamp(12px, 1.8vw, 22px);
+  font-size: clamp(12px, 1.35vw, 15px);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.content-section > *,
+.section-header > *,
+.section-actions,
+.panel-header-inline > *,
+.account-card,
+.account-list-panel,
+.account-switch-card > * {
+  min-width: 0;
+}
+
+#username-display {
+  max-width: min(32vw, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-actions {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .content-section {
+    padding-inline: clamp(16px, 2.4vw, 24px);
+  }
+
+  .accounts-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .section-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .account-actions .account-icon-button {
+    flex: 0 0 34px;
+  }
+}
+
+@media (max-width: 900px) {
+  .header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding-inline: 16px;
+  }
+
+  .header-user {
+    min-width: 0;
+  }
+
+  .section-actions,
+  .section-actions .btn {
+    width: 100%;
+  }
+
+  .account-switch-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-actions {
+    justify-content: stretch;
+  }
+}
+
+.section-actions .mods-folder-icon-btn {
+  width: var(--section-action-height);
+  min-width: var(--section-action-height);
+  flex: 0 0 var(--section-action-height);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.section-actions .mods-folder-icon-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  pointer-events: none;
+}
+
 /* Remove the pale rounded dashboard sheet that covered the animations. */
 .start-hero-card,
 html.theme-light .start-hero-card {
@@ -1777,4 +2086,98 @@ html.theme-light .settings-group {
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+/* Lightweight baseline: avoid expensive compositor layers and endless
+   cosmetic animation on all systems, without hiding or disabling features. */
+html.launcher-static-ui * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  will-change: auto !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 120ms !important;
+}
+
+html.launcher-static-ui .content-section::before,
+html.launcher-static-ui .content-section::after,
+html.launcher-static-ui .background-effects {
+  animation: none !important;
+}
+
+/* Hidden windows and inactive pages must consume no animation budget. */
+html.launcher-document-hidden *,
+html.launcher-static-ui .content-section:not(.active) * {
+  animation-play-state: paused !important;
+}
+
+html.launcher-static-ui .content-section:not(.active) {
+  content-visibility: hidden;
+}
+
+html.launcher-static-ui :is(
+  .installed-mod-card,
+  .pack-card,
+  .server-card,
+  .account-switch-card,
+  .saved-skin-chip,
+  .online-skin-card,
+  .hosting-player-card
+) {
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 108px;
+}
+
+/* Short micro-interactions keep the optimized UI lively without continuous
+   animation, blur or extra compositor layers. */
+@keyframes xlMicroSectionIn {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+html.launcher-static-ui .content-section.active {
+  animation: xlMicroSectionIn 180ms var(--motion-ease) both !important;
+}
+
+html.launcher-static-ui :is(
+  button,
+  .btn,
+  .nav-item,
+  .setting-item,
+  .mod-item,
+  .modrinth-project-card,
+  .pack-card,
+  .server-card,
+  .account-card,
+  .skin-card,
+  .saved-skin-chip,
+  .input-field,
+  .setting-toggle
+) {
+  transition: transform 120ms var(--motion-ease), border-color 120ms ease,
+    background-color 120ms ease, opacity 120ms ease !important;
+}
+
+html.launcher-static-ui :is(
+  button,
+  .btn,
+  .nav-item,
+  .setting-item,
+  .mod-item,
+  .modrinth-project-card,
+  .pack-card,
+  .server-card,
+  .account-card,
+  .skin-card,
+  .saved-skin-chip
+):hover {
+  transform: translate3d(0, -2px, 0);
+}
+
+html.launcher-static-ui :is(button, .btn, .nav-item):active {
+  transform: scale(0.97);
+}
+
+html.launcher-static-ui :is(input, select, .input-field, .setting-toggle):focus-within {
+  transform: translate3d(0, -1px, 0);
 }
