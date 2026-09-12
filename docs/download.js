@@ -3,10 +3,38 @@ const primary = document.querySelector("#download");
 const info = document.querySelector("#release-info");
 const downloadCount = document.querySelector("#download-count");
 const activePlayerCount = document.querySelector("#active-player-count");
+const siteMenu = document.querySelector("#site-menu");
+const siteMenuToggle = document.querySelector("#site-menu-toggle");
+const siteMenuPanel = siteMenu?.querySelector(".site-menu-panel");
 
 const counterBaseUrl = "https://countapi.mileshilliard.com/api/v1";
 const downloadCounterKey = "xlauncher-prod-a7f3-downloads";
 const initialDownloadCount = 5;
+
+function setSiteMenuOpen(open) {
+  const isOpen = Boolean(open);
+  siteMenu.classList.toggle("is-open", isOpen);
+  siteMenu.setAttribute("aria-hidden", String(!isOpen));
+  siteMenuToggle.setAttribute("aria-expanded", String(isOpen));
+  siteMenuToggle.setAttribute("aria-label", isOpen ? "Menü schließen" : "Menü öffnen");
+  document.body.classList.toggle("site-menu-open", isOpen);
+  if (isOpen) window.setTimeout(() => siteMenuPanel.focus(), 180);
+}
+
+siteMenuToggle.addEventListener("click", () => {
+  setSiteMenuOpen(siteMenuToggle.getAttribute("aria-expanded") !== "true");
+});
+
+siteMenu.querySelectorAll("[data-menu-close]").forEach((element) => {
+  element.addEventListener("click", () => setSiteMenuOpen(false));
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && siteMenu.classList.contains("is-open")) {
+    setSiteMenuOpen(false);
+    siteMenuToggle.focus();
+  }
+});
 
 function counterMinuteKey(date) {
   return date.toISOString().slice(0, 16).replace(/[-:t]/gi, "");
