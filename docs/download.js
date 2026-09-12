@@ -1,18 +1,30 @@
 const repo = "Porg-113/X-Launcher";
 const primary = document.querySelector("#download");
 const info = document.querySelector("#release-info");
-const totalPlayerCount = document.querySelector("#total-player-count");
+const downloadCount = document.querySelector("#download-count");
 const activePlayerCount = document.querySelector("#active-player-count");
 
-const counterBaseUrl = "https://countapi.mileshilliard.com/api/v1/get/";
+const counterBaseUrl = "https://countapi.mileshilliard.com/api/v1";
+const downloadCounterKey = "xlauncher-prod-a7f3-downloads";
+const initialDownloadCount = 5;
 
 function counterMinuteKey(date) {
   return date.toISOString().slice(0, 16).replace(/[-:t]/gi, "");
 }
 
 async function readCounter(key) {
-  const response = await fetch(`${counterBaseUrl}${encodeURIComponent(key)}`, { cache: "no-store" });
+  const response = await fetch(`${counterBaseUrl}/get/${encodeURIComponent(key)}`, { cache: "no-store" });
   if (response.status === 404) return 0;
+  if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
+  const result = await response.json();
+  return Number.isFinite(Number(result.value)) ? Number(result.value) : 0;
+}
+
+async function hitCounter(key) {
+  const response = await fetch(`${counterBaseUrl}/hit/${encodeURIComponent(key)}`, {
+    cache: "no-store",
+    keepalive: true
+  });
   if (!response.ok) throw new Error(`Counter request failed (${response.status})`);
   const result = await response.json();
   return Number.isFinite(Number(result.value)) ? Number(result.value) : 0;
@@ -22,13 +34,13 @@ async function updateLiveStats() {
   const now = new Date();
   const previousMinute = new Date(now.getTime() - 60 * 1000);
   try {
-    const [total, currentActive, previousActive, currentClosed] = await Promise.all([
-      readCounter("xlauncher-prod-a7f3-total"),
+    const [trackedDownloads, currentActive, previousActive, currentClosed] = await Promise.all([
+      readCounter(downloadCounterKey),
       readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(now)}`),
       readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(previousMinute)}`),
       readCounter(`xlauncher-prod-a7f3-closed-${counterMinuteKey(now)}`)
     ]);
-    totalPlayerCount.textContent = total.toLocaleString("de-CH");
+    downloadCount.textContent = (initialDownloadCount + trackedDownloads).toLocaleString("de-CH");
     const active = currentActive > 0
       ? Math.max(0, currentActive - currentClosed)
       : Math.max(0, previousActive - currentClosed);
@@ -38,6 +50,10 @@ async function updateLiveStats() {
 
 updateLiveStats();
 window.setInterval(updateLiveStats, 5 * 1000);
+
+primary.addEventListener("click", () => {
+  void hitCounter(downloadCounterKey).catch(() => {});
+});
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
