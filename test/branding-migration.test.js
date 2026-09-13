@@ -40,9 +40,13 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteHtml, />Über X Client</u);
   assert.doesNotMatch(websiteHtml, /site-menu-kicker/u);
   assert.match(websiteHtml, /href="downloads\.html"[^>]*>[\s\S]*?<strong>Jetzt spielen<\/strong>/u);
+  assert.doesNotMatch(websiteHtml, /Zur Download-Seite/u);
   assert.match(featuresHtml, /href="features\.html" aria-current="page"/u);
+  assert.match(featuresHtml, /class="download play-now"/u);
+  assert.doesNotMatch(featuresHtml, /Zur Download-Seite/u);
   assert.match(downloadsHtml, /href="downloads\.html" aria-current="page"/u);
   assert.match(downloadsHtml, /id="download"/u);
+  assert.doesNotMatch(downloadsHtml, /download-facts/u);
   assert.doesNotMatch(websiteCss, /site-menu-toggle\[aria-expanded="true"\]/u);
   assert.match(websiteCss, /\.site-menu\.is-open \.site-menu-backdrop/u);
   assert.match(websiteCss, /strong, b, h1, h2, h3, h4, h5, h6/u);
@@ -51,5 +55,6 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteCss, /\.live-stats, \.live-stats strong, \.live-stats small, \.download, \.download strong, \.download small, \.secondary \{ font-family: Inter/u);
   assert.match(websiteCss, /\.live-stats strong \{ font-weight: 900 !important; \}/u);
   assert.match(websiteCss, /\.live-stats small \{ font-weight: 800 !important; \}/u);
+  assert.match(websiteCss, /\.play-now strong \{ font-weight: 800 !important; \}/u);
   assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft.otf')));
 });
