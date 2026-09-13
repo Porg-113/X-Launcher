@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#00191f">
   <title data-i18n="home.title">X Client – Startseite</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=27">
+  <link rel="stylesheet" href="styles.css?v=28">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -79,7 +79,9 @@
         <p data-i18n="preview.copy">Entdecke die App – ohne echte Änderungen an deinem PC.</p>
       </div>
 
-      <div id="app-preview" class="demo-app" style="--demo-accent: #00ffff;">
+      <iframe id="app-preview" class="launcher-preview-frame" src="launcher-preview.html?v=28" title="Interaktive X Client Launcher-Vorschau" loading="eager" sandbox="allow-scripts allow-same-origin"></iframe>
+
+      <div id="legacy-app-preview" class="demo-app" style="--demo-accent: #00ffff;" hidden aria-hidden="true">
         <header class="demo-topbar">
           <div class="demo-brand"><span>X</span><strong>X Client</strong><small data-i18n="preview.demoMode">Demo-Modus</small></div>
           <button class="demo-account" type="button" aria-expanded="false">
@@ -188,7 +190,6 @@
   </main>
 
   <footer><span>© 2026 X Client</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=27"></script>
-  <script src="app-preview.js?v=27"></script>
+  <script src="download.js?v=28"></script>
 </body>
 </html>

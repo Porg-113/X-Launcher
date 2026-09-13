@@ -85,20 +85,26 @@ test('website language is automatic and can be selected from every menu', () => 
 test('website preview is interactive while unsafe demo actions stay locked', () => {
   const homePage = read(path.join('docs', 'index.html'));
   const featuresPage = read(path.join('docs', 'features.html'));
-  const previewScript = read(path.join('docs', 'app-preview.js'));
+  const previewPage = read(path.join('docs', 'launcher-preview.html'));
+  const previewScript = read(path.join('docs', 'launcher-preview.js'));
+  const previewSkin = fs.readFileSync(path.join(projectRoot, 'docs', 'assets', 'skins', 'i-am-steve.png'));
 
-  assert.match(homePage, /id="app-preview"/u);
-  assert.match(homePage, /<strong>X Client<\/strong>/u);
-  assert.match(homePage, /class="demo-steve-stage"/u);
-  assert.match(homePage, /data-skin-name="Steve"/u);
-  assert.match(homePage, /class="demo-window-controls"/u);
+  assert.match(homePage, /id="app-preview"[^>]+launcher-preview\.html\?v=28/u);
+  assert.match(homePage, /id="legacy-app-preview"[^>]+hidden/u);
+  assert.match(previewPage, /id="main-screen" class="screen active"/u);
+  assert.match(previewPage, /id="username-display"[^>]*>X Client<\/button>/u);
+  assert.match(previewPage, /assets\/skins\/i-am-steve\.png/u);
+  assert.match(previewPage, /data-skin-name="i-am-steve"/u);
+  assert.match(previewPage, /class="dashboard-skin-stage"/u);
+  assert.equal(read(path.join('docs', 'launcher-preview-base.css')), read('styles.css'));
+  assert.equal(read(path.join('docs', 'launcher-preview-theme.css')), read('modern-launcher.css'));
+  assert.deepEqual([...previewSkin.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   assert.doesNotMatch(homePage, /class="feature-story"/u);
   assert.match(featuresPage, /class="feature-story feature-story-page"/u);
-  for (const action of ['play', 'install', 'delete', 'create', 'transfer']) {
-    assert.match(homePage, new RegExp(`data-demo-locked="${action}"`, 'u'));
-  }
-  assert.match(previewScript, /data-demo-section/u);
-  assert.match(previewScript, /data-demo-search/u);
-  assert.match(previewScript, /data-demo-color/u);
-  assert.doesNotMatch(previewScript, /fetch\(|window\.api|electron/u);
+  assert.match(previewScript, /nav-item\[data-section\]/u);
+  assert.match(previewScript, /nothing installed|nichts installiert/u);
+  assert.match(previewScript, /nichts gelöscht/u);
+  assert.match(previewScript, /keine Dateien erstellt, importiert oder exportiert/u);
+  assert.match(previewScript, /SkinViewer/u);
+  assert.doesNotMatch(previewScript, /fetch\(|window\.api|electronAPI|XMLHttpRequest/u);
 });

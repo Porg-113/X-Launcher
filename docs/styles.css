@@ -130,6 +130,29 @@ body, body * { font-weight: 400 !important; }
 .live-stats small { font-weight: 800 !important; }
 .play-now strong { font-weight: 800 !important; }
 .feature-story-page { margin-top: 90px; }
+
+.launcher-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(780px, 78vw);
+  min-height: 620px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: #07080c;
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.48), 0 0 52px rgba(0, 217, 255, 0.08);
+}
+
+#legacy-app-preview[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .launcher-preview-frame {
+    height: 680px;
+    min-height: 680px;
+    border-radius: 12px;
+  }
+}
 .app-preview-section { margin: 70px auto 120px; }
 .app-preview-heading { max-width: 720px; margin: 0 auto 36px; text-align: center; }
 .app-preview-heading .eyebrow { justify-content: center; }
