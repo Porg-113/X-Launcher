@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#00191f">
   <title data-i18n="home.title">X Client – Startseite</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=25">
+  <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -72,17 +72,119 @@
       <p class="hint" data-i18n="home.hint">Kostenlos · 64-Bit · Direkter Download vom offiziellen GitHub Release</p>
     </section>
 
-    <div id="features" class="feature-story">
-      <section class="features" aria-label="Funktionen des X Clients">
-        <article class="reveal tilt-card"><span>01</span><div class="feature-copy"><h2 data-i18n="home.feature1Title">Modrinth integriert</h2><p data-i18n="home.feature1Copy">Suche und installiere Mods, Modpacks, Shader sowie Ressourcenpakete direkt im Launcher – passend zu deiner Fabric-Version.</p></div></article>
-        <article class="reveal tilt-card"><span>02</span><div class="feature-copy"><h2 data-i18n="home.feature2Title">Profile und Skins</h2><p data-i18n="home.feature2Copy">Erstelle Profile mit getrennten Mods-Ordnern. Importiere eigene Skins und sieh sie direkt in der Vorschau an.</p></div></article>
-        <article class="reveal tilt-card"><span>03</span><div class="feature-copy"><h2 data-i18n="home.feature3Title">Server und Updates</h2><p data-i18n="home.feature3Copy">Speichere Server-Favoriten und starte sie direkt. Installierte Launcher-Versionen suchen automatisch nach neuen Updates.</p></div></article>
-      </section>
-    </div>
+    <section class="app-preview-section reveal" aria-labelledby="app-preview-title">
+      <div class="app-preview-heading">
+        <div class="eyebrow"><span></span><b data-i18n="preview.eyebrow">Interaktive App-Vorschau</b></div>
+        <h2 id="app-preview-title" data-i18n="preview.title">X Client ausprobieren</h2>
+        <p data-i18n="preview.copy">Entdecke die App – ohne echte Änderungen an deinem PC.</p>
+      </div>
+
+      <div id="app-preview" class="demo-app" style="--demo-accent: #00ffff;">
+        <header class="demo-topbar">
+          <div class="demo-brand"><span>X</span><strong>X Client</strong><small data-i18n="preview.demoMode">Demo-Modus</small></div>
+          <div class="demo-window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+          <button class="demo-account" type="button" aria-expanded="false">
+            <span class="demo-avatar">X</span>
+            <span><strong>X Client</strong><small><i></i><b data-i18n="preview.online">Online</b></small></span>
+          </button>
+          <div class="demo-account-card" hidden><span data-i18n="preview.loggedIn">Angemeldet als</span><strong>X Client</strong><small data-i18n="preview.demoAccount">Demo-Konto</small></div>
+        </header>
+
+        <div class="demo-layout">
+          <nav class="demo-sidebar" aria-label="App-Navigation" data-i18n-aria-label="preview.navigation">
+            <button class="is-active" type="button" data-demo-section="dashboard" aria-label="Start" data-i18n-aria-label="preview.home"><svg viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8M3 10l9-8 9 8v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span data-i18n="preview.home">Start</span></button>
+            <button type="button" data-demo-section="mods" aria-label="Mods"><svg viewBox="0 0 24 24"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2M14 2h8v8h-8z"/></svg><span>Mods</span></button>
+            <button type="button" data-demo-section="modrinth" aria-label="Modrinth"><svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></svg><span>Modrinth</span></button>
+            <button type="button" data-demo-section="profiles" aria-label="Profile" data-i18n-aria-label="preview.profiles"><svg viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5m-9 5v10"/></svg><span data-i18n="preview.profiles">Profile</span></button>
+            <button type="button" data-demo-section="servers" aria-label="Server"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg><span>Server</span></button>
+            <button type="button" data-demo-section="skins" aria-label="Skins"><svg viewBox="0 0 24 24"><path d="M16 3a4 4 0 0 1-8 0L3.6 4.5 3 9h3v12h12V9h3l-.6-4.5z"/></svg><span>Skins</span></button>
+            <button type="button" data-demo-section="settings" aria-label="Einstellungen" data-i18n-aria-label="preview.settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.37.28.58.72.6 1.18V13.6h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg><span data-i18n="preview.settings">Einstellungen</span></button>
+          </nav>
+
+          <div class="demo-content">
+            <section class="demo-panel is-active" data-demo-panel="dashboard">
+              <div class="demo-panel-header"><div><small data-i18n="preview.welcome">Willkommen zurück</small><h3>X Client</h3></div><span class="demo-ready"><i></i><b data-i18n="preview.ready">Bereit</b></span></div>
+              <div class="demo-dashboard-grid">
+                <article class="demo-launch-card">
+                  <div><span class="demo-kicker">X CLIENT · FABRIC</span><h4 data-i18n="preview.yourMinecraft">Dein Minecraft</h4><p data-i18n="preview.launchCopy">Profil wählen und direkt loslegen.</p></div>
+                  <label><span data-i18n="preview.profile">Profil</span><select data-demo-profile><option>Performance · 1.21.4</option><option>Vanilla+ · 1.20.1</option><option>Creative · 1.21.1</option></select></label>
+                  <button class="demo-primary" type="button" data-demo-locked="play"><span data-i18n="preview.play">Minecraft starten</span><b>▶</b></button>
+                </article>
+                <div class="demo-overview-cards">
+                  <button type="button" data-demo-section-link="mods"><small>MODS</small><strong>12</strong><span data-i18n="preview.active">Aktiv</span></button>
+                  <button type="button" data-demo-section-link="profiles"><small data-i18n="preview.profiles">PROFILE</small><strong>3</strong><span data-i18n="preview.ready">Bereit</span></button>
+                  <button type="button" data-demo-section-link="servers"><small>SERVER</small><strong>2</strong><span>Online</span></button>
+                  <button type="button" data-demo-section-link="skins"><small>SKINS</small><strong>4</strong><span data-i18n="preview.saved">Gespeichert</span></button>
+                </div>
+              </div>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="mods">
+              <div class="demo-panel-header"><div><small>FABRIC 1.21.4</small><h3 data-i18n="preview.manageMods">Mods verwalten</h3></div><button class="demo-ghost" type="button" data-demo-check data-i18n="preview.checkAll">Alle prüfen</button></div>
+              <div class="demo-tabs" role="tablist"><button class="is-active" type="button" data-demo-tab="all" data-i18n="preview.all">Alle</button><button type="button" data-demo-tab="performance" data-i18n="preview.performance">Performance</button><button type="button" data-demo-tab="visual" data-i18n="preview.visual">Grafik</button></div>
+              <div class="demo-list">
+                <article class="demo-list-item" data-demo-category="performance"><span class="demo-item-icon">S</span><div><strong>Sodium</strong><small>0.6.13 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
+                <article class="demo-list-item" data-demo-category="visual"><span class="demo-item-icon">I</span><div><strong>Iris Shaders</strong><small>1.8.8 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
+                <article class="demo-list-item" data-demo-category="performance"><span class="demo-item-icon">L</span><div><strong>Lithium</strong><small>0.14.8 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
+              </div>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="modrinth">
+              <div class="demo-panel-header"><div><small>DISCOVER</small><h3>Modrinth</h3></div></div>
+              <div class="demo-search"><input type="search" data-demo-search placeholder="Mods suchen …" data-i18n-placeholder="preview.searchMods"><button class="demo-primary" type="button" data-demo-search-button data-i18n="preview.search">Suchen</button></div>
+              <div class="demo-list demo-search-results">
+                <article class="demo-list-item" data-search-name="sodium performance fps"><span class="demo-item-icon">S</span><div><strong>Sodium</strong><small data-i18n="preview.performanceMod">Performance-Mod</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
+                <article class="demo-list-item" data-search-name="iris shader graphics"><span class="demo-item-icon">I</span><div><strong>Iris Shaders</strong><small data-i18n="preview.shaderSupport">Shader-Unterstützung</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
+                <article class="demo-list-item" data-search-name="mod menu settings"><span class="demo-item-icon">M</span><div><strong>Mod Menu</strong><small data-i18n="preview.modSettings">Mod-Einstellungen</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
+              </div>
+              <p class="demo-empty" hidden data-i18n="preview.noResults">Keine Ergebnisse gefunden.</p>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="profiles">
+              <div class="demo-panel-header"><div><small data-i18n="preview.saved">GESPEICHERT</small><h3 data-i18n="preview.profiles">Profile</h3></div><div class="demo-header-actions"><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.import">Importieren</button><button class="demo-primary" type="button" data-demo-locked="create" data-i18n="preview.create">Erstellen</button></div></div>
+              <div class="demo-card-grid" data-demo-select-group>
+                <button class="demo-select-card is-selected" type="button"><small>1.21.4</small><strong>Performance</strong><span>12 Mods · Fabric</span></button>
+                <button class="demo-select-card" type="button"><small>1.20.1</small><strong>Vanilla+</strong><span>8 Mods · Fabric</span></button>
+                <button class="demo-select-card" type="button"><small>1.21.1</small><strong>Creative</strong><span>5 Mods · Fabric</span></button>
+              </div>
+              <button class="demo-text-action" type="button" data-demo-locked="transfer" data-i18n="preview.export">Ausgewähltes Profil exportieren</button>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="servers">
+              <div class="demo-panel-header"><div><small>FAVORITEN</small><h3>Server</h3></div><button class="demo-primary" type="button" data-demo-locked="create" data-i18n="preview.addServer">Server hinzufügen</button></div>
+              <div class="demo-server-list" data-demo-select-group>
+                <button class="demo-server-card is-selected" type="button"><span class="demo-server-icon">H</span><div><strong>Hypixel</strong><small>mc.hypixel.net</small></div><b><i></i>42K</b></button>
+                <button class="demo-server-card" type="button"><span class="demo-server-icon">X</span><div><strong>X Client SMP</strong><small>play.xclient.dev</small></div><b><i></i>18</b></button>
+              </div>
+              <div class="demo-server-detail"><small data-i18n="preview.selectedServer">Ausgewählter Server</small><strong data-demo-server-name>Hypixel</strong><span data-i18n="preview.serverReady">Verbindung bereit</span><button type="button" data-demo-locked="play" data-i18n="preview.join">Beitreten</button></div>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="skins">
+              <div class="demo-panel-header"><div><small data-i18n="preview.collection">SAMMLUNG</small><h3>Skins</h3></div><div class="demo-header-actions"><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.import">Importieren</button><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.exportShort">Exportieren</button></div></div>
+              <div class="demo-skin-layout">
+                <div class="demo-skin-preview"><div class="demo-skin-figure"><i></i><b></b><span></span></div><strong data-demo-skin-name>Neon Steve</strong><small data-i18n="preview.activeSkin">Aktiver Skin</small></div>
+                <div class="demo-skin-grid" data-demo-select-group><button class="demo-skin-card is-selected" type="button" data-skin-name="Neon Steve" data-skin-color="#00ffff"><span style="--skin:#00ffff"></span><b>Neon Steve</b></button><button class="demo-skin-card" type="button" data-skin-name="Purple Alex" data-skin-color="#a855f7"><span style="--skin:#a855f7"></span><b>Purple Alex</b></button><button class="demo-skin-card" type="button" data-skin-name="Lime Runner" data-skin-color="#8cff66"><span style="--skin:#8cff66"></span><b>Lime Runner</b></button></div>
+              </div>
+            </section>
+
+            <section class="demo-panel" data-demo-panel="settings">
+              <div class="demo-panel-header"><div><small>X CLIENT</small><h3 data-i18n="preview.settings">Einstellungen</h3></div></div>
+              <div class="demo-settings-grid">
+                <article><small data-i18n="preview.appearance">DARSTELLUNG</small><h4 data-i18n="preview.accentColor">Akzentfarbe</h4><div class="demo-color-row"><button class="is-active" type="button" data-demo-color="#00ffff" style="--choice:#00ffff" aria-label="Cyan"></button><button type="button" data-demo-color="#a855f7" style="--choice:#a855f7" aria-label="Violett"></button><button type="button" data-demo-color="#8cff66" style="--choice:#8cff66" aria-label="Grün"></button></div></article>
+                <article><small data-i18n="preview.behavior">VERHALTEN</small><label class="demo-setting-row"><span data-i18n="preview.animations">Animationen</span><button class="demo-switch is-on" type="button" role="switch" aria-checked="true" data-demo-motion><i></i></button></label><label class="demo-setting-row"><span data-i18n="preview.sounds">Sounds</span><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button></label></article>
+                <article><small>PERFORMANCE</small><h4>RAM</h4><input type="range" min="2" max="16" value="6" step="1" data-demo-memory><strong><span data-demo-memory-output>6</span> GB</strong></article>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="demo-toast" role="status" aria-live="polite"></div>
+      </div>
+    </section>
 
   </main>
 
   <footer><span>© 2026 X Client</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=25"></script>
+  <script src="download.js?v=26"></script>
+  <script src="app-preview.js?v=26"></script>
 </body>
 </html>

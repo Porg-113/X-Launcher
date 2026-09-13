@@ -81,3 +81,21 @@ test('website language is automatic and can be selected from every menu', () => 
   assert.match(websiteScript, /window\.addEventListener\("languagechange"/u);
   assert.match(websiteScript, /document\.documentElement\.lang = currentLanguage/u);
 });
+
+test('website preview is interactive while unsafe demo actions stay locked', () => {
+  const homePage = read(path.join('docs', 'index.html'));
+  const featuresPage = read(path.join('docs', 'features.html'));
+  const previewScript = read(path.join('docs', 'app-preview.js'));
+
+  assert.match(homePage, /id="app-preview"/u);
+  assert.match(homePage, /<strong>X Client<\/strong>/u);
+  assert.doesNotMatch(homePage, /class="feature-story"/u);
+  assert.match(featuresPage, /class="feature-story feature-story-page"/u);
+  for (const action of ['play', 'install', 'delete', 'create', 'transfer']) {
+    assert.match(homePage, new RegExp(`data-demo-locked="${action}"`, 'u'));
+  }
+  assert.match(previewScript, /data-demo-section/u);
+  assert.match(previewScript, /data-demo-search/u);
+  assert.match(previewScript, /data-demo-color/u);
+  assert.doesNotMatch(previewScript, /fetch\(|window\.api|electron/u);
+});
