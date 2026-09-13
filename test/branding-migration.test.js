@@ -87,13 +87,15 @@ test('website preview is interactive while unsafe demo actions stay locked', () 
   const featuresPage = read(path.join('docs', 'features.html'));
   const previewPage = read(path.join('docs', 'launcher-preview.html'));
   const previewScript = read(path.join('docs', 'launcher-preview.js'));
+  const launcherMainSource = read(path.join('src', 'main.parts', 'part-01.jsfrag'));
   const previewSkin = fs.readFileSync(path.join(projectRoot, 'docs', 'assets', 'skins', 'i-am-steve.png'));
 
-  assert.match(homePage, /id="app-preview"[^>]+launcher-preview\.html\?v=28/u);
+  assert.match(homePage, /id="app-preview"[^>]+launcher-preview\.html\?v=29/u);
   assert.match(homePage, /id="legacy-app-preview"[^>]+hidden/u);
   assert.match(previewPage, /id="main-screen" class="screen active"/u);
   assert.match(previewPage, /id="username-display"[^>]*>X Client<\/button>/u);
   assert.match(previewPage, /assets\/skins\/i-am-steve\.png/u);
+  assert.match(previewPage, /data-launcher-skin-src="assets\/skins\/i-am-steve\.png"/u);
   assert.match(previewPage, /data-skin-name="i-am-steve"/u);
   assert.match(previewPage, /class="dashboard-skin-stage"/u);
   assert.equal(read(path.join('docs', 'launcher-preview-base.css')), read('styles.css'));
@@ -105,6 +107,29 @@ test('website preview is interactive while unsafe demo actions stay locked', () 
   assert.match(previewScript, /nothing installed|nichts installiert/u);
   assert.match(previewScript, /nichts gelöscht/u);
   assert.match(previewScript, /keine Dateien erstellt, importiert oder exportiert/u);
-  assert.match(previewScript, /SkinViewer/u);
+  assert.match(previewScript, /renderSkin3DPreviewCanvas\(dashboardCanvas, activeSkin, 24,/u);
+  assert.match(previewScript, /renderSkin3DPreviewCanvas\(document\.querySelector\("#skin-preview-canvas"\), activeSkin, 14,/u);
+  assert.match(previewScript, /const LAUNCHER_STANDARD_PROFILE/u);
+  assert.match(previewScript, /const LAUNCHER_STANDARD_MODS/u);
+  assert.match(previewScript, /const LAUNCHER_STANDARD_CONTENT/u);
+  assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
+  assert.match(previewScript, /hidden: true/u);
+  assert.match(previewScript, /hidden: false/u);
+  assert.match(previewScript, /itemType: "shader"/u);
+  assert.match(previewScript, /itemType: "resourcepack"/u);
+  assert.match(previewScript, /cdn\.modrinth\.com\/data\//u);
+  assert.match(previewScript, /getLauncherPreviewView/u);
+  assert.match(previewScript, /renderLauncherStandardProfile\(\)/u);
+  assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
+  assert.match(previewScript, /Standard-Mods ausgerüstet/u);
+  const defaultProjectsSource = launcherMainSource.slice(
+    launcherMainSource.indexOf('const DEFAULT_PACK_PROJECTS = ['),
+    launcherMainSource.indexOf('const KNOWN_FABRIC_MOD_ID_PROJECT_IDS = {')
+  );
+  const defaultModTitles = [...defaultProjectsSource.matchAll(/title: '([^']+)'/gu)].map((match) => match[1]);
+  assert.equal(defaultModTitles.length, 22);
+  for (const title of defaultModTitles) assert.match(previewScript, new RegExp(`name: "${title}"`, 'u'));
+  assert.match(previewScript, /name: "X Client", kind: "Pflichtmod"/u);
+  assert.doesNotMatch(previewPage, /skinview3d/u);
   assert.doesNotMatch(previewScript, /fetch\(|window\.api|electronAPI|XMLHttpRequest/u);
 });

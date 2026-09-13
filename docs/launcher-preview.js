@@ -4,6 +4,9 @@
   const skinUrl = new URL(previewBody?.dataset.launcherSkinSrc || "assets/skins/i-am-steve.png", document.baseURI);
   if (deployedAssetVersion) skinUrl.searchParams.set("v", deployedAssetVersion);
   const SKIN_URL = skinUrl.href;
+  const xClientIconUrl = new URL("x-logo.png", document.baseURI);
+  if (deployedAssetVersion) xClientIconUrl.searchParams.set("v", deployedAssetVersion);
+  const X_CLIENT_ICON_URL = xClientIconUrl.href;
   const LAUNCHER_STANDARD_PROFILE = Object.freeze({
     name: "Launcher-Standard",
     minecraftVersion: "26.2",
@@ -14,29 +17,36 @@
   // local launcher data, so this is the exact equipped default state shown by
   // a fresh X Client installation.
   const LAUNCHER_STANDARD_MODS = Object.freeze([
-    { id: "x-launcher-menu", name: "X Client", kind: "Pflichtmod" },
-    { id: "fabric-api", name: "Fabric API", kind: "Standard-Mod" },
-    { id: "silicons", name: "Silicon", kind: "Standard-Mod" },
-    { id: "sodium", name: "Sodium", kind: "Standard-Mod" },
-    { id: "iris", name: "Iris Shaders", kind: "Standard-Mod" },
-    { id: "modmenu", name: "Mod Menu", kind: "Standard-Mod" },
-    { id: "infinite-zoom", name: "Infinite Zoom", kind: "Standard-Mod" },
-    { id: "simple-voice-chat", name: "Simple Voice Chat", kind: "Standard-Mod" },
-    { id: "lithium", name: "Lithium", kind: "Standard-Mod" },
-    { id: "ferrite-core", name: "FerriteCore", kind: "Standard-Mod" },
-    { id: "entityculling", name: "Entity Culling", kind: "Standard-Mod" },
-    { id: "immediatelyfast", name: "ImmediatelyFast", kind: "Standard-Mod" },
-    { id: "moreculling", name: "More Culling", kind: "Standard-Mod" },
-    { id: "dynamic-fps", name: "Dynamic FPS", kind: "Standard-Mod" },
-    { id: "clumps", name: "Clumps", kind: "Standard-Mod" },
-    { id: "fast-ip-ping", name: "Fast IP Ping", kind: "Standard-Mod" },
-    { id: "particle-core", name: "Particle Core", kind: "Standard-Mod" },
-    { id: "c2me-fabric", name: "Concurrent Chunk Management Engine", kind: "Standard-Mod" },
-    { id: "appleskin", name: "AppleSkin", kind: "Standard-Mod" },
-    { id: "continuity", name: "Continuity", kind: "Standard-Mod" },
-    { id: "chat-heads", name: "Chat Heads", kind: "Standard-Mod" },
-    { id: "controlling", name: "Controlling", kind: "Standard-Mod" },
-    { id: "shulkerboxtooltip", name: "Shulker Box Tooltip", kind: "Standard-Mod" }
+    { id: "x-launcher-menu", name: "X Client", kind: "Pflichtmod", hidden: false, iconUrl: X_CLIENT_ICON_URL },
+    { id: "fabric-api", name: "Fabric API", kind: "System-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/P7dR8mSH/icon.png" },
+    { id: "silicons", name: "Silicon", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/MdNZOBlg/b7e1e985a0fc8bb0164b025a310c3e843b4a5211_96.webp" },
+    { id: "sodium", name: "Sodium", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/AANobbMI/295862f4724dc3f78df3447ad6072b2dcd3ef0c9_96.webp" },
+    { id: "iris", name: "Iris Shaders", kind: "Shader-Engine", hidden: true, iconUrl: "https://cdn.modrinth.com/data/YL57xq9U/18d0e7f076d3d6ed5bedd472b853909aac5da202_96.webp" },
+    { id: "modmenu", name: "Mod Menu", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/mOgUt4GM/5a20ed1450a0e1e79a1fe04e61bb4e5878bf1d20.png" },
+    { id: "infinite-zoom", name: "Infinite Zoom", kind: "System-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/pS3Sez5p/d655cc00c40d4b9214214920971daf7a6ec4b8b0.png" },
+    { id: "simple-voice-chat", name: "Simple Voice Chat", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/9eGKb6K1/icon.png" },
+    { id: "lithium", name: "Lithium", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/gvQqBUqZ/bcc8686c13af0143adf4285d741256af824f70b7_96.webp" },
+    { id: "ferrite-core", name: "FerriteCore", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/uXXizFIs/222a126f26f8f9ae1eb339f3b767677f18bff31f_96.webp" },
+    { id: "entityculling", name: "Entity Culling", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/NNAgCjsB/7873452d6cede4daed12da3d7d8c193ab88b4fd6_96.webp" },
+    { id: "immediatelyfast", name: "ImmediatelyFast", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/5ZwdcRci/e57b6b451425692ac17ad322d5e14bea686a383a_96.webp" },
+    { id: "moreculling", name: "More Culling", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/51shyZVL/c51b07193b56e952269ef50101d12aecba2b4747_96.webp" },
+    { id: "dynamic-fps", name: "Dynamic FPS", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/LQ3K71Q1/5056368d0d87c1a9f3efead0cb48ab39a4ea87bf_96.webp" },
+    { id: "clumps", name: "Clumps", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/Wnxd13zP/6a965bb7974c3e759a53a1c89c35de4acd4cf86a_96.webp" },
+    { id: "fast-ip-ping", name: "Fast IP Ping", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/9mtu0sUO/dca186a8a57d45ad06e88de6cfc45d4cc4c6a0ba.png" },
+    { id: "particle-core", name: "Particle Core", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/RSeLon5O/147110a6a4457b2f287f68fc626771f0f8ef2cde_96.webp" },
+    { id: "c2me-fabric", name: "Concurrent Chunk Management Engine", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/VSNURh3q/3c2ce471054466712a44c8758a03e03bb868f93b_96.webp" },
+    { id: "appleskin", name: "AppleSkin", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/EsAfCjCV/icon.png" },
+    { id: "continuity", name: "Continuity", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/1IjD5062/icon.png" },
+    { id: "chat-heads", name: "Chat Heads", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/Wb5oqrBJ/icon.png" },
+    { id: "controlling", name: "Controlling", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/xv94TkTM/bdb6feb3d04ca37da4ed5aa73fef062a39d8b3e5_96.webp" },
+    { id: "shulkerboxtooltip", name: "Shulker Box Tooltip", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/2M01OLQq/bb490716cf2590cf84100a495931c3d4743bce43_96.webp" }
+  ]);
+  const LAUNCHER_STANDARD_CONTENT = Object.freeze([
+    { id: "complementary-reimagined", name: "Complementary Shaders - Reimagined", itemType: "shader", kind: "Shader", iconUrl: "https://cdn.modrinth.com/data/HVnmMxH1/79cb7c8123bbc54945305b2ebad6b8881efdf5f8_96.webp" },
+    { id: "bsl-shaders", name: "BSL Shaders", itemType: "shader", kind: "Shader", iconUrl: "https://cdn.modrinth.com/data/Q1vvjJYV/2a611a3cb434fb52fb81fa5dace13c5d8b67e55d_96.webp" },
+    { id: "x-client-resourcepack", name: "X Client Ressourcenpaket", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: X_CLIENT_ICON_URL },
+    { id: "fresh-animations", name: "Fresh Animations", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: "https://cdn.modrinth.com/data/50dA9Sha/3132c10e9e3c73fde9799720fd3da5561071708c_96.webp" },
+    { id: "better-vanilla-building", name: "BetterVanillaBuilding", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: "https://cdn.modrinth.com/data/LBcosBrl/icon.png" }
   ]);
   const toast = document.querySelector("#preview-toast");
   const sections = [...document.querySelectorAll(".content-section")];
@@ -122,6 +132,60 @@
     `).join("");
   }
 
+  function getLauncherPreviewView(view) {
+    if (view === "hidden") {
+      return { title: "Ausgeblendete Pflichtmods", dropTitle: "Ausgeblendete Mods", dropHint: "Pflicht- und Performance-Mods", items: LAUNCHER_STANDARD_MODS.filter((mod) => mod.hidden), empty: "Keine ausgeblendeten Mods installiert." };
+    }
+    if (view === "shader") {
+      return { title: "Shader", dropTitle: "Shader über Modrinth installieren", dropHint: "ZIP-Dateien werden im shaderpacks-Ordner verwaltet.", items: LAUNCHER_STANDARD_CONTENT.filter((item) => item.itemType === "shader"), empty: "Keine Shader installiert." };
+    }
+    if (view === "resourcepack") {
+      return { title: "Ressourcenpakete", dropTitle: "Ressourcenpakete über Modrinth installieren", dropHint: "ZIP-Dateien werden im resourcepacks-Ordner verwaltet.", items: LAUNCHER_STANDARD_CONTENT.filter((item) => item.itemType === "resourcepack"), empty: "Keine Ressourcenpakete installiert." };
+    }
+    return { title: "Mods für diese Version", dropTitle: "Mods hier ablegen", dropHint: "JAR-Dateien", items: LAUNCHER_STANDARD_MODS.filter((mod) => !mod.hidden), empty: "Keine Mods für diese Version aktiv." };
+  }
+
+  function renderLauncherStandardContent(view = "mod") {
+    const modList = document.querySelector("#mods-list");
+    const contextLabel = document.querySelector("#mods-context-label");
+    const sectionTitle = document.querySelector("#mods-section-title");
+    const dropZone = document.querySelector("#mods-drop-zone");
+    if (!modList) return;
+
+    const config = getLauncherPreviewView(view);
+    if (contextLabel) contextLabel.textContent = `${LAUNCHER_STANDARD_PROFILE.name} · ${LAUNCHER_STANDARD_MODS.length} Mods, ${LAUNCHER_STANDARD_CONTENT.length} Inhalte ausgerüstet.`;
+    if (sectionTitle) sectionTitle.textContent = config.title;
+    if (dropZone) {
+      dropZone.querySelector("strong").textContent = config.dropTitle;
+      dropZone.querySelector("span").textContent = config.dropHint;
+      dropZone.classList.toggle("is-download-only", view !== "mod");
+    }
+    if (!config.items.length) {
+      modList.innerHTML = `<p class="mods-empty">${config.empty}</p>`;
+      return;
+    }
+
+    modList.innerHTML = config.items.map((item) => {
+      const isHidden = view === "hidden";
+      const itemType = item.itemType || "mod";
+      const badge = isHidden ? `Ausgeblendet · ${item.kind}` : `${item.kind} · Aktiv`;
+      return `
+        <article class="mod-item installed-mod-card${isHidden ? " is-preview-hidden" : ""}" data-standard-mod="${item.id}" data-preview-content-type="${itemType}">
+          <div class="mod-head">
+            <div class="mod-title-wrap">
+              <img class="mod-icon" src="${item.iconUrl}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='assets/icons/nav-modrinth.svg'">
+              <div class="installed-mod-copy">
+                <div class="installed-mod-name-row"><div class="installed-mod-name-text"><h4>${item.name}</h4></div></div>
+                <span class="mod-source-badge">${badge}</span>
+              </div>
+            </div>
+          </div>
+          <p>Im ${LAUNCHER_STANDARD_PROFILE.name} ausgerüstet.</p>
+        </article>
+      `;
+    }).join("");
+  }
+
   function applyLauncherSkinState() {
     const skinName = previewBody?.dataset.launcherSkinName || "Steve";
     const skinVariant = previewBody?.dataset.launcherSkinVariant || "wide";
@@ -143,7 +207,7 @@
   }
 
   renderLauncherStandardProfile();
-  renderLauncherStandardMods();
+  renderLauncherStandardContent();
 
   navButtons.forEach((button) => {
     button.dataset.previewWired = "true";
@@ -174,7 +238,7 @@
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", String(active));
       });
-      if (button.hasAttribute("data-mods-view")) renderLauncherStandardMods(button.dataset.modsView);
+      if (button.hasAttribute("data-mods-view")) renderLauncherStandardContent(button.dataset.modsView);
     });
   });
 
