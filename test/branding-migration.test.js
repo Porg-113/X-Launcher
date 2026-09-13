@@ -111,14 +111,16 @@ test('website preview is interactive while unsafe demo actions stay locked', () 
   assert.match(previewScript, /renderSkin3DPreviewCanvas\(document\.querySelector\("#skin-preview-canvas"\), activeSkin, 14,/u);
   assert.match(previewScript, /const LAUNCHER_STANDARD_PROFILE/u);
   assert.match(previewScript, /const LAUNCHER_STANDARD_MODS/u);
+  assert.match(previewScript, /const LAUNCHER_VISIBLE_MODS/u);
   assert.match(previewScript, /const LAUNCHER_STANDARD_CONTENT/u);
   assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
   assert.match(previewScript, /hidden: true/u);
-  assert.match(previewScript, /hidden: false/u);
   assert.match(previewScript, /itemType: "shader"/u);
   assert.match(previewScript, /itemType: "resourcepack"/u);
   assert.match(previewScript, /cdn\.modrinth\.com\/data\//u);
   assert.match(previewScript, /getLauncherPreviewView/u);
+  assert.match(previewScript, /Xaero's Minimap/u);
+  assert.match(previewScript, /Inventory Profiles Next/u);
   assert.match(previewScript, /renderLauncherStandardProfile\(\)/u);
   assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
   assert.match(previewScript, /Standard-Mods ausgerüstet/u);

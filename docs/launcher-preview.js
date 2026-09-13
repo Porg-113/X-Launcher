@@ -17,14 +17,14 @@
   // local launcher data, so this is the exact equipped default state shown by
   // a fresh X Client installation.
   const LAUNCHER_STANDARD_MODS = Object.freeze([
-    { id: "x-launcher-menu", name: "X Client", kind: "Pflichtmod", hidden: false, iconUrl: X_CLIENT_ICON_URL },
+    { id: "x-launcher-menu", name: "X Client", kind: "Pflichtmod", hidden: true, iconUrl: X_CLIENT_ICON_URL },
     { id: "fabric-api", name: "Fabric API", kind: "System-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/P7dR8mSH/icon.png" },
     { id: "silicons", name: "Silicon", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/MdNZOBlg/b7e1e985a0fc8bb0164b025a310c3e843b4a5211_96.webp" },
     { id: "sodium", name: "Sodium", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/AANobbMI/295862f4724dc3f78df3447ad6072b2dcd3ef0c9_96.webp" },
     { id: "iris", name: "Iris Shaders", kind: "Shader-Engine", hidden: true, iconUrl: "https://cdn.modrinth.com/data/YL57xq9U/18d0e7f076d3d6ed5bedd472b853909aac5da202_96.webp" },
-    { id: "modmenu", name: "Mod Menu", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/mOgUt4GM/5a20ed1450a0e1e79a1fe04e61bb4e5878bf1d20.png" },
+    { id: "modmenu", name: "Mod Menu", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/mOgUt4GM/5a20ed1450a0e1e79a1fe04e61bb4e5878bf1d20.png" },
     { id: "infinite-zoom", name: "Infinite Zoom", kind: "System-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/pS3Sez5p/d655cc00c40d4b9214214920971daf7a6ec4b8b0.png" },
-    { id: "simple-voice-chat", name: "Simple Voice Chat", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/9eGKb6K1/icon.png" },
+    { id: "simple-voice-chat", name: "Simple Voice Chat", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/9eGKb6K1/icon.png" },
     { id: "lithium", name: "Lithium", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/gvQqBUqZ/bcc8686c13af0143adf4285d741256af824f70b7_96.webp" },
     { id: "ferrite-core", name: "FerriteCore", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/uXXizFIs/222a126f26f8f9ae1eb339f3b767677f18bff31f_96.webp" },
     { id: "entityculling", name: "Entity Culling", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/NNAgCjsB/7873452d6cede4daed12da3d7d8c193ab88b4fd6_96.webp" },
@@ -35,11 +35,20 @@
     { id: "fast-ip-ping", name: "Fast IP Ping", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/9mtu0sUO/dca186a8a57d45ad06e88de6cfc45d4cc4c6a0ba.png" },
     { id: "particle-core", name: "Particle Core", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/RSeLon5O/147110a6a4457b2f287f68fc626771f0f8ef2cde_96.webp" },
     { id: "c2me-fabric", name: "Concurrent Chunk Management Engine", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/VSNURh3q/3c2ce471054466712a44c8758a03e03bb868f93b_96.webp" },
-    { id: "appleskin", name: "AppleSkin", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/EsAfCjCV/icon.png" },
+    { id: "appleskin", name: "AppleSkin", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/EsAfCjCV/icon.png" },
     { id: "continuity", name: "Continuity", kind: "Performance", hidden: true, iconUrl: "https://cdn.modrinth.com/data/1IjD5062/icon.png" },
-    { id: "chat-heads", name: "Chat Heads", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/Wb5oqrBJ/icon.png" },
-    { id: "controlling", name: "Controlling", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/xv94TkTM/bdb6feb3d04ca37da4ed5aa73fef062a39d8b3e5_96.webp" },
-    { id: "shulkerboxtooltip", name: "Shulker Box Tooltip", kind: "Standard-Mod", hidden: false, iconUrl: "https://cdn.modrinth.com/data/2M01OLQq/bb490716cf2590cf84100a495931c3d4743bce43_96.webp" }
+    { id: "chat-heads", name: "Chat Heads", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/Wb5oqrBJ/icon.png" },
+    { id: "controlling", name: "Controlling", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/xv94TkTM/bdb6feb3d04ca37da4ed5aa73fef062a39d8b3e5_96.webp" },
+    { id: "shulkerboxtooltip", name: "Shulker Box Tooltip", kind: "Standard-Mod", hidden: true, iconUrl: "https://cdn.modrinth.com/data/2M01OLQq/bb490716cf2590cf84100a495931c3d4743bce43_96.webp" }
+  ]);
+  const LAUNCHER_VISIBLE_MODS = Object.freeze([
+    { id: "xaeros-minimap", name: "Xaero's Minimap", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/1bokaNcj/354080f65407e49f486fcf9c4580e82c45ae63b8_96.webp" },
+    { id: "emi", name: "EMI", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/fRiHVvU7/395fe5302b2bab612ef0623509f768f3c5a5ee0f.webp" },
+    { id: "wthit", name: "WTHIT", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/6AQIaxuO/2bd96dccf28d264598c2c5f5a46c1d57561841a2_96.webp" },
+    { id: "lamb-dynamic-lights", name: "LambDynamicLights", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/yBW8D80W/d4f5c3ff8df7caf024178b04eca6d69f95979cfe_96.webp" },
+    { id: "not-enough-animations", name: "Not Enough Animations", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/MPCX6s5C/b97fd5f7a893165052408b747286d6eb38d57abb_96.webp" },
+    { id: "presence-footsteps", name: "Presence Footsteps", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/rcTfTZr3/c08dc581f0bf3b729f86e962fa800463af86e9a2_96.webp" },
+    { id: "inventory-profiles-next", name: "Inventory Profiles Next", kind: "Community-Mod", iconUrl: "https://cdn.modrinth.com/data/O7RBXm3n/04cdecd37b4c7409f70d36fcdc85722ebf14aab8_96.webp" }
   ]);
   const LAUNCHER_STANDARD_CONTENT = Object.freeze([
     { id: "complementary-reimagined", name: "Complementary Shaders - Reimagined", itemType: "shader", kind: "Shader", iconUrl: "https://cdn.modrinth.com/data/HVnmMxH1/79cb7c8123bbc54945305b2ebad6b8881efdf5f8_96.webp" },
@@ -70,7 +79,7 @@
   }
 
   function renderLauncherStandardProfile() {
-    const totalMods = LAUNCHER_STANDARD_MODS.length;
+    const totalMods = LAUNCHER_STANDARD_MODS.length + LAUNCHER_VISIBLE_MODS.length;
     const profileLabel = `${LAUNCHER_STANDARD_PROFILE.name} · Minecraft ${LAUNCHER_STANDARD_PROFILE.minecraftVersion} · ${LAUNCHER_STANDARD_PROFILE.loader}`;
     const startProfileSelect = document.querySelector("#start-pack-select");
     const profileList = document.querySelector("#packs-list");
@@ -142,7 +151,7 @@
     if (view === "resourcepack") {
       return { title: "Ressourcenpakete", dropTitle: "Ressourcenpakete über Modrinth installieren", dropHint: "ZIP-Dateien werden im resourcepacks-Ordner verwaltet.", items: LAUNCHER_STANDARD_CONTENT.filter((item) => item.itemType === "resourcepack"), empty: "Keine Ressourcenpakete installiert." };
     }
-    return { title: "Mods für diese Version", dropTitle: "Mods hier ablegen", dropHint: "JAR-Dateien", items: LAUNCHER_STANDARD_MODS.filter((mod) => !mod.hidden), empty: "Keine Mods für diese Version aktiv." };
+    return { title: "Mods für diese Version", dropTitle: "Mods hier ablegen", dropHint: "JAR-Dateien", items: LAUNCHER_VISIBLE_MODS, empty: "Keine Mods für diese Version aktiv." };
   }
 
   function renderLauncherStandardContent(view = "mod") {
@@ -153,7 +162,7 @@
     if (!modList) return;
 
     const config = getLauncherPreviewView(view);
-    if (contextLabel) contextLabel.textContent = `${LAUNCHER_STANDARD_PROFILE.name} · ${LAUNCHER_STANDARD_MODS.length} Mods, ${LAUNCHER_STANDARD_CONTENT.length} Inhalte ausgerüstet.`;
+    if (contextLabel) contextLabel.textContent = `${LAUNCHER_STANDARD_PROFILE.name} · ${LAUNCHER_STANDARD_MODS.length + LAUNCHER_VISIBLE_MODS.length} Mods, ${LAUNCHER_STANDARD_CONTENT.length} Inhalte ausgerüstet.`;
     if (sectionTitle) sectionTitle.textContent = config.title;
     if (dropZone) {
       dropZone.querySelector("strong").textContent = config.dropTitle;
