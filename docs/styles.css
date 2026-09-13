@@ -19,7 +19,7 @@
 html { scroll-behavior: smooth; }
 body { margin: 0; background: radial-gradient(circle at 75% 8%, #003942 0, transparent 34%), var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow-x: hidden; }
 body.site-menu-open { overflow: hidden; }
-strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .secondary, .features article > span, .closing a, .site-menu-kicker, .site-menu-links a, .site-menu-external a { font-family: "Minecraft Website", monospace; }
+strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .secondary, .features article > span, .closing a, .site-menu-links a, .site-menu-external a { font-family: "Minecraft Website", monospace; }
 .glow { position: fixed; border-radius: 50%; filter: blur(110px); pointer-events: none; }
 .glow-one { width: 550px; height: 550px; background: var(--cyan); opacity: .13; top: -250px; right: -130px; }
 .glow-two { width: 420px; height: 420px; background: #00d8ff; opacity: .1; left: -240px; top: 520px; }
@@ -37,22 +37,19 @@ strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .s
 .menu-bars i:nth-child(1) { top: 0; }
 .menu-bars i:nth-child(2) { top: 7px; }
 .menu-bars i:nth-child(3) { top: 14px; }
-.site-menu-toggle[aria-expanded="true"] .menu-bars i:nth-child(1) { top: 7px; transform: rotate(45deg); }
-.site-menu-toggle[aria-expanded="true"] .menu-bars i:nth-child(2) { opacity: 0; transform: scaleX(.2); }
-.site-menu-toggle[aria-expanded="true"] .menu-bars i:nth-child(3) { top: 7px; transform: rotate(-45deg); }
 .site-menu { position: fixed; inset: 0; z-index: 60; visibility: hidden; pointer-events: none; transition: visibility .5s; }
 .site-menu.is-open { visibility: visible; pointer-events: auto; }
 .site-menu-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(0, 10, 14, .76); opacity: 0; cursor: default; backdrop-filter: blur(0); transition: opacity .42s ease, backdrop-filter .42s ease; }
 .site-menu.is-open .site-menu-backdrop { opacity: 1; backdrop-filter: blur(14px); }
 .site-menu-panel { position: absolute; inset: 0 auto 0 0; width: min(560px, 92vw); display: flex; flex-direction: column; padding: clamp(118px, 15vh, 160px) clamp(30px, 7vw, 82px) 46px; overflow-y: auto; outline: 0; border-right: 1px solid rgba(0, 255, 255, .28); background: radial-gradient(circle at 18% 12%, rgba(0, 255, 255, .16), transparent 34%), linear-gradient(145deg, rgba(0, 34, 42, .99), rgba(0, 13, 18, .99)); box-shadow: 35px 0 100px rgba(0, 0, 0, .48); transform: translateX(-102%); transition: transform .52s cubic-bezier(.16,1,.3,1); }
 .site-menu.is-open .site-menu-panel { transform: translateX(0); }
-.site-menu-kicker { margin: 0 0 13px; color: var(--cyan); font-size: .75rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
 .site-menu-panel h2 { margin: 0; color: #fff; font-size: clamp(2.35rem, 6vw, 4.5rem); line-height: .95; letter-spacing: -.035em; text-shadow: 0 0 30px rgba(0, 255, 255, .24); }
 .site-menu-copy { max-width: 420px; margin: 24px 0 34px; color: var(--muted); font-size: .98rem; line-height: 1.7; }
 .site-menu-links { display: grid; border-top: 1px solid var(--line); }
 .site-menu-links a { display: flex; align-items: baseline; gap: 16px; padding: 17px 2px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; font-size: clamp(1.25rem, 3vw, 1.75rem); font-weight: 700; opacity: 0; transform: translateX(-22px); transition: color .25s ease, padding-left .25s ease, opacity .35s ease, transform .35s ease; }
 .site-menu-links a span { color: var(--cyan); font-size: .62rem; letter-spacing: .12em; }
 .site-menu-links a:hover { color: var(--cyan); padding-left: 9px; }
+.site-menu-links a[aria-current="page"] { color: var(--cyan); }
 .site-menu.is-open .site-menu-links a { opacity: 1; transform: translateX(0); }
 .site-menu.is-open .site-menu-links a:nth-child(1) { transition-delay: .15s; }
 .site-menu.is-open .site-menu-links a:nth-child(2) { transition-delay: .22s; }
@@ -92,6 +89,32 @@ strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .s
 .features p { color: var(--muted); line-height: 1.65; margin: 0; }
 .feature-copy { transition: opacity .22s ease, transform .22s cubic-bezier(.2,.8,.2,1), filter .22s ease; }
 .feature-copy.text-changing { opacity: 0; transform: translateY(14px); filter: blur(5px); }
+.page-main { padding: 74px 0 120px; }
+.page-hero { max-width: 880px; margin: 0 auto 64px; text-align: center; }
+.page-hero .eyebrow { justify-content: center; }
+.page-title { margin: 22px auto 20px; color: #fff; font-size: clamp(2.8rem, 7vw, 6rem); line-height: .98; letter-spacing: -.045em; text-shadow: 0 0 36px rgba(0, 255, 255, .2); }
+.page-copy { max-width: 680px; margin: auto; color: var(--muted); font-size: clamp(1rem, 2vw, 1.18rem); line-height: 1.75; }
+.feature-page-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.page-feature-card { position: relative; min-height: 250px; padding: 32px; overflow: hidden; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(145deg, rgba(0, 255, 255, .09), rgba(0, 255, 255, .02)); box-shadow: inset 0 1px rgba(255, 255, 255, .04); transform-style: preserve-3d; transition: border-color .3s ease, box-shadow .3s ease, transform .18s ease-out; }
+.page-feature-card::after { content: ""; position: absolute; width: 150px; height: 150px; right: -75px; bottom: -75px; border-radius: 50%; background: var(--cyan); opacity: .07; filter: blur(12px); }
+.page-feature-card:hover { border-color: rgba(0, 255, 255, .58); box-shadow: 0 20px 58px rgba(0, 255, 255, .09), inset 0 1px rgba(255, 255, 255, .07); }
+.page-feature-card > span { color: var(--cyan); font-family: "Minecraft Website", monospace; font-size: .68rem; letter-spacing: .12em; }
+.page-feature-card h2 { margin: 52px 0 13px; font-size: clamp(1.35rem, 2.4vw, 1.8rem); }
+.page-feature-card p { margin: 0; color: var(--muted); line-height: 1.7; }
+.page-cta { margin-top: 70px; text-align: center; }
+.page-cta .download { margin: 0 auto; }
+.download-shell { width: min(760px, 100%); margin: 0 auto; padding: clamp(28px, 5vw, 54px); text-align: center; border: 1px solid rgba(0, 255, 255, .34); border-radius: 28px; background: radial-gradient(circle at 50% 0, rgba(0, 255, 255, .16), transparent 42%), rgba(0, 24, 31, .72); box-shadow: 0 28px 90px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .06); }
+.download-shell-logo { width: min(360px, 76%); margin: 0 auto 28px; filter: drop-shadow(0 0 24px rgba(0, 255, 255, .3)); }
+.download-shell h2 { margin: 0 0 12px; font-size: clamp(1.65rem, 4vw, 2.5rem); }
+.download-shell > p { margin: 0 auto 30px; color: var(--muted); line-height: 1.65; }
+.download-shell .download { margin: auto; }
+.download-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; }
+.download-facts span { padding: 13px 10px; border: 1px solid var(--line); border-radius: 12px; color: #80b9bf; font-size: .72rem; }
+.install-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 58px; }
+.install-steps article { padding: 25px; border-top: 1px solid var(--line); }
+.install-steps span { color: var(--cyan); font-family: "Minecraft Website", monospace; font-size: .68rem; }
+.install-steps h2 { margin: 17px 0 10px; font-size: 1.15rem; }
+.install-steps p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.6; }
 .closing { text-align: center; border: 1px solid var(--line); border-radius: 24px; padding: 75px 20px; background: radial-gradient(circle at 50% 120%, rgba(0, 255, 255, .2), transparent 58%); }
 .closing p { color: var(--muted); }
 .closing h2 { font-size: clamp(2.4rem, 6vw, 4.8rem); letter-spacing: -.05em; margin: 5px 0 30px; }
@@ -113,6 +136,10 @@ body, body * { font-weight: 400 !important; }
   .feature-story { height: auto; }
   .features { position: static; grid-template-columns: 1fr; padding: 60px 0 120px; }
   .features article { min-height: 0; }
+  .feature-page-grid, .install-steps { grid-template-columns: 1fr; }
+  .page-main { padding-top: 52px; }
+  .page-feature-card { min-height: 0; }
+  .download-facts { grid-template-columns: 1fr; }
   .nav, main, footer { width: min(100% - 28px, 1120px); }
   footer { gap: 12px; flex-direction: column; }
   .github-link { font-size: .9rem; }

@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="X Client – der moderne Minecraft Fabric Client für Windows.">
   <meta name="theme-color" content="#00191f">
-  <title>X Client – Download</title>
+  <title>X Client – Startseite</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -30,13 +30,12 @@
   <div id="site-menu" class="site-menu" aria-hidden="true">
     <button class="site-menu-backdrop" type="button" data-menu-close aria-label="Menü schließen"></button>
     <aside class="site-menu-panel" role="dialog" aria-modal="true" aria-labelledby="site-menu-title" tabindex="-1">
-      <p class="site-menu-kicker">X Client</p>
       <h2 id="site-menu-title">Über X Client</h2>
       <p class="site-menu-copy">Ein schneller, persönlicher Minecraft-Client mit Mods, Profilen, Skins und direktem Spielstart – alles an einem Ort.</p>
       <nav class="site-menu-links" aria-label="Seitennavigation">
-        <a href="#top" data-menu-close><span>01</span>Startseite</a>
-        <a href="#features" data-menu-close><span>02</span>Features</a>
-        <a href="#download" data-menu-close><span>03</span>Download</a>
+        <a href="index.html" aria-current="page" data-menu-close><span>01</span>Startseite</a>
+        <a href="features.html" data-menu-close><span>02</span>Features</a>
+        <a href="downloads.html" data-menu-close><span>03</span>Downloads</a>
       </nav>
       <div class="site-menu-external">
         <a href="https://discord.gg/9xTWsqeqY" target="_blank" rel="noreferrer">Discord ↗</a>
@@ -55,10 +54,10 @@
         <span><strong id="active-player-count">0</strong><small>Active</small></span>
       </section>
       <div class="actions">
-        <a id="download" class="download" href="https://github.com/Porg-113/X-Launcher/releases/latest" aria-describedby="release-info">
-          <span><strong>Download</strong><small id="release-info">Neueste Version wird geladen …</small></span>
+        <a class="download play-now" href="downloads.html">
+          <span><strong>Jetzt spielen</strong><small>Zur Download-Seite</small></span>
         </a>
-        <a class="secondary" href="#features">Mehr erfahren</a>
+        <a class="secondary" href="features.html">Features entdecken</a>
       </div>
       <p class="hint">Kostenlos · 64-Bit · Direkter Download vom offiziellen GitHub Release</p>
     </section>
@@ -74,6 +73,6 @@
   </main>
 
   <footer><span>© 2026 X Client</span><span>Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=18"></script>
+  <script src="download.js?v=22"></script>
 </body>
 </html>

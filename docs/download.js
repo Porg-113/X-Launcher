@@ -18,7 +18,11 @@ function setSiteMenuOpen(open) {
   siteMenuToggle.setAttribute("aria-expanded", String(isOpen));
   siteMenuToggle.setAttribute("aria-label", isOpen ? "Menü schließen" : "Menü öffnen");
   document.body.classList.toggle("site-menu-open", isOpen);
-  if (isOpen) window.setTimeout(() => siteMenuPanel.focus(), 180);
+  if (isOpen) {
+    window.setTimeout(() => {
+      if (siteMenu.classList.contains("is-open")) siteMenuPanel.focus();
+    }, 180);
+  }
 }
 
 siteMenuToggle.addEventListener("click", () => {
@@ -59,6 +63,7 @@ async function hitCounter(key) {
 }
 
 async function updateLiveStats() {
+  if (!downloadCount && !activePlayerCount) return;
   const now = new Date();
   const previousMinute = new Date(now.getTime() - 60 * 1000);
   try {
@@ -68,20 +73,26 @@ async function updateLiveStats() {
       readCounter(`xlauncher-prod-a7f3-active-${counterMinuteKey(previousMinute)}`),
       readCounter(`xlauncher-prod-a7f3-closed-${counterMinuteKey(now)}`)
     ]);
-    downloadCount.textContent = (initialDownloadCount + trackedDownloads).toLocaleString("de-CH");
+    if (downloadCount) {
+      downloadCount.textContent = (initialDownloadCount + trackedDownloads).toLocaleString("de-CH");
+    }
     const active = currentActive > 0
       ? Math.max(0, currentActive - currentClosed)
       : Math.max(0, previousActive - currentClosed);
-    activePlayerCount.textContent = active.toLocaleString("de-CH");
+    if (activePlayerCount) activePlayerCount.textContent = active.toLocaleString("de-CH");
   } catch (_) {}
 }
 
-updateLiveStats();
-window.setInterval(updateLiveStats, 5 * 1000);
+if (downloadCount || activePlayerCount) {
+  updateLiveStats();
+  window.setInterval(updateLiveStats, 5 * 1000);
+}
 
-primary.addEventListener("click", () => {
-  void hitCounter(downloadCounterKey).catch(() => {});
-});
+if (primary) {
+  primary.addEventListener("click", () => {
+    void hitCounter(downloadCounterKey).catch(() => {});
+  });
+}
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -97,13 +108,15 @@ if (!reduceMotion) {
   });
 
   const wordmark = document.querySelector(".client-wordmark");
-  wordmark.addEventListener("pointermove", (event) => {
-    const box = wordmark.getBoundingClientRect();
-    const x = ((event.clientX - box.left) / box.width - .5) * 10;
-    const y = ((event.clientY - box.top) / box.height - .5) * -7;
-    wordmark.style.transform = `perspective(900px) rotateX(${y}deg) rotateY(${x}deg) scale(1.02)`;
-  });
-  wordmark.addEventListener("pointerleave", () => { wordmark.style.transform = ""; });
+  if (wordmark) {
+    wordmark.addEventListener("pointermove", (event) => {
+      const box = wordmark.getBoundingClientRect();
+      const x = ((event.clientX - box.left) / box.width - .5) * 10;
+      const y = ((event.clientY - box.top) / box.height - .5) * -7;
+      wordmark.style.transform = `perspective(900px) rotateX(${y}deg) rotateY(${x}deg) scale(1.02)`;
+    });
+    wordmark.addEventListener("pointerleave", () => { wordmark.style.transform = ""; });
+  }
 }
 
 const revealObserver = new IntersectionObserver((entries) => {
@@ -171,23 +184,25 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 updateFeatureStory();
 
-fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-  headers: { Accept: "application/vnd.github+json" }
-})
-  .then((response) => {
-    if (!response.ok) throw new Error("Release nicht verfügbar");
-    return response.json();
+if (primary && info) {
+  fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    headers: { Accept: "application/vnd.github+json" }
   })
-  .then((release) => {
-    const installer = release.assets.find((asset) =>
-      asset.name.toLowerCase().endsWith(".exe") &&
-      !asset.name.toLowerCase().includes("portable")
-    ) || release.assets.find((asset) => asset.name.toLowerCase().endsWith(".exe"));
+    .then((response) => {
+      if (!response.ok) throw new Error("Release nicht verfügbar");
+      return response.json();
+    })
+    .then((release) => {
+      const installer = release.assets.find((asset) =>
+        asset.name.toLowerCase().endsWith(".exe") &&
+        !asset.name.toLowerCase().includes("portable")
+      ) || release.assets.find((asset) => asset.name.toLowerCase().endsWith(".exe"));
 
-    if (!installer) throw new Error("Keine EXE gefunden");
-    primary.href = installer.browser_download_url;
-    info.textContent = `${release.tag_name} · ${(installer.size / 1024 / 1024).toFixed(0)} MB`;
-  })
-  .catch(() => {
-    info.textContent = "Neueste Version auf GitHub ansehen";
-  });
+      if (!installer) throw new Error("Keine EXE gefunden");
+      primary.href = installer.browser_download_url;
+      info.textContent = `${release.tag_name} · ${(installer.size / 1024 / 1024).toFixed(0)} MB`;
+    })
+    .catch(() => {
+      info.textContent = "Neueste Version auf GitHub ansehen";
+    });
+}
