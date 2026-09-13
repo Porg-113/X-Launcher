@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Entdecke die Funktionen von X Client für Minecraft Java.">
+  <meta name="description" content="Entdecke die Funktionen von X Client für Minecraft Java." data-i18n-content="features.meta">
   <meta name="theme-color" content="#00191f">
-  <title>X Client – Features</title>
+  <title data-i18n="features.title">X Client – Features</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=23">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -16,7 +16,7 @@
     <button id="site-menu-toggle" class="site-menu-toggle" type="button" aria-controls="site-menu" aria-expanded="false" aria-label="Menü öffnen">
       <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
     </button>
-    <nav class="nav-links" aria-label="Community und Quellcode">
+    <nav class="nav-links" aria-label="Community und Quellcode" data-i18n-aria-label="common.communityNav">
       <a class="social-link discord" href="https://discord.gg/9xTWsqeqY" target="_blank" rel="noreferrer" aria-label="X Client Discord" title="Discord"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.34A16.3 16.3 0 0 0 15.44 4l-.5 1.02a15.2 15.2 0 0 0-5.88 0L8.54 4A16.5 16.5 0 0 0 4.5 5.35C1.93 9.17 1.23 12.9 1.58 16.58a16.7 16.7 0 0 0 4.98 2.5l1.2-1.65a10.8 10.8 0 0 1-1.88-.9l.46-.36c3.63 1.69 7.57 1.69 11.15 0l.47.36c-.6.36-1.24.66-1.89.9l1.2 1.65a16.6 16.6 0 0 0 4.97-2.5c.42-4.27-.72-7.97-2.84-11.24ZM8.68 14.33c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.88 2.23-1.98 2.23Zm6.64 0c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.87 2.23-1.98 2.23Z"/></svg></a>
       <a class="social-link youtube" href="https://www.youtube.com/@x-client" target="_blank" rel="noreferrer" aria-label="X Client YouTube" title="YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.12C19.55 3.58 12 3.58 12 3.58s-7.55 0-9.4.5A3 3 0 0 0 .5 6.2 31.2 31.2 0 0 0 0 12a31.2 31.2 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.12c1.85.5 9.4.5 9.4.5s7.55 0 9.4-.5a3 3 0 0 0 2.1-2.12A31.2 31.2 0 0 0 24 12a31.2 31.2 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.26 3.6-6.26 3.6Z"/></svg></a>
       <a class="github-link" href="https://github.com/Porg-113/X-Launcher" target="_blank" rel="noreferrer">GitHub ↗</a>
@@ -24,37 +24,40 @@
   </header>
 
   <div id="site-menu" class="site-menu" aria-hidden="true">
-    <button class="site-menu-backdrop" type="button" data-menu-close aria-label="Menü schließen"></button>
+    <button class="site-menu-backdrop" type="button" data-menu-close aria-label="Menü schließen" data-i18n-aria-label="common.closeMenu"></button>
     <aside class="site-menu-panel" role="dialog" aria-modal="true" aria-labelledby="site-menu-title" tabindex="-1">
-      <h2 id="site-menu-title">Über X Client</h2>
-      <p class="site-menu-copy">Ein schneller, persönlicher Minecraft-Client mit Mods, Profilen, Skins und direktem Spielstart – alles an einem Ort.</p>
-      <nav class="site-menu-links" aria-label="Seitennavigation">
-        <a href="index.html" data-menu-close><span>01</span>Startseite</a>
-        <a href="features.html" aria-current="page" data-menu-close><span>02</span>Features</a>
-        <a href="downloads.html" data-menu-close><span>03</span>Downloads</a>
+      <h2 id="site-menu-title" data-i18n="common.menuTitle">Über X Client</h2>
+      <p class="site-menu-copy" data-i18n="common.menuCopy">Ein schneller, persönlicher Minecraft-Client mit Mods, Profilen, Skins und direktem Spielstart – alles an einem Ort.</p>
+      <nav class="site-menu-links" aria-label="Seitennavigation" data-i18n-aria-label="common.siteNav">
+        <a href="index.html" data-menu-close><span>01</span><b data-i18n="common.home">Startseite</b></a>
+        <a href="features.html" aria-current="page" data-menu-close><span>02</span><b data-i18n="common.features">Features</b></a>
+        <a href="downloads.html" data-menu-close><span>03</span><b data-i18n="common.downloads">Downloads</b></a>
       </nav>
-      <div class="site-menu-external"><a href="https://discord.gg/9xTWsqeqY" target="_blank" rel="noreferrer">Discord ↗</a><a href="https://github.com/Porg-113/X-Launcher" target="_blank" rel="noreferrer">GitHub ↗</a></div>
+      <div class="site-menu-footer">
+        <div class="site-menu-external"><a href="https://discord.gg/9xTWsqeqY" target="_blank" rel="noreferrer">Discord ↗</a><a href="https://github.com/Porg-113/X-Launcher" target="_blank" rel="noreferrer">GitHub ↗</a></div>
+        <label class="language-picker" for="language-select"><span data-i18n="common.language">Sprache</span><select id="language-select"><option value="auto" data-i18n="common.auto">Automatisch</option><option value="de">Deutsch</option><option value="en">English</option></select></label>
+      </div>
     </aside>
   </div>
 
   <main id="top" class="page-main">
     <section class="page-hero reveal">
-      <div class="eyebrow"><span></span> Alles in einem Client</div>
-      <h1 class="page-title">Mehr spielen.<br>Weniger verwalten.</h1>
-      <p class="page-copy">X Client verbindet deine Minecraft-Versionen, Mods, Profile, Skins und Server in einer schnellen, aufgeräumten Oberfläche.</p>
+      <div class="eyebrow"><span></span><b data-i18n="features.eyebrow">Alles in einem Client</b></div>
+      <h1 class="page-title"><b data-i18n="features.heading1">Mehr spielen.</b><br><b data-i18n="features.heading2">Weniger verwalten.</b></h1>
+      <p class="page-copy" data-i18n="features.copy">X Client verbindet deine Minecraft-Versionen, Mods, Profile, Skins und Server in einer schnellen, aufgeräumten Oberfläche.</p>
     </section>
     <section class="feature-page-grid" aria-label="X Client Features">
-      <article class="page-feature-card reveal tilt-card"><span>01 · MODS</span><h2>Modrinth direkt integriert</h2><p>Finde Mods, Modpacks, Shader und Ressourcenpakete und installiere sie passend zu deiner Fabric-Version.</p></article>
-      <article class="page-feature-card reveal tilt-card"><span>02 · PROFILE</span><h2>Jede Version sauber getrennt</h2><p>Erstelle eigene Profile mit getrennten Mods und Einstellungen, ohne Dateien von Hand verschieben zu müssen.</p></article>
-      <article class="page-feature-card reveal tilt-card"><span>03 · SKINS</span><h2>Dein Look vor dem Start</h2><p>Importiere Skins, speichere deine Favoriten und kontrolliere dein Aussehen direkt in der Vorschau.</p></article>
-      <article class="page-feature-card reveal tilt-card"><span>04 · SERVER</span><h2>Schneller zusammen spielen</h2><p>Speichere Server, starte Favoriten direkt und verwalte eigene Welten für deine Freunde.</p></article>
-      <article class="page-feature-card reveal tilt-card"><span>05 · UPDATES</span><h2>Automatisch aktuell</h2><p>X Client sucht nach neuen Versionen und bereitet Updates vor, ohne deinen Spielfluss zu unterbrechen.</p></article>
-      <article class="page-feature-card reveal tilt-card"><span>06 · FABRIC</span><h2>Für dein Minecraft gebaut</h2><p>Wähle deine Fabric-Version und lass X Client verwaltete Mods automatisch aufeinander abstimmen.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>01 · MODS</span><h2 data-i18n="features.card1Title">Modrinth direkt integriert</h2><p data-i18n="features.card1Copy">Finde Mods, Modpacks, Shader und Ressourcenpakete und installiere sie passend zu deiner Fabric-Version.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>02 · PROFILE</span><h2 data-i18n="features.card2Title">Jede Version sauber getrennt</h2><p data-i18n="features.card2Copy">Erstelle eigene Profile mit getrennten Mods und Einstellungen, ohne Dateien von Hand verschieben zu müssen.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>03 · SKINS</span><h2 data-i18n="features.card3Title">Dein Look vor dem Start</h2><p data-i18n="features.card3Copy">Importiere Skins, speichere deine Favoriten und kontrolliere dein Aussehen direkt in der Vorschau.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>04 · SERVER</span><h2 data-i18n="features.card4Title">Schneller zusammen spielen</h2><p data-i18n="features.card4Copy">Speichere Server, starte Favoriten direkt und verwalte eigene Welten für deine Freunde.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>05 · UPDATES</span><h2 data-i18n="features.card5Title">Automatisch aktuell</h2><p data-i18n="features.card5Copy">X Client sucht nach neuen Versionen und bereitet Updates vor, ohne deinen Spielfluss zu unterbrechen.</p></article>
+      <article class="page-feature-card reveal tilt-card"><span>06 · FABRIC</span><h2 data-i18n="features.card6Title">Für dein Minecraft gebaut</h2><p data-i18n="features.card6Copy">Wähle deine Fabric-Version und lass X Client verwaltete Mods automatisch aufeinander abstimmen.</p></article>
     </section>
-    <div class="page-cta reveal"><a class="download play-now" href="downloads.html"><span><strong>Jetzt spielen</strong></span></a></div>
+    <div class="page-cta reveal"><a class="download play-now" href="downloads.html"><span><strong data-i18n="common.playNow">Jetzt spielen</strong></span></a></div>
   </main>
 
-  <footer><span>© 2026 X Client</span><span>Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=23"></script>
+  <footer><span>© 2026 X Client</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
+  <script src="download.js?v=24"></script>
 </body>
 </html>

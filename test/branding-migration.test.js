@@ -39,7 +39,7 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteHtml, /id="site-menu-toggle"/u);
   assert.match(websiteHtml, />Über X Client</u);
   assert.doesNotMatch(websiteHtml, /site-menu-kicker/u);
-  assert.match(websiteHtml, /href="downloads\.html"[^>]*>[\s\S]*?<strong>Jetzt spielen<\/strong>/u);
+  assert.match(websiteHtml, /href="downloads\.html"[^>]*>[\s\S]*?<strong[^>]*>Jetzt spielen<\/strong>/u);
   assert.doesNotMatch(websiteHtml, /Zur Download-Seite/u);
   assert.match(featuresHtml, /href="features\.html" aria-current="page"/u);
   assert.match(featuresHtml, /class="download play-now"/u);
@@ -57,4 +57,24 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(websiteCss, /\.live-stats small \{ font-weight: 800 !important; \}/u);
   assert.match(websiteCss, /\.play-now strong \{ font-weight: 800 !important; \}/u);
   assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft.otf')));
+});
+
+test('website language is automatic and can be selected from every menu', () => {
+  const websiteScript = read(path.join('docs', 'download.js'));
+  const pages = ['index.html', 'features.html', 'downloads.html']
+    .map((fileName) => read(path.join('docs', fileName)));
+
+  for (const page of pages) {
+    assert.match(page, /class="site-menu-footer"/u);
+    assert.match(page, /id="language-select"/u);
+    assert.match(page, /option value="auto"/u);
+    assert.match(page, /option value="de"/u);
+    assert.match(page, /option value="en"/u);
+  }
+
+  assert.match(websiteScript, /navigator\.languages/u);
+  assert.match(websiteScript, /localStorage\.setItem\(languageStorageKey/u);
+  assert.match(websiteScript, /localStorage\.removeItem\(languageStorageKey/u);
+  assert.match(websiteScript, /window\.addEventListener\("languagechange"/u);
+  assert.match(websiteScript, /document\.documentElement\.lang = currentLanguage/u);
 });
