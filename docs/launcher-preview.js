@@ -1,10 +1,49 @@
 (() => {
-  const SKIN_URL = new URL("assets/skins/i-am-steve.png", document.baseURI).href;
+  const previewBody = document.body;
+  const deployedAssetVersion = new URLSearchParams(window.location.search).get("v");
+  const skinUrl = new URL(previewBody?.dataset.launcherSkinSrc || "assets/skins/i-am-steve.png", document.baseURI);
+  if (deployedAssetVersion) skinUrl.searchParams.set("v", deployedAssetVersion);
+  const SKIN_URL = skinUrl.href;
+  const LAUNCHER_STANDARD_PROFILE = Object.freeze({
+    name: "Launcher-Standard",
+    minecraftVersion: "26.2",
+    loader: "Fabric"
+  });
+  // Keep this list aligned with DEFAULT_PACK_PROJECTS and REQUIRED_BUNDLED_MODS
+  // in src/main.parts/part-01.jsfrag. A public website cannot read a visitor's
+  // local launcher data, so this is the exact equipped default state shown by
+  // a fresh X Client installation.
+  const LAUNCHER_STANDARD_MODS = Object.freeze([
+    { id: "x-launcher-menu", name: "X Client", kind: "Pflichtmod" },
+    { id: "fabric-api", name: "Fabric API", kind: "Standard-Mod" },
+    { id: "silicons", name: "Silicon", kind: "Standard-Mod" },
+    { id: "sodium", name: "Sodium", kind: "Standard-Mod" },
+    { id: "iris", name: "Iris Shaders", kind: "Standard-Mod" },
+    { id: "modmenu", name: "Mod Menu", kind: "Standard-Mod" },
+    { id: "infinite-zoom", name: "Infinite Zoom", kind: "Standard-Mod" },
+    { id: "simple-voice-chat", name: "Simple Voice Chat", kind: "Standard-Mod" },
+    { id: "lithium", name: "Lithium", kind: "Standard-Mod" },
+    { id: "ferrite-core", name: "FerriteCore", kind: "Standard-Mod" },
+    { id: "entityculling", name: "Entity Culling", kind: "Standard-Mod" },
+    { id: "immediatelyfast", name: "ImmediatelyFast", kind: "Standard-Mod" },
+    { id: "moreculling", name: "More Culling", kind: "Standard-Mod" },
+    { id: "dynamic-fps", name: "Dynamic FPS", kind: "Standard-Mod" },
+    { id: "clumps", name: "Clumps", kind: "Standard-Mod" },
+    { id: "fast-ip-ping", name: "Fast IP Ping", kind: "Standard-Mod" },
+    { id: "particle-core", name: "Particle Core", kind: "Standard-Mod" },
+    { id: "c2me-fabric", name: "Concurrent Chunk Management Engine", kind: "Standard-Mod" },
+    { id: "appleskin", name: "AppleSkin", kind: "Standard-Mod" },
+    { id: "continuity", name: "Continuity", kind: "Standard-Mod" },
+    { id: "chat-heads", name: "Chat Heads", kind: "Standard-Mod" },
+    { id: "controlling", name: "Controlling", kind: "Standard-Mod" },
+    { id: "shulkerboxtooltip", name: "Shulker Box Tooltip", kind: "Standard-Mod" }
+  ]);
   const toast = document.querySelector("#preview-toast");
   const sections = [...document.querySelectorAll(".content-section")];
   const navButtons = [...document.querySelectorAll(".nav-item[data-section]")];
-  const viewers = [];
+  const skinTextureCache = new Map();
   let toastTimer = 0;
+  let dashboardAnimationFrame = 0;
 
   function showToast(message) {
     if (!toast) return;
@@ -20,6 +59,92 @@
     document.querySelector(`#${CSS.escape(sectionName)}`)?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function renderLauncherStandardProfile() {
+    const totalMods = LAUNCHER_STANDARD_MODS.length;
+    const profileLabel = `${LAUNCHER_STANDARD_PROFILE.name} · Minecraft ${LAUNCHER_STANDARD_PROFILE.minecraftVersion} · ${LAUNCHER_STANDARD_PROFILE.loader}`;
+    const startProfileSelect = document.querySelector("#start-pack-select");
+    const profileList = document.querySelector("#packs-list");
+    const profileStatus = document.querySelector("#packs-status");
+
+    if (startProfileSelect) {
+      startProfileSelect.replaceChildren(new Option(profileLabel, "", true, true));
+      startProfileSelect.disabled = true;
+    }
+    if (profileStatus) profileStatus.textContent = `${LAUNCHER_STANDARD_PROFILE.name} ist aktiv · ${totalMods} Standard-Mods ausgerüstet.`;
+    if (!profileList) return;
+
+    profileList.innerHTML = `
+      <article class="pack-card active" data-preview-profile="launcher-standard">
+        <div class="pack-card-head">
+          <div>
+            <h4>${LAUNCHER_STANDARD_PROFILE.name}</h4>
+            <p>Der offizielle .minecraft-Mods-Ordner mit allen Standard-Mods von X Client.</p>
+          </div>
+          <span class="pack-badge">AKTIV</span>
+        </div>
+        <div class="pack-meta">
+          <span class="pack-tag">${LAUNCHER_STANDARD_PROFILE.loader} ${LAUNCHER_STANDARD_PROFILE.minecraftVersion}</span>
+          <span class="pack-tag">${totalMods} Standard-Mods ausgerüstet</span>
+        </div>
+        <div class="pack-actions"><button class="btn btn-secondary" type="button" disabled>Aktives Profil</button></div>
+      </article>
+    `;
+  }
+
+  function renderLauncherStandardMods(view = "mod") {
+    const modList = document.querySelector("#mods-list");
+    const contextLabel = document.querySelector("#mods-context-label");
+    const sectionTitle = document.querySelector("#mods-section-title");
+    if (!modList) return;
+
+    if (contextLabel) contextLabel.textContent = `${LAUNCHER_STANDARD_PROFILE.name} · ${LAUNCHER_STANDARD_MODS.length} Standard-Mods ausgerüstet.`;
+    if (sectionTitle) sectionTitle.textContent = "Standard-Mods für diese Version";
+    if (view !== "mod") {
+      modList.innerHTML = `<p class="mods-empty">Keine ${view === "hidden" ? "ausgeblendeten Inhalte" : "Standard-Inhalte"} im ${LAUNCHER_STANDARD_PROFILE.name}.</p>`;
+      return;
+    }
+
+    modList.innerHTML = LAUNCHER_STANDARD_MODS.map((mod) => `
+      <article class="mod-item installed-mod-card" data-standard-mod="${mod.id}">
+        <div class="mod-head">
+          <div class="mod-title-wrap">
+            <div class="mod-icon mod-icon-placeholder" aria-hidden="true">${mod.name.slice(0, 1)}</div>
+            <div class="installed-mod-copy">
+              <div class="installed-mod-name-row"><div class="installed-mod-name-text"><h4>${mod.name}</h4></div></div>
+              <span class="mod-source-badge">${mod.kind}</span>
+            </div>
+          </div>
+        </div>
+        <p>Im ${LAUNCHER_STANDARD_PROFILE.name} aktiviert.</p>
+        <div class="mod-tags"><span class="mod-tag">Fabric ${LAUNCHER_STANDARD_PROFILE.minecraftVersion}</span><span class="mod-tag">Ausgerüstet</span></div>
+        <div class="mod-actions"><button class="btn btn-secondary" type="button" disabled>Ausgerüstet</button></div>
+      </article>
+    `).join("");
+  }
+
+  function applyLauncherSkinState() {
+    const skinName = previewBody?.dataset.launcherSkinName || "Steve";
+    const skinVariant = previewBody?.dataset.launcherSkinVariant || "wide";
+    const skinImage = `url("${SKIN_URL}")`;
+    const headerSkin = document.querySelector("#header-skin-head");
+    const savedSkin = document.querySelector(".saved-skin-chip");
+    const savedSkinName = document.querySelector(".saved-skin-chip-content h5");
+    const skinStatus = document.querySelector("#skin-status");
+    const skinCanvas = document.querySelector("#skin-preview-canvas");
+
+    headerSkin?.style.setProperty("--skin-image", skinImage);
+    headerSkin?.setAttribute("aria-label", `Aktiver Skin ${skinName}`);
+    savedSkin?.setAttribute("data-skin-name", skinName);
+    if (savedSkinName) savedSkinName.textContent = skinName;
+    if (skinStatus) skinStatus.textContent = `Aktiver Skin: ${skinName} · 1 gespeichert`;
+    skinCanvas?.setAttribute("aria-label", `Skin ${skinName}`);
+
+    return { id: "launcher-default-skin", name: skinName, previewDataUrl: SKIN_URL, height: 64, variant: skinVariant };
+  }
+
+  renderLauncherStandardProfile();
+  renderLauncherStandardMods();
+
   navButtons.forEach((button) => {
     button.dataset.previewWired = "true";
     button.addEventListener("click", () => showSection(button.dataset.section));
@@ -29,6 +154,11 @@
   if (accountButton) {
     accountButton.dataset.previewWired = "true";
     accountButton.addEventListener("click", () => showSection("accounts"));
+  }
+
+  const requestedSection = new URLSearchParams(window.location.search).get("section");
+  if (requestedSection && sections.some((section) => section.id === requestedSection)) {
+    showSection(requestedSection);
   }
 
   document.querySelectorAll("[data-mods-view], [data-modrinth-type], [data-cape-face]").forEach((button) => {
@@ -44,6 +174,7 @@
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", String(active));
       });
+      if (button.hasAttribute("data-mods-view")) renderLauncherStandardMods(button.dataset.modsView);
     });
   });
 
@@ -109,7 +240,13 @@
     return "Diese Aktion verändert in der Vorschau nichts auf deinem PC.";
   }
 
+  function isRestricted(button) {
+    const label = `${button.id} ${button.dataset.launcherAction || ""} ${button.textContent}`.toLowerCase();
+    return /launch|play|start|join|beitreten|install|update|aktual|check|prüf|delete|remove|clear|cleanup|lösch|entfern|unequip|create|add|import|export|choose|folder|path|speicher|erstell|hinzuf|ordner|skin|cape/u.test(label);
+  }
+
   document.querySelectorAll("button:not([data-preview-wired])").forEach((button) => {
+    if (!isRestricted(button)) return;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -124,34 +261,218 @@
   window.addEventListener("dragover", (event) => event.preventDefault());
   window.addEventListener("drop", (event) => event.preventDefault());
 
-  async function createSkinViewer(canvas, options) {
-    if (!canvas || !window.skinview3d?.SkinViewer) return null;
-    const idle = new window.skinview3d.IdleAnimation();
-    idle.speed = 0.16;
-    const viewer = new window.skinview3d.SkinViewer({
-      canvas,
-      width: options.width,
-      height: options.height,
-      enableControls: false,
-      background: null,
-      fov: 34,
-      zoom: options.zoom,
-      pixelRatio: Math.min(2, Math.max(1.25, Number(window.devicePixelRatio) || 1)),
-      animation: idle
+  function loadImageSource(source) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Skin-Vorschau konnte nicht geladen werden."));
+      image.src = source;
     });
-    viewer.renderer.setClearColor(0x000000, 0);
-    viewer.globalLight.intensity = 2.6;
-    viewer.cameraLight.intensity = 0.7;
-    await viewer.loadSkin(SKIN_URL, { model: "default" });
-    viewer.playerObject.rotation.y = -0.2;
-    viewer.playerObject.position.set(0, -3.5, 0);
-    viewer.camera.position.set(0, 7, 58);
-    viewer.camera.lookAt(0, 8, 0);
-    viewer.camera.updateProjectionMatrix();
+  }
+
+  async function loadSkinTexture(source) {
+    if (skinTextureCache.has(source)) return skinTextureCache.get(source);
+    const image = await loadImageSource(source);
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = image.naturalWidth || image.width;
+    sourceCanvas.height = image.naturalHeight || image.height;
+    const sourceContext = sourceCanvas.getContext("2d");
+    if (!sourceContext) return null;
+    sourceContext.imageSmoothingEnabled = false;
+    sourceContext.drawImage(image, 0, 0);
+    const texture = { sourceCanvas, sourceContext };
+    skinTextureCache.set(source, texture);
+    return texture;
+  }
+
+  // This is the same pixel-projected renderer used by the desktop X Client.
+  async function renderSkin3DPreviewCanvas(canvas, activeSkin, scale = 10, animationTime = 0) {
+    if (!canvas) return false;
+    const context = canvas.getContext("2d");
+    if (!context) return false;
+    if (!activeSkin?.previewDataUrl) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.classList.add("hidden");
+      return false;
+    }
+
+    const texture = await loadSkinTexture(activeSkin.previewDataUrl);
+    if (!texture) return false;
+    const { sourceContext } = texture;
+    const isLegacy = activeSkin.height === 32;
+    const isSlim = activeSkin.variant === "slim" && !isLegacy;
+    const armWidth = isSlim ? 3 : 4;
+    const depth = { x: Math.round(scale * 0.62), y: -Math.round(scale * 0.42) };
+    const modelLeft = 3.55;
+    const modelRight = 12.45 + (armWidth * 2);
+    const modelWidth = modelRight - modelLeft;
+    const legDrop = 0.5;
+    const modelHeight = 32 + Math.max(legDrop, 0);
+    const padding = scale * 5;
+    const animationPadding = scale * 1.7;
+    const stageWidth = Math.ceil((modelWidth * scale) + depth.x + (padding * 2) + (animationPadding * 2));
+    const stageHeight = Math.ceil((modelHeight * scale) - depth.y + (padding * 2) + (animationPadding * 2));
+
+    canvas.width = stageWidth;
+    canvas.height = stageHeight;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = false;
+
+    const originX = ((stageWidth - (modelWidth * scale) - depth.x) / 2) - (modelLeft * scale);
+    const originY = ((stageHeight - (modelHeight * scale) + depth.y) / 2) - depth.y;
+    const sway = Math.sin(animationTime / 720) * 0.26;
+    const smallSway = Math.sin((animationTime / 720) + Math.PI) * 0.18;
+    const pose = {
+      bodyRotation: 0,
+      headRotation: -2,
+      leftArmRotation: -5,
+      rightArmRotation: 6,
+      leftLegRotation: 2,
+      rightLegRotation: -2,
+      leftArmX: 3.85,
+      leftArmY: 8.15,
+      rightArmX: 12.15 + armWidth,
+      rightArmY: 8.2,
+      leftLegX: 4 + armWidth,
+      leftLegY: 20 + legDrop,
+      rightLegX: 8 + armWidth,
+      rightLegY: 20 + legDrop
+    };
+
+    const rgbaCache = new Map();
+    const getPixel = (sourceX, sourceY) => {
+      const key = `${sourceX},${sourceY}`;
+      if (rgbaCache.has(key)) return rgbaCache.get(key);
+      const pixel = sourceContext.getImageData(sourceX, sourceY, 1, 1).data;
+      const value = { r: pixel[0], g: pixel[1], b: pixel[2], a: pixel[3] / 255 };
+      rgbaCache.set(key, value);
+      return value;
+    };
+    const getColor = (sourceX, sourceY, shade) => {
+      const pixel = getPixel(sourceX, sourceY);
+      if (pixel.a <= 0) return null;
+      const clampColor = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
+      return `rgba(${clampColor(pixel.r)}, ${clampColor(pixel.g)}, ${clampColor(pixel.b)}, ${pixel.a})`;
+    };
+    const project = (face, xRatio, yRatio) => ({
+      x: face.topLeft.x + ((face.topRight.x - face.topLeft.x) * xRatio) + ((face.bottomLeft.x - face.topLeft.x) * yRatio),
+      y: face.topLeft.y + ((face.topRight.y - face.topLeft.y) * xRatio) + ((face.bottomLeft.y - face.topLeft.y) * yRatio)
+    });
+    const drawQuad = (points, color) => {
+      const center = points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+      center.x /= points.length;
+      center.y /= points.length;
+      const expandedPoints = points.map((point) => {
+        const deltaX = point.x - center.x;
+        const deltaY = point.y - center.y;
+        const length = Math.hypot(deltaX, deltaY) || 1;
+        return { x: point.x + ((deltaX / length) * 0.45), y: point.y + ((deltaY / length) * 0.45) };
+      });
+      context.beginPath();
+      context.moveTo(expandedPoints[0].x, expandedPoints[0].y);
+      expandedPoints.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+      context.closePath();
+      context.fillStyle = color;
+      context.fill();
+    };
+    const drawTexturedFace = (source, face, shade) => {
+      if (!source) return;
+      for (let y = 0; y < source.h; y += 1) {
+        for (let x = 0; x < source.w; x += 1) {
+          const color = getColor(source.x + x, source.y + y, shade);
+          if (!color) continue;
+          const topLeft = project(face, x / source.w, y / source.h);
+          const topRight = project(face, (x + 1) / source.w, y / source.h);
+          const bottomRight = project(face, (x + 1) / source.w, (y + 1) / source.h);
+          const bottomLeft = project(face, x / source.w, (y + 1) / source.h);
+          drawQuad([topLeft, topRight, bottomRight, bottomLeft], color);
+        }
+      }
+    };
+    const makeFace = (x, y, width, height, inflate = 0, rotation = 0, pivot = null) => {
+      const radians = (rotation * Math.PI) / 180;
+      const cosine = Math.cos(radians);
+      const sine = Math.sin(radians);
+      const inflatedX = x - inflate;
+      const inflatedY = y - inflate;
+      const inflatedWidth = width + (inflate * 2);
+      const inflatedHeight = height + (inflate * 2);
+      const pivotX = pivot?.x ?? (inflatedX + (inflatedWidth / 2));
+      const pivotY = pivot?.y ?? (inflatedY + (inflatedHeight / 2));
+      const makePoint = (pointX, pointY) => {
+        const localX = pointX - pivotX;
+        const localY = pointY - pivotY;
+        return {
+          x: originX + ((pivotX + ((localX * cosine) - (localY * sine))) * scale),
+          y: originY + ((pivotY + ((localX * sine) + (localY * cosine))) * scale)
+        };
+      };
+      const topLeft = makePoint(inflatedX, inflatedY);
+      const topRight = makePoint(inflatedX + inflatedWidth, inflatedY);
+      const bottomRight = makePoint(inflatedX + inflatedWidth, inflatedY + inflatedHeight);
+      const bottomLeft = makePoint(inflatedX, inflatedY + inflatedHeight);
+      return {
+        front: { topLeft, topRight, bottomLeft },
+        right: { topLeft: topRight, topRight: { x: topRight.x + depth.x, y: topRight.y + depth.y }, bottomLeft: bottomRight },
+        top: { topLeft, topRight, bottomLeft: { x: topLeft.x + depth.x, y: topLeft.y + depth.y } }
+      };
+    };
+    const drawBox = ({ x, y, w, h, rotation = 0, pivot = null, front, right, top, overlayFront, overlayRight, overlayTop }) => {
+      const faces = makeFace(x, y, w, h, 0, rotation, pivot);
+      drawTexturedFace(top, faces.top, 1.08);
+      drawTexturedFace(right, faces.right, 0.72);
+      drawTexturedFace(front, faces.front, 1);
+      const overlayFaces = makeFace(x, y, w, h, 0.34, rotation, pivot);
+      drawTexturedFace(overlayTop, overlayFaces.top, 1.08);
+      drawTexturedFace(overlayRight, overlayFaces.right, 0.72);
+      drawTexturedFace(overlayFront, overlayFaces.front, 1);
+    };
+
+    const rightArmSourceY = isLegacy ? 20 : 52;
+    const rightArmTopY = isLegacy ? 16 : 48;
+    const rightLegSourceX = isLegacy ? 4 : 20;
+    const rightLegTopX = isLegacy ? 4 : 20;
+    const rightLegSourceY = isLegacy ? 20 : 52;
+    const rightLegTopY = isLegacy ? 16 : 48;
+
+    drawBox({
+      x: pose.leftArmX, y: pose.leftArmY + sway, w: armWidth, h: 12,
+      rotation: pose.leftArmRotation, pivot: { x: pose.leftArmX + armWidth, y: 8.9 },
+      front: { x: 44, y: 20, w: armWidth, h: 12 }, right: { x: 40, y: 20, w: 4, h: 12 }, top: { x: 44, y: 16, w: armWidth, h: 4 },
+      overlayFront: isLegacy ? null : { x: 44, y: 36, w: armWidth, h: 12 }, overlayRight: isLegacy ? null : { x: 40, y: 36, w: 4, h: 12 }, overlayTop: isLegacy ? null : { x: 44, y: 32, w: armWidth, h: 4 }
+    });
+    drawBox({
+      x: 4 + armWidth, y: 8, w: 8, h: 12, rotation: pose.bodyRotation,
+      front: { x: 20, y: 20, w: 8, h: 12 }, right: { x: 16, y: 20, w: 4, h: 12 }, top: { x: 20, y: 16, w: 8, h: 4 },
+      overlayFront: isLegacy ? null : { x: 20, y: 36, w: 8, h: 12 }, overlayRight: isLegacy ? null : { x: 16, y: 36, w: 4, h: 12 }, overlayTop: isLegacy ? null : { x: 20, y: 32, w: 8, h: 4 }
+    });
+    drawBox({
+      x: pose.rightArmX, y: pose.rightArmY - sway, w: armWidth, h: 12,
+      rotation: pose.rightArmRotation, pivot: { x: pose.rightArmX, y: 8.9 },
+      front: { x: 36, y: rightArmSourceY, w: armWidth, h: 12 }, right: { x: 32, y: rightArmSourceY, w: 4, h: 12 }, top: { x: 36, y: rightArmTopY, w: armWidth, h: 4 },
+      overlayFront: isLegacy ? null : { x: 52, y: 52, w: armWidth, h: 12 }, overlayRight: isLegacy ? null : { x: 48, y: 52, w: 4, h: 12 }, overlayTop: isLegacy ? null : { x: 52, y: 48, w: armWidth, h: 4 }
+    });
+    drawBox({
+      x: pose.leftLegX, y: pose.leftLegY + smallSway, w: 4, h: 12,
+      rotation: pose.leftLegRotation, pivot: { x: pose.leftLegX + 2, y: pose.leftLegY },
+      front: { x: 4, y: 20, w: 4, h: 12 }, right: { x: 0, y: 20, w: 4, h: 12 }, top: { x: 4, y: 16, w: 4, h: 4 },
+      overlayFront: isLegacy ? null : { x: 4, y: 36, w: 4, h: 12 }, overlayRight: isLegacy ? null : { x: 0, y: 36, w: 4, h: 12 }, overlayTop: isLegacy ? null : { x: 4, y: 32, w: 4, h: 4 }
+    });
+    drawBox({
+      x: pose.rightLegX, y: pose.rightLegY - smallSway, w: 4, h: 12,
+      rotation: pose.rightLegRotation, pivot: { x: pose.rightLegX + 2, y: pose.rightLegY },
+      front: { x: rightLegSourceX, y: rightLegSourceY, w: 4, h: 12 }, right: { x: rightLegSourceX - 4, y: rightLegSourceY, w: 4, h: 12 }, top: { x: rightLegTopX, y: rightLegTopY, w: 4, h: 4 },
+      overlayFront: isLegacy ? null : { x: 4, y: 52, w: 4, h: 12 }, overlayRight: isLegacy ? null : { x: 0, y: 52, w: 4, h: 12 }, overlayTop: isLegacy ? null : { x: 4, y: 48, w: 4, h: 4 }
+    });
+    drawBox({
+      x: 4 + armWidth, y: 0, w: 8, h: 8, rotation: pose.headRotation, pivot: { x: 8 + armWidth, y: 8 },
+      front: { x: 8, y: 8, w: 8, h: 8 }, right: { x: 16, y: 8, w: 8, h: 8 }, top: { x: 8, y: 0, w: 8, h: 8 },
+      overlayFront: { x: 40, y: 8, w: 8, h: 8 }, overlayRight: { x: 48, y: 8, w: 8, h: 8 }, overlayTop: { x: 40, y: 0, w: 8, h: 8 }
+    });
+
     canvas.classList.remove("hidden");
     canvas.setAttribute("aria-hidden", "false");
-    viewers.push(viewer);
-    return viewer;
+    return true;
   }
 
   async function drawSkinHead(canvas) {
@@ -167,14 +488,29 @@
     context.drawImage(image, 40, 8, 8, 8, 0, 0, 16, 16);
   }
 
+  const activeSkin = applyLauncherSkinState();
+  const dashboardCanvas = document.querySelector("#dashboard-skin-canvas");
   Promise.allSettled([
-    createSkinViewer(document.querySelector("#dashboard-skin-canvas"), { width: 460, height: 720, zoom: 0.74 }),
-    createSkinViewer(document.querySelector("#skin-preview-canvas"), { width: 330, height: 420, zoom: 0.8 }),
+    renderSkin3DPreviewCanvas(dashboardCanvas, activeSkin, 24, 0),
+    renderSkin3DPreviewCanvas(document.querySelector("#skin-preview-canvas"), activeSkin, 14, 0),
     drawSkinHead(document.querySelector("#saved-skin-canvas"))
   ]).then(() => {
     document.querySelector("#dashboard-skin-empty")?.classList.add("hidden");
     document.querySelector("#skin-preview-empty")?.classList.add("hidden");
+    const animationStartedAt = performance.now();
+    let lastFrameAt = 0;
+    let renderInFlight = false;
+    const animateDashboardSkin = (timestamp) => {
+      dashboardAnimationFrame = requestAnimationFrame(animateDashboardSkin);
+      if (!document.querySelector("#dashboard")?.classList.contains("active")) return;
+      if (renderInFlight || timestamp - lastFrameAt < 33) return;
+      lastFrameAt = timestamp;
+      renderInFlight = true;
+      renderSkin3DPreviewCanvas(dashboardCanvas, activeSkin, 24, timestamp - animationStartedAt)
+        .finally(() => { renderInFlight = false; });
+    };
+    dashboardAnimationFrame = requestAnimationFrame(animateDashboardSkin);
   });
 
-  window.addEventListener("beforeunload", () => viewers.forEach((viewer) => viewer.dispose()));
+  window.addEventListener("beforeunload", () => cancelAnimationFrame(dashboardAnimationFrame));
 })();

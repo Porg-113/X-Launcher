@@ -342,6 +342,7 @@ function setSiteMenuOpen(open) {
   siteMenu.setAttribute("aria-hidden", String(!isOpen));
   siteMenuToggle.setAttribute("aria-expanded", String(isOpen));
   siteMenuToggle.setAttribute("aria-label", translate(isOpen ? "common.closeMenu" : "common.openMenu"));
+  siteMenuToggle.classList.toggle("is-hidden", isOpen);
   document.body.classList.toggle("site-menu-open", isOpen);
   if (isOpen) {
     window.setTimeout(() => {

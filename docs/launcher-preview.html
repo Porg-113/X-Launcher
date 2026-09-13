@@ -20,11 +20,11 @@
       document.documentElement.style.setProperty('--accent-contrast', luminance > 0.57 ? '#050708' : '#ffffff');
     })();
   </script>
-  <link rel="stylesheet" href="launcher-preview-base.css?v=28">
-  <link rel="stylesheet" href="launcher-preview-theme.css?v=28">
-  <link rel="stylesheet" href="launcher-preview-overrides.css?v=28">
+  <link rel="stylesheet" href="launcher-preview-base.css?v=29">
+  <link rel="stylesheet" href="launcher-preview-theme.css?v=29">
+  <link rel="stylesheet" href="launcher-preview-overrides.css?v=29">
 </head>
-<body>
+<body data-launcher-skin-src="assets/skins/i-am-steve.png" data-launcher-skin-name="Steve" data-launcher-skin-variant="wide">
   <div class="window-drag-region" aria-hidden="true"></div>
   <div class="window-controls global-window-controls">
     <button id="window-minimize-btn" class="window-btn" type="button" aria-label="Minimieren" title="Minimieren">
@@ -68,7 +68,7 @@
       <header class="header">
         <div class="header-content">
           <div class="header-brand">
-            <div id="header-skin-head" class="skin-head" aria-label="Aktiver Skin i-am-steve" style="--skin-image: url('assets/skins/i-am-steve.png'); --skin-sheet-height-units: 8;">
+            <div id="header-skin-head" class="skin-head" aria-label="Aktiver Skin Steve" style="--skin-sheet-height-units: 8;">
               <div class="skin-head-layer base"></div>
               <div class="skin-head-layer hat"></div>
             </div>
@@ -570,11 +570,11 @@
           <div class="skin-layout">
             <div class="skin-card skin-preview-card">
               <div class="skin-preview-head-wrap">
-                <canvas id="skin-preview-canvas" class="skin-front-preview" aria-label="Skin i-am-steve"></canvas>
+                <canvas id="skin-preview-canvas" class="skin-front-preview" aria-label="Skin Steve"></canvas>
                 <div id="skin-preview-empty" class="skin-preview-empty hidden" aria-hidden="true">Kein aktiver Skin</div>
               </div>
 
-              <p id="skin-status" class="skin-status">Aktiver Skin: i-am-steve · 1 gespeichert</p>
+              <p id="skin-status" class="skin-status">Aktiver Skin: Steve · 1 gespeichert</p>
 
               <div class="skin-actions">
                 <button id="clear-skin-btn" class="btn btn-secondary" disabled>Aktiven Skin entfernen</button>
@@ -585,7 +585,7 @@
                 <div id="skins-list" class="skins-list">
                   <article class="saved-skin-chip active" data-skin-name="i-am-steve">
                     <div class="saved-skin-thumb"><canvas id="saved-skin-canvas" aria-hidden="true"></canvas></div>
-                    <div class="saved-skin-chip-content"><h5>i-am-steve</h5><p>Wide · Aktiv</p></div>
+                    <div class="saved-skin-chip-content"><h5>Steve</h5><p>Wide · Aktiv</p></div>
                     <span class="saved-skin-badge">AKTIV</span>
                   </article>
                 </div>
@@ -599,6 +599,7 @@
               </div>
               <section class="cape-section custom-capes-section">
                 <div class="cape-section-title"><h4>Custom capes</h4></div>
+                <button id="choose-cape-btn" class="cape-add-btn" type="button" aria-label="Cape erstellen" title="Cape erstellen"><span aria-hidden="true">+</span><strong>Cape erstellen</strong></button>
                 <div id="custom-capes-list" class="cape-grid"></div>
               </section>
               <section class="cape-section official-capes-section">
@@ -607,12 +608,12 @@
               </section>
               <div id="cape-editor" class="cape-editor hidden" aria-hidden="true">
                 <div class="cape-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="cape-editor-title">
-                  <div class="cape-editor-head"><div><h4 id="cape-editor-title"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l2 4v14H5V7l2-4Zm0 5h10M9 3v5m6-5v5"/></svg><span>Create pixel cape</span></h4><p>Each square is exactly one Minecraft pixel.</p></div><button id="close-cape-editor-btn" class="cape-tool-btn" type="button" title="Close" aria-label="Close"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+                  <div class="cape-editor-head"><div><h4 id="cape-editor-title"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l2 4v14H5V7l2-4Zm0 5h10M9 3v5m6-5v5"/></svg><span>Create pixel cape</span></h4><p>Each square is exactly one Minecraft pixel.</p></div><button id="close-cape-editor-btn" class="cape-tool-btn" type="button" data-preview-wired="true" title="Close" aria-label="Close"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
                   <div class="cape-editor-tools"><label class="cape-name-control"><input id="cape-name-input" class="input-field" maxlength="40" placeholder="Cape name" aria-label="Cape name"></label><label class="cape-color-control" title="Color" aria-label="Color"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3C8 7 5 10 5 14a7 7 0 0 0 14 0c0-4-3-7-7-11Z"/></svg><input id="cape-color-input" type="color" value="#ffffff"></label><button id="cape-eraser-btn" class="cape-tool-btn" type="button" aria-pressed="false" title="Eraser" aria-label="Eraser"><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 19-4-4L14 4l7 7-8 8H7Zm6 0h8M9 17l-4-4"/></svg></button><span class="cape-tool-divider" aria-hidden="true"></span><button id="cape-undo-btn" class="cape-tool-btn" type="button" title="Undo" aria-label="Undo" disabled><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7-5 5 5 5M5 12h8a6 6 0 0 1 6 6"/></svg></button><button id="cape-redo-btn" class="cape-tool-btn" type="button" title="Redo" aria-label="Redo" disabled><svg class="cape-ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5m4-5h-8a6 6 0 0 0-6 6"/></svg></button><label class="cape-elytra-toggle" title="Use cape texture for Elytra"><span>Elytra</span><input id="cape-elytra-toggle" type="checkbox" aria-label="Use cape texture for Elytra"><span class="setting-switch" aria-hidden="true"></span></label></div>
                   <div id="cape-face-tabs" class="cape-face-tabs" role="tablist" aria-label="Cape face"><button class="active" type="button" data-cape-face="front">Front</button><button type="button" data-cape-face="back">Back</button><button type="button" data-cape-face="left">Left</button><button type="button" data-cape-face="right">Right</button><button type="button" data-cape-face="top">Top</button><button type="button" data-cape-face="bottom">Bottom</button></div>
                   <div class="cape-editor-workspace"><div class="cape-canvas-wrap"><strong id="cape-active-face-label">Front · facing the player</strong><div class="cape-face-stage"><canvas id="cape-editor-canvas" width="10" height="16" aria-label="Cape pixel editor"></canvas></div></div><aside class="cape-full-preview"><h5>Preview</h5><div><span>Front</span><canvas id="cape-preview-front" width="10" height="16"></canvas></div><div><span>Back</span><canvas id="cape-preview-back" width="10" height="16"></canvas></div></aside></div>
                   <p id="cape-editor-error" class="cape-editor-error hidden" role="alert"></p>
-                  <button id="save-cape-btn" class="cape-save-btn" type="button">Save</button>
+                  <button id="save-cape-btn" class="cape-save-btn" type="button" data-preview-wired="true">Save</button>
                 </div>
               </div>
             </aside>
@@ -1132,7 +1133,6 @@
   <!-- Notification Toast -->
 
   <div id="preview-toast" class="preview-toast" role="status" aria-live="polite"></div>
-  <script src="vendor/skinview3d.bundle.js?v=28"></script>
-  <script src="launcher-preview.js?v=28"></script>
+  <script src="launcher-preview.js?v=29"></script>
 </body>
 </html>

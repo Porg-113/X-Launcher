@@ -34,16 +34,6 @@ body {
   visibility: visible;
 }
 
-#skins .skin-preview-head-wrap {
-  min-height: 420px;
-}
-
-#skins .skin-front-preview {
-  width: min(100%, 330px);
-  height: 420px;
-  margin-inline: auto;
-}
-
 .saved-skin-thumb {
   display: grid;
   place-items: center;
