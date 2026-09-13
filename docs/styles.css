@@ -139,16 +139,23 @@ body, body * { font-weight: 400 !important; }
 .demo-app { position: relative; overflow: hidden; width: 100%; min-height: 720px; border: 1px solid color-mix(in srgb, var(--demo-accent) 42%, transparent); border-radius: 26px; color: #e9fdff; background: #02090c; box-shadow: 0 34px 110px rgba(0,0,0,.52), 0 0 70px color-mix(in srgb, var(--demo-accent) 10%, transparent); transition: border-color .3s ease, box-shadow .3s ease; }
 .demo-app::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 78% 8%, color-mix(in srgb, var(--demo-accent) 12%, transparent), transparent 28%); }
 .demo-app.demo-no-motion *, .demo-app.demo-no-motion *::before, .demo-app.demo-no-motion *::after { transition: none !important; animation: none !important; }
-.demo-topbar { position: relative; z-index: 4; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 76px; padding: 0 22px; border-bottom: 1px solid rgba(117,216,224,.12); background: rgba(2,14,18,.94); }
+.demo-topbar { position: relative; z-index: 4; display: grid; grid-template-columns: 1fr auto auto; align-items: center; min-height: 76px; padding: 0 16px 0 22px; border-bottom: 1px solid rgba(117,216,224,.12); background: rgba(2,14,18,.94); }
 .demo-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .demo-brand > span { display: grid; place-items: center; width: 35px; height: 35px; border: 1px solid color-mix(in srgb, var(--demo-accent) 60%, transparent); border-radius: 9px; color: var(--demo-accent); font-family: "Minecraft Website", monospace; font-size: 1.05rem; box-shadow: inset 0 0 18px color-mix(in srgb, var(--demo-accent) 10%, transparent); }
 .demo-brand > strong { font-family: "Minecraft Website", monospace; font-size: 1.08rem; white-space: nowrap; }
 .demo-brand > small { padding: 5px 8px; border: 1px solid rgba(120,207,214,.16); border-radius: 6px; color: #5f9298; font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-.demo-window-dots { display: flex; gap: 7px; }
-.demo-window-dots i { width: 8px; height: 8px; border-radius: 50%; background: #24444a; }
+.demo-window-controls { align-self: stretch; display: flex; align-items: stretch; margin-left: 10px; }
+.demo-window-controls i { position: relative; display: block; width: 34px; opacity: .6; }
+.demo-window-controls i::before, .demo-window-controls i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 1px; background: #8fb4b8; transform: translate(-50%,-50%); }
+.demo-window-controls i:nth-child(2)::after { width: 8px; height: 7px; border: 1px solid #8fb4b8; background: transparent; }
+.demo-window-controls i:nth-child(3)::before { transform: translate(-50%,-50%) rotate(45deg); }
+.demo-window-controls i:nth-child(3)::after { transform: translate(-50%,-50%) rotate(-45deg); }
 .demo-account { justify-self: end; display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid rgba(112,208,216,.16); border-radius: 11px; color: #dffcff; background: rgba(0,255,255,.025); cursor: pointer; }
 .demo-account:hover, .demo-account[aria-expanded="true"] { border-color: color-mix(in srgb, var(--demo-accent) 58%, transparent); background: color-mix(in srgb, var(--demo-accent) 8%, transparent); }
 .demo-avatar { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 8px; color: #001114; background: var(--demo-accent); font-family: "Minecraft Website", monospace; }
+.demo-steve-avatar { position: relative; overflow: hidden; border-radius: 3px; background: #bd7b52; box-shadow: inset -6px 0 rgba(97,55,39,.24); }
+.demo-steve-avatar::before { content: ""; position: absolute; inset: 0 0 auto; height: 9px; background: #332019; box-shadow: 0 3px #4a2a1d; }
+.demo-steve-avatar::after { content: ""; position: absolute; left: 5px; top: 16px; width: 5px; height: 4px; background: #fff; box-shadow: 3px 0 #437dad, 16px 0 #fff, 13px 0 #437dad, 8px 7px #70402c; }
 .demo-account > span:last-child { display: grid; gap: 2px; text-align: left; }
 .demo-account strong { font-size: .77rem; }
 .demo-account small { display: flex; align-items: center; gap: 5px; color: #74a3a8; font-size: .58rem; }
@@ -175,17 +182,50 @@ body, body * { font-weight: 400 !important; }
 .demo-panel-header h3 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.2rem); }
 .demo-ready { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgba(80,245,154,.18); border-radius: 20px; color: #8cb9ad; font-size: .66rem; }
 .demo-ready b { font: inherit; }
-.demo-dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(220px, .8fr); gap: 17px; }
-.demo-launch-card { min-height: 430px; display: flex; flex-direction: column; padding: clamp(24px,4vw,38px); border: 1px solid color-mix(in srgb, var(--demo-accent) 30%, transparent); border-radius: 20px; background: radial-gradient(circle at 80% 5%, color-mix(in srgb, var(--demo-accent) 14%, transparent), transparent 33%), linear-gradient(145deg, rgba(8,31,37,.96), rgba(2,13,17,.96)); }
-.demo-launch-card h4 { margin: 19px 0 10px; font-size: clamp(2rem, 4vw, 3.3rem); }
+.demo-dashboard-grid { display: block; }
+.demo-launch-card { position: relative; min-height: 500px; display: grid; grid-template-columns: minmax(260px,.9fr) minmax(280px,1.1fr); grid-template-rows: 1fr auto auto; column-gap: 34px; padding: clamp(28px,4vw,46px); overflow: hidden; border: 1px solid color-mix(in srgb, var(--demo-accent) 30%, transparent); border-radius: 20px; background: radial-gradient(circle at 73% 44%, color-mix(in srgb, var(--demo-accent) 14%, transparent), transparent 32%), linear-gradient(125deg, rgba(13,30,36,.98), rgba(2,12,16,.96)); }
+.demo-launch-card::before { content: "X"; position: absolute; right: 4%; top: 46%; color: rgba(255,255,255,.018); font-family: "Minecraft Website", monospace; font-size: 390px; line-height: .65; transform: translateY(-50%) rotate(-6deg); }
+.demo-launch-card > * { position: relative; z-index: 2; }
+.demo-launch-copy { grid-column: 1; grid-row: 1; align-self: end; padding-bottom: 18px; }
+.demo-launch-card h4 { margin: 19px 0 10px; font-size: clamp(2.25rem, 4vw, 3.7rem); line-height: .95; }
 .demo-launch-card p { margin: 0; color: #729ba0; font-size: .82rem; }
-.demo-launch-card label { display: grid; gap: 8px; margin-top: auto; color: #6d9ba0; font-size: .66rem; }
+.demo-launch-controls { grid-column: 1; grid-row: 2; display: grid; gap: 10px; }
+.demo-launch-controls label { display: grid; gap: 8px; color: #6d9ba0; font-size: .66rem; }
+.demo-launch-status { justify-self: start; display: flex; align-items: center; gap: 7px; margin-bottom: 2px; padding: 7px 10px; border: 1px solid rgba(112,208,216,.14); border-radius: 999px; color: #779fa4; font-size: .62rem; background: rgba(255,255,255,.025); }
+.demo-launch-status i { width: 6px; height: 6px; border-radius: 50%; background: #50f59a; box-shadow: 0 0 9px #50f59a; }
+.demo-launch-status b { font: inherit; }
+.demo-steve-stage { grid-column: 2; grid-row: 1 / span 3; align-self: stretch; display: grid; place-items: center; min-height: 410px; perspective: 900px; }
+.demo-steve-stage::after { content: ""; position: absolute; left: 50%; bottom: 5%; width: 64%; height: 10%; border-radius: 50%; background: color-mix(in srgb, var(--demo-accent) 28%, transparent); filter: blur(25px); transform: translateX(-50%); }
+.demo-steve { position: relative; z-index: 2; width: 180px; height: 405px; transform: rotateY(-9deg) rotateX(2deg); filter: drop-shadow(18px 28px 22px rgba(0,0,0,.48)); animation: demo-steve-float 4.2s ease-in-out infinite; }
+@keyframes demo-steve-float { 0%,100% { transform: rotateY(-9deg) rotateX(2deg) translateY(0); } 50% { transform: rotateY(-5deg) rotateX(1deg) translateY(-8px); } }
+.steve-head, .steve-body, .steve-arm, .steve-leg { position: absolute; display: block; image-rendering: pixelated; box-shadow: inset -13px 0 rgba(0,0,0,.16), inset 0 -10px rgba(0,0,0,.09); }
+.steve-head { left: 42px; top: 0; width: 96px; height: 96px; background: #bd7b52; }
+.steve-hair { position: absolute; inset: 0 0 auto; height: 25px; background: #2c1c17; box-shadow: 0 9px #43271d; }
+.steve-hair::before, .steve-hair::after { content: ""; position: absolute; top: 21px; width: 13px; height: 19px; background: #43271d; }
+.steve-hair::before { left: 0; }
+.steve-hair::after { right: 0; height: 14px; }
+.steve-eye { position: absolute; top: 53px; width: 18px; height: 9px; background: linear-gradient(90deg,#fff 0 55%,#3f78aa 55% 82%,#18233b 82%); }
+.steve-eye-left { left: 16px; }
+.steve-eye-right { right: 16px; transform: scaleX(-1); }
+.steve-nose { position: absolute; left: 43px; top: 63px; width: 10px; height: 10px; background: #a76449; }
+.steve-mouth { position: absolute; left: 36px; top: 79px; width: 25px; height: 6px; background: #6e3d31; }
+.steve-body { left: 42px; top: 102px; width: 96px; height: 132px; background: linear-gradient(90deg,#149b9d 0 22%,#21b9b6 22% 78%,#118487 78%); }
+.steve-body::after { content: ""; position: absolute; inset: auto 0 0; height: 26px; background: #276099; }
+.steve-arm { top: 102px; width: 39px; height: 150px; background: linear-gradient(#1ba7a7 0 33%,#bd7b52 33%); }
+.steve-arm-left { left: 0; transform: rotate(2deg); transform-origin: top right; }
+.steve-arm-right { right: 0; transform: rotate(-3deg); transform-origin: top left; }
+.steve-leg { top: 234px; width: 45px; height: 158px; background: linear-gradient(#285c98 0 86%,#30363d 86%); }
+.steve-leg-left { left: 42px; }
+.steve-leg-right { right: 42px; }
+.demo-meta-strip { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(3,1fr); margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(112,208,216,.09); }
+.demo-meta-strip > span { display: grid; gap: 4px; color: #587e83; font-size: .52rem; }
+.demo-meta-strip b { color: #b9e7ea; font-family: "Minecraft Website", monospace; font-size: .55rem; }
 .demo-app select, .demo-app input[type="search"] { width: 100%; min-height: 42px; padding: 0 13px; border: 1px solid rgba(112,208,216,.17); border-radius: 9px; outline: 0; color: #dffcff; background: #06181d; }
 .demo-app select:focus, .demo-app input[type="search"]:focus { border-color: color-mix(in srgb, var(--demo-accent) 65%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--demo-accent) 8%, transparent); }
 .demo-primary, .demo-small-primary { border: 1px solid color-mix(in srgb, var(--demo-accent) 72%, white); border-radius: 9px; color: #001114; background: var(--demo-accent); cursor: pointer; box-shadow: 0 0 22px color-mix(in srgb, var(--demo-accent) 18%, transparent); }
 .demo-primary:hover, .demo-small-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
-.demo-launch-card > .demo-primary { display: flex; align-items: center; justify-content: space-between; min-height: 54px; margin-top: 12px; padding: 0 18px; }
-.demo-launch-card > .demo-primary b { font-size: .8rem; }
+.demo-launch-controls > .demo-primary { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0 18px; }
+.demo-launch-controls > .demo-primary b { font-size: .8rem; }
 .demo-overview-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .demo-overview-cards button { display: grid; align-content: center; gap: 7px; min-height: 150px; padding: 18px; border: 1px solid rgba(112,208,216,.13); border-radius: 16px; color: #dbfaff; text-align: left; background: rgba(5,24,29,.72); cursor: pointer; }
 .demo-overview-cards button:hover { border-color: color-mix(in srgb, var(--demo-accent) 45%, transparent); transform: translateY(-2px); }
@@ -236,6 +276,7 @@ body, body * { font-weight: 400 !important; }
 .demo-skin-preview { display: grid; place-items: center; align-content: center; min-height: 410px; border: 1px solid rgba(112,208,216,.13); border-radius: 18px; background: radial-gradient(circle, color-mix(in srgb, var(--demo-accent) 10%, transparent), transparent 55%); }
 .demo-skin-preview > strong { margin-top: 24px; }
 .demo-skin-preview > small { margin-top: 6px; color: #618b90; font-size: .65rem; }
+.demo-steve-small { animation: none; margin: -58px 0 -66px; transform: scale(.67) rotateY(-8deg); }
 .demo-skin-figure { position: relative; width: 72px; height: 172px; filter: drop-shadow(0 18px 18px rgba(0,0,0,.45)); }
 .demo-skin-figure i, .demo-skin-figure b, .demo-skin-figure span { position: absolute; display: block; border: 2px solid color-mix(in srgb, var(--demo-accent) 70%, white); background: color-mix(in srgb, var(--demo-accent) 60%, #0b2830); }
 .demo-skin-figure i { top: 0; left: 14px; width: 44px; height: 44px; }
@@ -245,6 +286,9 @@ body, body * { font-weight: 400 !important; }
 .demo-skin-card { display: flex; align-items: center; gap: 13px; min-height: 74px; padding: 12px; border: 1px solid rgba(112,208,216,.12); border-radius: 13px; color: #dffcff; background: rgba(5,23,28,.72); cursor: pointer; }
 .demo-skin-card:hover, .demo-skin-card.is-selected { border-color: color-mix(in srgb, var(--skin, var(--demo-accent)) 48%, transparent); transform: translateX(3px); }
 .demo-skin-card > span { width: 42px; height: 42px; border: 2px solid color-mix(in srgb, var(--skin) 70%, white); border-radius: 9px; background: color-mix(in srgb, var(--skin) 55%, #10272c); }
+.demo-skin-card > .demo-steve-face { position: relative; overflow: hidden; border-color: #754a34; background: #bd7b52; box-shadow: inset -8px 0 rgba(82,44,31,.2); }
+.demo-steve-face::before { content: ""; position: absolute; inset: 0 0 auto; height: 12px; background: #2d1c17; box-shadow: 0 4px #45291f; }
+.demo-steve-face::after { content: ""; position: absolute; left: 7px; top: 22px; width: 6px; height: 4px; background: #fff; box-shadow: 4px 0 #3f78aa, 21px 0 #fff, 17px 0 #3f78aa, 11px 9px #70402c; }
 .demo-settings-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 13px; }
 .demo-settings-grid article { min-height: 150px; padding: 20px; border: 1px solid rgba(112,208,216,.12); border-radius: 14px; background: rgba(5,23,28,.72); }
 .demo-settings-grid article > small { color: var(--demo-accent); font-family: "Minecraft Website", monospace; font-size: .55rem; }
@@ -282,14 +326,18 @@ body, body * { font-weight: 400 !important; }
   .app-preview-section { margin-top: 80px; }
   .demo-app { min-height: 700px; border-radius: 18px; }
   .demo-topbar { grid-template-columns: 1fr auto; padding: 0 14px; }
-  .demo-window-dots { display: none; }
+  .demo-window-controls { display: none; }
   .demo-layout { display: block; min-height: 620px; }
   .demo-sidebar { flex-direction: row; align-items: center; gap: 5px; padding: 9px; overflow-x: auto; border-right: 0; border-bottom: 1px solid rgba(117,216,224,.12); }
   .demo-sidebar button { width: 46px; height: 43px; }
   .demo-sidebar button > span { display: none; }
   .demo-content { height: 580px; padding: 23px 18px 34px; }
   .demo-dashboard-grid, .demo-skin-layout { grid-template-columns: 1fr; }
-  .demo-launch-card { min-height: 330px; }
+  .demo-launch-card { min-height: 790px; grid-template-columns: 1fr; grid-template-rows: auto 390px auto auto; }
+  .demo-launch-copy { grid-column: 1; grid-row: 1; }
+  .demo-steve-stage { grid-column: 1; grid-row: 2; min-height: 380px; }
+  .demo-launch-controls { grid-column: 1; grid-row: 3; }
+  .demo-meta-strip { grid-column: 1; grid-row: 4; }
   .demo-overview-cards { grid-template-columns: repeat(2,1fr); }
   .demo-overview-cards button { min-height: 105px; }
   .demo-card-grid, .demo-server-list { grid-template-columns: 1fr; }

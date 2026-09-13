@@ -89,6 +89,9 @@ test('website preview is interactive while unsafe demo actions stay locked', () 
 
   assert.match(homePage, /id="app-preview"/u);
   assert.match(homePage, /<strong>X Client<\/strong>/u);
+  assert.match(homePage, /class="demo-steve-stage"/u);
+  assert.match(homePage, /data-skin-name="Steve"/u);
+  assert.match(homePage, /class="demo-window-controls"/u);
   assert.doesNotMatch(homePage, /class="feature-story"/u);
   assert.match(featuresPage, /class="feature-story feature-story-page"/u);
   for (const action of ['play', 'install', 'delete', 'create', 'transfer']) {

@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#00191f">
   <title data-i18n="home.title">X Client – Startseite</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=26">
+  <link rel="stylesheet" href="styles.css?v=27">
 </head>
 <body>
   <div class="glow glow-one"></div>
@@ -82,11 +82,11 @@
       <div id="app-preview" class="demo-app" style="--demo-accent: #00ffff;">
         <header class="demo-topbar">
           <div class="demo-brand"><span>X</span><strong>X Client</strong><small data-i18n="preview.demoMode">Demo-Modus</small></div>
-          <div class="demo-window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
           <button class="demo-account" type="button" aria-expanded="false">
-            <span class="demo-avatar">X</span>
+            <span class="demo-avatar demo-steve-avatar" aria-label="Steve"></span>
             <span><strong>X Client</strong><small><i></i><b data-i18n="preview.online">Online</b></small></span>
           </button>
+          <div class="demo-window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
           <div class="demo-account-card" hidden><span data-i18n="preview.loggedIn">Angemeldet als</span><strong>X Client</strong><small data-i18n="preview.demoAccount">Demo-Konto</small></div>
         </header>
 
@@ -106,16 +106,20 @@
               <div class="demo-panel-header"><div><small data-i18n="preview.welcome">Willkommen zurück</small><h3>X Client</h3></div><span class="demo-ready"><i></i><b data-i18n="preview.ready">Bereit</b></span></div>
               <div class="demo-dashboard-grid">
                 <article class="demo-launch-card">
-                  <div><span class="demo-kicker">X CLIENT · FABRIC</span><h4 data-i18n="preview.yourMinecraft">Dein Minecraft</h4><p data-i18n="preview.launchCopy">Profil wählen und direkt loslegen.</p></div>
-                  <label><span data-i18n="preview.profile">Profil</span><select data-demo-profile><option>Performance · 1.21.4</option><option>Vanilla+ · 1.20.1</option><option>Creative · 1.21.1</option></select></label>
-                  <button class="demo-primary" type="button" data-demo-locked="play"><span data-i18n="preview.play">Minecraft starten</span><b>▶</b></button>
+                  <div class="demo-launch-copy"><span class="demo-kicker">X CLIENT · FABRIC EDITION</span><h4 data-i18n="preview.yourMinecraft">Dein Minecraft</h4><p data-i18n="preview.launchCopy">Profil wählen und direkt loslegen.</p></div>
+                  <div class="demo-steve-stage" aria-label="Steve Skin">
+                    <div class="demo-steve" aria-hidden="true">
+                      <div class="steve-head"><i class="steve-hair"></i><i class="steve-eye steve-eye-left"></i><i class="steve-eye steve-eye-right"></i><i class="steve-nose"></i><i class="steve-mouth"></i></div>
+                      <div class="steve-body"></div><i class="steve-arm steve-arm-left"></i><i class="steve-arm steve-arm-right"></i><i class="steve-leg steve-leg-left"></i><i class="steve-leg steve-leg-right"></i>
+                    </div>
+                  </div>
+                  <div class="demo-launch-controls">
+                    <span class="demo-launch-status"><i></i><b data-i18n="preview.readyToPlay">Bereit zum Spielen</b></span>
+                    <label><span data-i18n="preview.profile">Profil</span><select data-demo-profile><option>Performance · 1.21.4</option><option>Vanilla+ · 1.20.1</option><option>Creative · 1.21.1</option></select></label>
+                    <button class="demo-primary" type="button" data-demo-locked="play"><span data-i18n="preview.play">Minecraft starten</span><b>▶</b></button>
+                  </div>
+                  <div class="demo-meta-strip" aria-hidden="true"><span><b>FABRIC</b><small data-i18n="preview.optimized">Optimiert</small></span><span><b>MODRINTH</b><small data-i18n="preview.integrated">Integriert</small></span><span><b>X CLIENT</b><small data-i18n="preview.ready">Bereit</small></span></div>
                 </article>
-                <div class="demo-overview-cards">
-                  <button type="button" data-demo-section-link="mods"><small>MODS</small><strong>12</strong><span data-i18n="preview.active">Aktiv</span></button>
-                  <button type="button" data-demo-section-link="profiles"><small data-i18n="preview.profiles">PROFILE</small><strong>3</strong><span data-i18n="preview.ready">Bereit</span></button>
-                  <button type="button" data-demo-section-link="servers"><small>SERVER</small><strong>2</strong><span>Online</span></button>
-                  <button type="button" data-demo-section-link="skins"><small>SKINS</small><strong>4</strong><span data-i18n="preview.saved">Gespeichert</span></button>
-                </div>
               </div>
             </section>
 
@@ -162,8 +166,8 @@
             <section class="demo-panel" data-demo-panel="skins">
               <div class="demo-panel-header"><div><small data-i18n="preview.collection">SAMMLUNG</small><h3>Skins</h3></div><div class="demo-header-actions"><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.import">Importieren</button><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.exportShort">Exportieren</button></div></div>
               <div class="demo-skin-layout">
-                <div class="demo-skin-preview"><div class="demo-skin-figure"><i></i><b></b><span></span></div><strong data-demo-skin-name>Neon Steve</strong><small data-i18n="preview.activeSkin">Aktiver Skin</small></div>
-                <div class="demo-skin-grid" data-demo-select-group><button class="demo-skin-card is-selected" type="button" data-skin-name="Neon Steve" data-skin-color="#00ffff"><span style="--skin:#00ffff"></span><b>Neon Steve</b></button><button class="demo-skin-card" type="button" data-skin-name="Purple Alex" data-skin-color="#a855f7"><span style="--skin:#a855f7"></span><b>Purple Alex</b></button><button class="demo-skin-card" type="button" data-skin-name="Lime Runner" data-skin-color="#8cff66"><span style="--skin:#8cff66"></span><b>Lime Runner</b></button></div>
+                <div class="demo-skin-preview"><div class="demo-steve demo-steve-small" aria-hidden="true"><div class="steve-head"><i class="steve-hair"></i><i class="steve-eye steve-eye-left"></i><i class="steve-eye steve-eye-right"></i><i class="steve-nose"></i><i class="steve-mouth"></i></div><div class="steve-body"></div><i class="steve-arm steve-arm-left"></i><i class="steve-arm steve-arm-right"></i><i class="steve-leg steve-leg-left"></i><i class="steve-leg steve-leg-right"></i></div><strong data-demo-skin-name>Steve</strong><small data-i18n="preview.activeSkin">Aktiver Skin</small></div>
+                <div class="demo-skin-grid" data-demo-select-group><button class="demo-skin-card is-selected" type="button" data-skin-name="Steve" data-skin-color="#00ffff"><span class="demo-steve-face"></span><b>Steve</b></button><button class="demo-skin-card" type="button" data-skin-name="Purple Alex" data-skin-color="#a855f7"><span style="--skin:#a855f7"></span><b>Purple Alex</b></button><button class="demo-skin-card" type="button" data-skin-name="Lime Runner" data-skin-color="#8cff66"><span style="--skin:#8cff66"></span><b>Lime Runner</b></button></div>
               </div>
             </section>
 
@@ -184,7 +188,7 @@
   </main>
 
   <footer><span>© 2026 X Client</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
-  <script src="download.js?v=26"></script>
-  <script src="app-preview.js?v=26"></script>
+  <script src="download.js?v=27"></script>
+  <script src="app-preview.js?v=27"></script>
 </body>
 </html>
