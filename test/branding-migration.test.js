@@ -47,6 +47,9 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(downloadsHtml, /href="downloads\.html" aria-current="page"/u);
   assert.match(downloadsHtml, /id="download"/u);
   assert.doesNotMatch(downloadsHtml, /download-facts/u);
+  assert.doesNotMatch(downloadsHtml, /download-shell-logo/u);
+  assert.doesNotMatch(downloadsHtml, /Download X Client, sign in with Microsoft/u);
+  assert.match(downloadsHtml, /class="download-shell-title"[^>]*data-i18n="downloads\.heading"/u);
   assert.doesNotMatch(websiteCss, /site-menu-toggle\[aria-expanded="true"\]/u);
   assert.match(websiteCss, /\.site-menu\.is-open \.site-menu-backdrop/u);
   assert.match(websiteCss, /strong, b, h1, h2, h3, h4, h5, h6/u);
