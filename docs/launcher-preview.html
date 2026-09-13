@@ -176,7 +176,6 @@
                 <button class="modrinth-type-tab active" type="button" data-mods-view="mod" aria-selected="true">Mods</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="resourcepack" aria-selected="false">Ressourcenpakete</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="shader" aria-selected="false">Shader</button>
-                <button class="modrinth-type-tab" type="button" data-mods-view="datapack" aria-selected="false">Datapacks</button>
                 <button class="modrinth-type-tab" type="button" data-mods-view="hidden" aria-selected="false">Ausgeblendet</button>
               </div>
               <div id="mods-drop-zone" class="mods-drop-zone" role="button" tabindex="0">
@@ -203,7 +202,6 @@
               <button class="modrinth-type-tab" type="button" data-modrinth-type="modpack" aria-selected="false">Modpacks</button>
               <button class="modrinth-type-tab" type="button" data-modrinth-type="shader" aria-selected="false">Shader</button>
               <button class="modrinth-type-tab" type="button" data-modrinth-type="resourcepack" aria-selected="false">Ressourcenpakete</button>
-              <button class="modrinth-type-tab" type="button" data-modrinth-type="datapack" aria-selected="false">Datapacks</button>
             </div>
             <div class="modrinth-search-row">
               <div class="modrinth-search-box">
@@ -983,70 +981,6 @@
       <div class="confirm-actions">
         <button id="confirm-cancel-btn" class="btn btn-secondary" type="button">Abbrechen</button>
         <button id="confirm-ok-btn" class="btn btn-danger" type="button">Bestätigen</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="datapack-install-modal" class="confirm-modal datapack-install-modal hidden" role="dialog" aria-modal="true" aria-labelledby="datapack-install-title">
-    <div class="confirm-box">
-      <div id="datapack-install-existing-view" class="confirm-content">
-        <h3 id="datapack-install-title">Install Datapack</h3>
-        <p id="datapack-install-message">Choose the world where the datapack should be installed.</p>
-        <select id="datapack-install-world-select" class="input-field" aria-label="Choose a Minecraft world"></select>
-      </div>
-      <div id="datapack-install-existing-actions" class="confirm-actions datapack-install-actions">
-        <button id="datapack-install-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
-        <button id="datapack-create-world-btn" class="btn btn-secondary" type="button">Create New World</button>
-        <button id="datapack-install-confirm-btn" class="btn btn-primary" type="button">Install</button>
-      </div>
-      <div id="datapack-create-world-view" class="confirm-content hidden">
-        <div class="datapack-world-hero">
-          <div class="datapack-world-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z"/><path d="m4 7 8 4 8-4M12 11v10"/><path d="m8 5 8 4"/></svg>
-          </div>
-          <div>
-            <span class="datapack-world-step">WORLD SETUP</span>
-            <h3>Create New World</h3>
-            <p>Choose how your new adventure should begin.</p>
-          </div>
-        </div>
-        <div class="datapack-world-form">
-          <div class="datapack-world-name-field">
-            <label class="field-label" for="datapack-world-name-input">World Name</label>
-            <input id="datapack-world-name-input" class="input-field" type="text" maxlength="64" value="New World" autocomplete="off" placeholder="Enter a world name">
-          </div>
-          <div class="datapack-world-option">
-            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">◆</span><div><label class="field-label" for="datapack-world-gamemode-select">Game Mode</label><small>Choose your play style</small></div></div>
-            <select id="datapack-world-gamemode-select" class="input-field">
-              <option value="survival" selected>Survival</option>
-              <option value="creative">Creative</option>
-              <option value="hardcore">Hardcore</option>
-            </select>
-          </div>
-          <div class="datapack-world-option">
-            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">✦</span><div><label class="field-label" for="datapack-world-difficulty-select">Difficulty</label><small>Set the challenge level</small></div></div>
-            <select id="datapack-world-difficulty-select" class="input-field">
-              <option value="peaceful">Peaceful</option>
-              <option value="easy">Easy</option>
-              <option value="normal" selected>Normal</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-          <div class="datapack-world-option">
-            <div class="datapack-world-option-copy"><span class="datapack-option-icon" aria-hidden="true">▦</span><div><label class="field-label" for="datapack-world-type-select">World Type</label><small>Shape the generated terrain</small></div></div>
-            <select id="datapack-world-type-select" class="input-field">
-              <option value="default" selected>Default</option>
-              <option value="flat">Superflat</option>
-              <option value="large_biomes">Large Biomes</option>
-              <option value="amplified">Amplified</option>
-            </select>
-          </div>
-        </div>
-        <div class="datapack-world-pack-note"><span aria-hidden="true">✓</span><span>The selected datapack will be installed automatically.</span></div>
-      </div>
-      <div id="datapack-create-world-actions" class="confirm-actions datapack-world-actions hidden">
-        <button id="datapack-create-world-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
-        <button id="datapack-create-world-confirm-btn" class="btn btn-primary" type="button"><span aria-hidden="true">＋</span> Create World</button>
       </div>
     </div>
   </div>

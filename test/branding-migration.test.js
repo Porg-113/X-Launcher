@@ -117,6 +117,8 @@ test('website preview is interactive while unsafe demo actions stay locked', () 
   assert.match(previewScript, /hidden: true/u);
   assert.match(previewScript, /itemType: "shader"/u);
   assert.match(previewScript, /itemType: "resourcepack"/u);
+  assert.doesNotMatch(previewScript, /X Client Ressourcenpaket/u);
+  assert.doesNotMatch(previewPage, /datapack/u);
   assert.match(previewScript, /cdn\.modrinth\.com\/data\//u);
   assert.match(previewScript, /getLauncherPreviewView/u);
   assert.match(previewScript, /Xaero's Minimap/u);

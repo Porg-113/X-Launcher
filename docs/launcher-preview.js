@@ -53,7 +53,6 @@
   const LAUNCHER_STANDARD_CONTENT = Object.freeze([
     { id: "complementary-reimagined", name: "Complementary Shaders - Reimagined", itemType: "shader", kind: "Shader", iconUrl: "https://cdn.modrinth.com/data/HVnmMxH1/79cb7c8123bbc54945305b2ebad6b8881efdf5f8_96.webp" },
     { id: "bsl-shaders", name: "BSL Shaders", itemType: "shader", kind: "Shader", iconUrl: "https://cdn.modrinth.com/data/Q1vvjJYV/2a611a3cb434fb52fb81fa5dace13c5d8b67e55d_96.webp" },
-    { id: "x-client-resourcepack", name: "X Client Ressourcenpaket", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: X_CLIENT_ICON_URL },
     { id: "fresh-animations", name: "Fresh Animations", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: "https://cdn.modrinth.com/data/50dA9Sha/3132c10e9e3c73fde9799720fd3da5561071708c_96.webp" },
     { id: "better-vanilla-building", name: "BetterVanillaBuilding", itemType: "resourcepack", kind: "Ressourcenpaket", iconUrl: "https://cdn.modrinth.com/data/LBcosBrl/icon.png" }
   ]);
