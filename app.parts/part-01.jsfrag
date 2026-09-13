@@ -990,6 +990,7 @@ class MinecraftLauncher {
     this.buttonAudioContext = null;
     this.clickSoundPlayers = new Map();
     this.clickSoundAudioNodes = new Map();
+    this.clickSoundPoolSize = 4;
     this.lastButtonSoundAt = 0;
     this.soundVolumeStorageKey = 'xLauncherSoundVolume';
     this.soundVolumeScaleStorageKey = 'xLauncherSoundVolumeScale';
@@ -997,8 +998,10 @@ class MinecraftLauncher {
     this.defaultSoundVolume = 0.04;
     this.clickSoundReferenceVolume = 0.04;
     this.clickSoundStorageKey = 'xLauncherClickSound';
+    this.clickSoundEnabledStorageKey = 'xLauncherClickSoundEnabled';
     this.soundVolume = this.readSoundVolume();
     this.clickSound = this.readClickSound();
+    this.clickSoundEnabled = this.readStoredBoolean(this.clickSoundEnabledStorageKey, true);
     this.soundSettingsListenersAttached = false;
     this.isUpdatingAllMods = false;
     this.lastModsCheckResult = null;
@@ -1006,7 +1009,11 @@ class MinecraftLauncher {
     this.pendingConfirm = null;
     this.pendingSkinVariantChoice = null;
     this.scrollFadeFrame = null;
-    this.scrollFadeObservers = [];
+    this.scrollFadeObserver = null;
+    this.scrollFadeObservedRoot = null;
+    this.scrollFadeDirty = true;
+    this.scrollFadeItemCache = new WeakMap();
+    this.scrollFadeTrackedContainers = new Set();
     this.reactBitsMotionFrame = null;
     this.reactBitsMotionObserver = null;
     this.reactBitsPointerFrame = null;
@@ -1809,6 +1816,13 @@ class MinecraftLauncher {
       clearTimeout(this.minecraftRunningTransitionTimer);
       this.setMinecraftLaunchState('idle');
       this.playDashboardSkinReturnAnimation();
+    });
+    window.electronAPI.onGameEvent('minecraft-crash-repaired', (_event, payload) => {
+      const messages = Array.isArray(payload?.messages) ? payload.messages.filter(Boolean) : [];
+      const message = payload?.repaired
+        ? `Minecraft-Absturz automatisch repariert. ${messages.join(' | ')}`
+        : `Minecraft ist unerwartet beendet. ${messages.join(' | ') || 'Die Diagnose wurde gespeichert.'}`;
+      this.showNotification(message);
     });
 
     if (typeof window.electronAPI.getMinecraftRuntimeStatus === 'function') {
@@ -3087,19 +3101,17 @@ class MinecraftLauncher {
     return this.getClickSoundProfile(storedSound) ? storedSound : 'alpaca';
   }
 
+  readStoredBoolean(storageKey, fallback) {
+    const storedValue = localStorage.getItem(storageKey);
+    if (storedValue === null) return fallback;
+    return storedValue === 'true';
+  }
+
   initializeSoundSettings() {
     const volumeSlider = document.getElementById('sound-volume-slider');
     const soundSelect = document.getElementById('click-sound-select');
     const previewButton = document.getElementById('sound-preview-btn');
 
-    Object.keys(this.getClickSoundProfiles()).forEach((soundId) => {
-      const profile = this.getClickSoundProfile(soundId);
-      if (!profile || this.clickSoundPlayers.has(soundId)) return;
-      const player = new Audio(profile.src);
-      player.preload = 'auto';
-      player.load();
-      this.clickSoundPlayers.set(soundId, player);
-    });
     this.updateSoundSettingsUI();
 
     if (this.soundSettingsListenersAttached) {
@@ -3109,6 +3121,7 @@ class MinecraftLauncher {
     volumeSlider?.addEventListener('input', () => this.handleSoundVolumeChange(false));
     volumeSlider?.addEventListener('change', () => this.handleSoundVolumeChange(true));
     soundSelect?.addEventListener('change', () => this.handleClickSoundChange());
+    document.getElementById('click-sound-enabled')?.addEventListener('change', (event) => this.handleClickSoundEnabledChange(event.target.checked));
     previewButton?.addEventListener('click', () => this.playButtonSound({ force: true }));
     this.soundSettingsListenersAttached = true;
   }
@@ -3118,6 +3131,7 @@ class MinecraftLauncher {
     const volumeSlider = document.getElementById('sound-volume-slider');
     const volumeValue = document.getElementById('sound-volume-value');
     const soundSelect = document.getElementById('click-sound-select');
+    const soundEnabled = document.getElementById('click-sound-enabled');
 
     if (volumeSlider) {
       volumeSlider.value = String(volumePercent);
@@ -3128,6 +3142,21 @@ class MinecraftLauncher {
     if (soundSelect) {
       soundSelect.value = this.getClickSoundProfile(this.clickSound) ? this.clickSound : 'alpaca';
     }
+    if (soundEnabled) {
+      soundEnabled.checked = this.clickSoundEnabled;
+    }
+  }
+
+  ensureClickSoundPool(soundId) {
+    const profile = this.getClickSoundProfile(soundId);
+    if (!profile || this.clickSoundPlayers.has(soundId)) return;
+    const players = Array.from({ length: this.clickSoundPoolSize }, () => {
+      const player = new Audio(profile.src);
+      player.preload = 'auto';
+      player.load();
+      return player;
+    });
+    this.clickSoundPlayers.set(soundId, players);
   }
 
   handleSoundVolumeChange(playPreview = false) {
@@ -3147,9 +3176,16 @@ class MinecraftLauncher {
     const soundSelect = document.getElementById('click-sound-select');
     const nextSound = this.getClickSoundProfile(soundSelect?.value) ? soundSelect.value : 'alpaca';
     this.clickSound = nextSound;
+    this.ensureClickSoundPool(nextSound);
     localStorage.setItem(this.clickSoundStorageKey, nextSound);
     this.updateSoundSettingsUI();
     this.playButtonSound({ force: true });
+  }
+
+  handleClickSoundEnabledChange(enabled) {
+    this.clickSoundEnabled = Boolean(enabled);
+    localStorage.setItem(this.clickSoundEnabledStorageKey, String(this.clickSoundEnabled));
+    this.updateSoundSettingsUI();
   }
 
   async loadThemeConfig(options = {}) {
@@ -3663,6 +3699,7 @@ class MinecraftLauncher {
 
     this.activeSectionId = sectionId;
     this.windowGroupState.activeSectionId = sectionId;
+    this.refreshScrollFadeTracking();
     this.refreshSectionFromPreloadedState(sectionId);
     void this.ensureSectionDataLoaded(sectionId);
     if (sectionId === 'hosting') {

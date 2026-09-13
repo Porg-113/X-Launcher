@@ -699,6 +699,10 @@
                     <p>Feedback beim Klicken und Bedienen.</p>
                   </div>
                   <div class="sound-controls">
+                    <label class="setting-toggle-row" for="click-sound-enabled">
+                      <span>Klicksounds aktiv</span>
+                      <input id="click-sound-enabled" type="checkbox" checked>
+                    </label>
                     <div class="slider-group">
                       <label for="sound-volume-slider">Lautstärke: <span id="sound-volume-value">4%</span></label>
                       <input type="range" id="sound-volume-slider" class="rgb-slider" min="0" max="100" value="4">
@@ -1115,7 +1119,6 @@
 
   <!-- Notification Toast -->
 
-  <script src="node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

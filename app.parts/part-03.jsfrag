@@ -1063,7 +1063,7 @@
       this.dashboardSkinAnimationFrame = null;
     }
 
-    const dashboardPreviewScale = 24;
+    const dashboardPreviewScale = 20;
     const rendered = await this.renderSkin3DPreviewCanvas(canvas, activeSkin, dashboardPreviewScale, 0);
     canvas.setAttribute('aria-hidden', rendered ? 'false' : 'true');
     emptyEl.classList.toggle('hidden', rendered);
@@ -1081,7 +1081,7 @@
     const animate = (timestamp) => {
       this.dashboardSkinAnimationFrame = requestAnimationFrame(animate);
       if (!document.getElementById('dashboard')?.classList.contains('active')) return;
-      if (this.dashboardSkinRenderInFlight || timestamp - this.dashboardSkinLastFrameAt < 33) return;
+      if (this.dashboardSkinRenderInFlight || timestamp - this.dashboardSkinLastFrameAt < 50) return;
       this.dashboardSkinLastFrameAt = timestamp;
       this.dashboardSkinRenderInFlight = true;
       this.renderSkin3DPreviewCanvas(
@@ -1207,9 +1207,32 @@
     sourceContext.imageSmoothingEnabled = false;
     sourceContext.drawImage(image, 0, 0);
 
+    const width = sourceCanvas.width;
+    const height = sourceCanvas.height;
+    // The Minecraft layout uses the top-left 64 × 64 pixels. Capping this
+    // cache also keeps unusually large imported PNGs from reserving memory.
+    const pixelWidth = Math.min(64, width);
+    const pixelHeight = Math.min(64, height);
+    const pixels = sourceContext.getImageData(0, 0, pixelWidth, pixelHeight).data;
+    const shadedPixels = new Map([[1, new Array(pixelWidth * pixelHeight)], [0.72, new Array(pixelWidth * pixelHeight)], [1.08, new Array(pixelWidth * pixelHeight)]]);
+    shadedPixels.forEach((colors, shade) => {
+      for (let pixelIndex = 0; pixelIndex < pixelWidth * pixelHeight; pixelIndex += 1) {
+        const offset = pixelIndex * 4;
+        const alpha = pixels[offset + 3] / 255;
+        if (alpha <= 0) continue;
+        const clampColor = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
+        colors[pixelIndex] = `rgba(${clampColor(pixels[offset])}, ${clampColor(pixels[offset + 1])}, ${clampColor(pixels[offset + 2])}, ${alpha})`;
+      }
+    });
+
     const texture = {
       sourceCanvas,
-      sourceContext
+      sourceContext,
+      width,
+      height,
+      pixelWidth,
+      pixelHeight,
+      shadedPixels
     };
     this.skinTextureCache.set(source, texture);
     return texture;
@@ -1303,7 +1326,7 @@
     if (!texture) {
       return false;
     }
-    const { sourceContext } = texture;
+    const { shadedPixels, pixelWidth: textureWidth, pixelHeight: textureHeight } = texture;
 
     // 3) Minecraft-Skin-Modell erkennen: Classic/Slim und alte 64x32-Skins.
     const isLegacy = activeSkin.height === 32;
@@ -1326,8 +1349,10 @@
     const stageHeight = Math.ceil((modelHeight * scale) - depth.y + (padding * 2) + (animationPadding * 2));
 
     // 5) Canvas für den aktuellen Frame vorbereiten.
-    canvas.width = stageWidth;
-    canvas.height = stageHeight;
+    if (canvas.width !== stageWidth || canvas.height !== stageHeight) {
+      canvas.width = stageWidth;
+      canvas.height = stageHeight;
+    }
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.imageSmoothingEnabled = false;
 
@@ -1355,32 +1380,11 @@
       rightLegY: 20 + legDrop
     };
 
-    // 8) Pixel-Farben aus der Skin-Textur lesen und cachen.
-    const rgbaCache = new Map();
-    const getPixel = (sx, sy) => {
-      const key = `${sx},${sy}`;
-      if (rgbaCache.has(key)) {
-        return rgbaCache.get(key);
-      }
-
-      const pixel = sourceContext.getImageData(sx, sy, 1, 1).data;
-      const value = {
-        r: pixel[0],
-        g: pixel[1],
-        b: pixel[2],
-        a: pixel[3] / 255
-      };
-      rgbaCache.set(key, value);
-      return value;
-    };
+    // 8) Skin-Farben werden beim Laden vorbereitet. Das spart tausende
+    // getImageData-Aufrufe und Map-Allokationen pro Animationsframe.
     const getColor = (sx, sy, shade) => {
-      const pixel = getPixel(sx, sy);
-      if (pixel.a <= 0) {
-        return null;
-      }
-
-      const clampColor = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
-      return `rgba(${clampColor(pixel.r)}, ${clampColor(pixel.g)}, ${clampColor(pixel.b)}, ${pixel.a})`;
+      if (sx < 0 || sy < 0 || sx >= textureWidth || sy >= textureHeight) return null;
+      return shadedPixels.get(shade)?.[(sy * textureWidth) + sx] || null;
     };
 
     // 9) Einen Punkt innerhalb einer 3D-Fläche auf Canvas-Koordinaten abbilden.

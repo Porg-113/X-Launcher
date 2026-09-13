@@ -11,6 +11,7 @@
     "build": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis portable --publish never",
     "build:installer": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish never",
     "build:portable": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win portable --publish never",
+    "build:website": "node scripts/build-website.js",
     "release:github": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --win nsis --publish always",
     "pack": "set ELECTRON_BUILDER_DISABLE_BUILD_CACHE=true&& electron-builder --dir",
     "release:hashes": "powershell -NoProfile -File scripts/write-release-hashes.ps1",
@@ -22,8 +23,7 @@
   "dependencies": {
     "electron-updater": "^6.8.3",
     "node-fetch": "^2.6.7",
-    "prismarine-auth": "^3.1.1",
-    "skinview3d": "^3.4.2"
+    "prismarine-auth": "^3.1.1"
   },
   "devDependencies": {
     "electron": "latest",
@@ -52,7 +52,6 @@
       "styles.css",
       "modern-launcher.css",
       "package.json",
-      "node_modules/skinview3d/bundles/**/*",
       "icons/**/*",
       "assets/**/*"
     ],
