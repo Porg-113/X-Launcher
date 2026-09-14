@@ -73,6 +73,7 @@ let cosmeticsBackendSessionToken = '';
 let verifiedOwnerSession = { uuid: '', verifiedAt: 0 };
 const verifiedMinecraftSessions = new Map();
 let minecraftLaunchReserved = false;
+let minecraftCrashRepairPromise = null;
 
 const PROJECT_ROOT_DIR = path.join(__dirname, '..');
 const ICONS_DIR = path.join(PROJECT_ROOT_DIR, 'icons');
@@ -149,6 +150,7 @@ const LOCAL_DIRECT_HOSTING = createLocalDirectHostingBackend({
   shell
 });
 const MINECRAFT_SERVER_STATUS_TIMEOUT_MS = 5000;
+const MINECRAFT_CRASH_DIAGNOSTICS_FLUSH_DELAY_MS = 500;
 const MAX_SERVER_ICON_DATA_URL_LENGTH = 180000;
 const VERSION_MANIFEST_URL = 'https://launchermeta.mojang.com/mc/game/version_manifest.json';
 const FABRIC_GAME_VERSIONS_URL = 'https://meta.fabricmc.net/v2/versions/game';
@@ -177,6 +179,7 @@ const MODRINTH_UNAVAILABLE_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MODRINTH_SEARCH_CACHE_MAX_ENTRIES = 120;
 const modrinthSearchCache = new Map();
 let modrinthCatalogDiskCache = null;
+let packsConfigCache = null;
 const SERVICE_HEALTH_TIMEOUT_MS = 4500;
 const SERVICE_HEALTH_CHECKS = [
   {
@@ -535,7 +538,7 @@ const KNOWN_MOD_CONFLICTS = [
 const HIDDEN_FABRIC_API_MINECRAFT_VERSIONS = new Set([
   '1.21.11'
 ]);
-const X_CLIENT_MOD_VERSION = '1.0.152';
+const X_CLIENT_MOD_VERSION = '1.0.153';
 const REQUIRED_BUNDLED_MODS = [
   {
     projectId: 'x-launcher-menu',
@@ -2665,12 +2668,14 @@ registerIpcHandler('cleanup-numbered-and-duplicate-mods', async () => {
 
 registerIpcHandler('launch-minecraft', async (event, username, passedAccessToken = '', launchOptions = {}) => {
   const runtimeStatus = getMinecraftRuntimeStatus();
-  if (minecraftLaunchReserved || runtimeStatus.running) {
+  if (minecraftLaunchReserved || runtimeStatus.running || minecraftCrashRepairPromise) {
     return {
       success: false,
       alreadyRunning: true,
       pid: runtimeStatus.pid || activeMinecraftProcess?.pid || 0,
-      error: 'Minecraft läuft bereits. Beende es vollständig, bevor du eine weitere Instanz startest.'
+      error: minecraftCrashRepairPromise
+        ? 'Der letzte Minecraft-Absturz wird gerade automatisch repariert. Bitte warte einen Moment und starte danach erneut.'
+        : 'Minecraft läuft bereits. Beende es vollständig, bevor du eine weitere Instanz startest.'
     };
   }
 
@@ -2985,17 +2990,18 @@ async function repairMinecraftLaunchFailure(error, context = {}) {
   let repaired = false;
   const selectedVersionId = String(context.versionId || getEffectiveSelectedVersionId() || '').trim();
   const modContext = getActiveModContext(selectedVersionId);
+  const minecraftDir = String(context.minecraftDir || DEFAULT_MINECRAFT_DIR).trim() || DEFAULT_MINECRAFT_DIR;
 
   try {
-    ensureDir(DEFAULT_MINECRAFT_DIR);
-    ensureVisibleChatOptions(DEFAULT_MINECRAFT_DIR);
-    cleanupFullbrightResourcePack(DEFAULT_MINECRAFT_DIR);
+    ensureDir(minecraftDir);
+    ensureVisibleChatOptions(minecraftDir);
+    cleanupFullbrightResourcePack(minecraftDir);
   } catch (repairError) {
     messages.push(`Basisprüfung unvollständig: ${repairError.message}`);
   }
 
-  const diagnostics = readLaunchDiagnostics(DEFAULT_MINECRAFT_DIR);
-  const optionRepairs = repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error);
+  const diagnostics = readLaunchDiagnostics(minecraftDir);
+  const optionRepairs = repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error, minecraftDir);
   if (optionRepairs.length) {
     repaired = true;
     messages.push(...optionRepairs);
@@ -3049,6 +3055,61 @@ async function repairMinecraftLaunchFailure(error, context = {}) {
     repaired,
     messages: uniqueStrings(messages)
   };
+}
+
+function isUnexpectedMinecraftExit(code, signal) {
+  return Boolean(signal) || code === null || code === undefined || Number(code) !== 0;
+}
+
+async function repairMinecraftCrashAfterExit({ code, signal, minecraftDir, versionId, sourceWindow = null }) {
+  if (!isUnexpectedMinecraftExit(code, signal)) {
+    return { repaired: false, messages: [] };
+  }
+
+  const exitLabel = signal ? `Signal ${signal}` : `Code ${code ?? 'unbekannt'}`;
+  const error = new Error(`Minecraft ist unerwartet beendet (${exitLabel}).`);
+
+  // Minecraft finishes writing latest.log/crash-reports just after its process
+  // exits. Waiting briefly lets the existing repair rules see the actual cause.
+  await delay(MINECRAFT_CRASH_DIAGNOSTICS_FLUSH_DELAY_MS);
+
+  try {
+    const repairResult = await repairMinecraftLaunchFailure(error, { minecraftDir, versionId });
+    const messages = uniqueStrings(repairResult.messages || []);
+    logger.warn('Minecraft crash was analyzed after process exit', {
+      code,
+      signal,
+      minecraftDir,
+      versionId,
+      repaired: repairResult.repaired,
+      messages
+    });
+    sendMinecraftLifecycleEvent('minecraft-crash-repaired', {
+      code,
+      signal,
+      repaired: Boolean(repairResult.repaired),
+      messages,
+      completedAt: new Date().toISOString()
+    }, sourceWindow);
+    return { repaired: Boolean(repairResult.repaired), messages };
+  } catch (repairError) {
+    const message = `Automatische Absturz-Reparatur fehlgeschlagen: ${repairError.message}`;
+    logger.warn('Minecraft crash repair failed after process exit', {
+      code,
+      signal,
+      minecraftDir,
+      versionId,
+      error: serializeError(repairError)
+    });
+    sendMinecraftLifecycleEvent('minecraft-crash-repaired', {
+      code,
+      signal,
+      repaired: false,
+      messages: [message],
+      completedAt: new Date().toISOString()
+    }, sourceWindow);
+    return { repaired: false, messages: [message] };
+  }
 }
 
 function parseMissingFabricDependencies(diagnostics) {
@@ -3233,7 +3294,7 @@ function readTextTail(filePath, maxChars = 120000) {
   }
 }
 
-function repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error) {
+function repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error, minecraftDir = DEFAULT_MINECRAFT_DIR) {
   const text = `${diagnostics || ''}\n${error?.message || ''}`.toLowerCase();
   const shouldResetResourcePacks = /resource\s*pack|incompatibleresourcepacks|failed to load pack|pack\.mcmeta/u.test(text);
   const shouldResetShaders = /shader|opengl|glfw|render thread|could not create window|failed to create window/u.test(text);
@@ -3243,7 +3304,7 @@ function repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error) {
     return repairs;
   }
 
-  const optionsPath = path.join(DEFAULT_MINECRAFT_DIR, 'options.txt');
+  const optionsPath = path.join(minecraftDir, 'options.txt');
   if (fs.existsSync(optionsPath)) {
     try {
       const original = fs.readFileSync(optionsPath, 'utf8');
@@ -3269,7 +3330,7 @@ function repairMinecraftOptionsFromLaunchDiagnostics(diagnostics, error) {
     }
   }
 
-  const shaderOptionsPath = path.join(DEFAULT_MINECRAFT_DIR, 'optionsshaders.txt');
+  const shaderOptionsPath = path.join(minecraftDir, 'optionsshaders.txt');
   if (shouldResetShaders && fs.existsSync(shaderOptionsPath)) {
     try {
       const original = fs.readFileSync(shaderOptionsPath, 'utf8');
@@ -3309,6 +3370,16 @@ function disableKnownCrashModsLocally(modContext, diagnostics) {
       id: 'krypton',
       match: ['krypton.mixins.json', 'from mod krypton', 'mod krypton'],
       filePatterns: [/^krypton.*\.jar$/iu]
+    },
+    {
+      id: 'grand-teleport-sodium',
+      match: [
+        'gtalike_teleport.mixins.json:sodiumdefaultchunkrenderermixin',
+        'from mod gtalike_teleport',
+        'mod gtalike_teleport',
+        'invalid descriptor on gtalike_teleport'
+      ],
+      filePatterns: [/^(?:grand-teleport|gtalike[_-]teleport).*\.jar$/iu]
     }
   ];
   const disabled = [];
@@ -4135,6 +4206,7 @@ function readPacksState() {
 }
 
 function writePacksState(state) {
+  packsConfigCache = null;
   ensurePacksState();
   const normalizedState = normalizePacksState(state);
   ROBUSTNESS.writeJsonFileAtomic(PACKS_STATE_FILE, {
@@ -4517,8 +4589,12 @@ async function ensureStandardLauncherUpdatedForLaunch() {
 }
 
 function getPacksConfig() {
+  const now = Date.now();
+  if (packsConfigCache && now - packsConfigCache.createdAt < 750) {
+    return packsConfigCache.value;
+  }
   const state = readPacksState();
-  return {
+  const value = {
     success: true,
     settingsClipboardAvailable: listSafeSettingsFiles(PROFILE_SETTINGS_CLIPBOARD_DIR).length > 0,
     standardVersionId: getSelectedVersionId(),
@@ -4527,6 +4603,8 @@ function getPacksConfig() {
       .slice()
       .sort((left, right) => getVersionTimestamp(right.updatedAt) - getVersionTimestamp(left.updatedAt))
   };
+  packsConfigCache = { createdAt: now, value };
+  return value;
 }
 
 async function createPack(name, versionId) {

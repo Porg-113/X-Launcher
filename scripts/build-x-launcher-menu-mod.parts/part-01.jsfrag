@@ -1,0 +1,4543 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const PROJECT_ROOT = path.join(__dirname, '..');
+const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'x-launcher-menu');
+const OUTPUT_DIR = path.join(PROJECT_ROOT, 'assets', 'required-mods');
+const MINECRAFT_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '.minecraft');
+const LIBRARIES_DIR = path.join(MINECRAFT_DIR, 'libraries');
+const VERSIONS_DIR = path.join(MINECRAFT_DIR, 'versions');
+const MOD_VERSION = '1.0.153';
+const MOD_ICON_SOURCE = path.join(PROJECT_ROOT, 'icons', 'icon.png');
+const MOD_MENU_BACKGROUND_SOURCE = path.join(PROJECT_ROOT, 'assets', 'x-client', 'menu-blur.png');
+const MOD_FAVORITE_ICON_SOURCE = path.join(PROJECT_ROOT, 'assets', 'x-client', 'icons', 'favorite-star.png');
+const MOD_PICTURES_ICON_SOURCE = path.join(PROJECT_ROOT, 'assets', 'x-client', 'icons', 'pictures-square.png');
+const MOD_KEY_SOUND_SOURCE = path.join(PROJECT_ROOT, 'assets', 'sounds', 'typersguild');
+const FFMPEG_PATH = path.join(PROJECT_ROOT, 'build', 'ffmpeg-tool', 'package', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+
+function ensureDir(targetPath) {
+  fs.mkdirSync(targetPath, { recursive: true });
+}
+
+function writeFile(filePath, content) {
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, content.replace(/\r?\n/g, '\n'), 'utf8');
+}
+
+function removeDir(targetPath) {
+  fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
+function removeFile(targetPath) {
+  fs.rmSync(targetPath, { force: true });
+}
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd || PROJECT_ROOT,
+    stdio: 'inherit',
+    shell: false
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} failed with exit code ${result.status}`);
+  }
+}
+
+function collectFiles(dir, extension) {
+  const result = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      result.push(...collectFiles(fullPath, extension));
+    } else if (entry.isFile() && entry.name.endsWith(extension)) {
+      result.push(fullPath);
+    }
+  }
+  return result;
+}
+
+function writeArgFile(filePath, args) {
+  const lines = args.map((arg) => `"${String(arg).replace(/\\/g, '/')}"`);
+  writeFile(filePath, `${lines.join('\n')}\n`);
+  return filePath;
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function mavenNameToPath(name) {
+  const [groupId, artifactId, version] = String(name || '').split(':');
+  if (!groupId || !artifactId || !version) {
+    return '';
+  }
+  return path.join(LIBRARIES_DIR, ...groupId.split('.'), artifactId, version, `${artifactId}-${version}.jar`);
+}
+
+function resolveLibraryJar(library) {
+  const artifactPath = library?.downloads?.artifact?.path;
+  if (artifactPath) {
+    return path.join(LIBRARIES_DIR, artifactPath);
+  }
+  return mavenNameToPath(library?.name);
+}
+
+function getVersionClasspath(versionId) {
+  const versionJsonPath = path.join(VERSIONS_DIR, versionId, `${versionId}.json`);
+  const versionJarPath = path.join(VERSIONS_DIR, versionId, `${versionId}.jar`);
+  if (!fs.existsSync(versionJsonPath) || !fs.existsSync(versionJarPath)) {
+    throw new Error(`Minecraft ${versionId} is not installed in ${VERSIONS_DIR}`);
+  }
+
+  const versionJson = readJson(versionJsonPath);
+  const classpath = [versionJarPath];
+  for (const library of versionJson.libraries || []) {
+    const jarPath = resolveLibraryJar(library);
+    if (jarPath && fs.existsSync(jarPath)) {
+      classpath.push(jarPath);
+    }
+  }
+  classpath.push(findLatestFabricLoaderJar());
+  return Array.from(new Set(classpath));
+}
+
+function compareVersionLabels(left, right) {
+  const leftParts = String(left || '').split(/[^0-9]+/).filter(Boolean).map(Number);
+  const rightParts = String(right || '').split(/[^0-9]+/).filter(Boolean).map(Number);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (diff) {
+      return diff;
+    }
+  }
+  return String(left || '').localeCompare(String(right || ''), undefined, { numeric: true });
+}
+
+function findLatestFabricLoaderJar() {
+  const loaderRoot = path.join(LIBRARIES_DIR, 'net', 'fabricmc', 'fabric-loader');
+  if (!fs.existsSync(loaderRoot)) {
+    throw new Error(`Fabric Loader library not found: ${loaderRoot}`);
+  }
+
+  const versions = fs.readdirSync(loaderRoot)
+    .filter((entry) => fs.existsSync(path.join(loaderRoot, entry, `fabric-loader-${entry}.jar`)))
+    .sort(compareVersionLabels);
+  const latest = versions[versions.length - 1];
+  if (!latest) {
+    throw new Error(`No Fabric Loader JAR found in ${loaderRoot}`);
+  }
+  return path.join(loaderRoot, latest, `fabric-loader-${latest}.jar`);
+}
+
+function compileJava(sourceDir, classDir, classpath) {
+  ensureDir(classDir);
+  const sources = collectFiles(sourceDir, '.java');
+  const argFile = writeArgFile(path.join(classDir, 'sources.args'), sources);
+  const args = [
+    '--release',
+    '21',
+    '-encoding',
+    'UTF-8'
+  ];
+  if (classpath.length > 0) {
+    args.push('-cp', classpath.join(path.delimiter));
+  }
+  args.push('-d', classDir, `@${argFile}`);
+  run('javac', args);
+}
+
+function compileJavaFromSourceDirs(sourceDirs, classDir, classpath = []) {
+  ensureDir(classDir);
+  const sources = sourceDirs.flatMap((sourceDir) => collectFiles(sourceDir, '.java'));
+  const argFile = writeArgFile(path.join(classDir, 'sources.args'), sources);
+  const args = [
+    '--release',
+    '21',
+    '-encoding',
+    'UTF-8'
+  ];
+  if (classpath.length > 0) {
+    args.push('-cp', classpath.join(path.delimiter));
+  }
+  args.push('-d',
+    classDir,
+    `@${argFile}`);
+  run('javac', args);
+}
+
+function getFabricApiClasspath(workDir) {
+  const modsDir = path.join(MINECRAFT_DIR, 'mods');
+  const fabricApi = fs.existsSync(modsDir)
+    ? fs.readdirSync(modsDir).filter((name) => /^fabric-api-.*26\.2.*\.jar$/i.test(name)).sort().pop()
+    : '';
+  if (!fabricApi) {
+    throw new Error('Fabric API for Minecraft 26.2 is not installed.');
+  }
+  const dependencyDir = path.join(workDir, 'fabric-api-dependencies');
+  ensureDir(dependencyDir);
+  run('jar', ['--extract', '--file', path.join(modsDir, fabricApi)], { cwd: dependencyDir });
+  return collectFiles(path.join(dependencyDir, 'META-INF', 'jars'), '.jar');
+}
+
+function packageJar(outputPath, classDir, resourcesDir) {
+  ensureDir(path.dirname(outputPath));
+  const args = ['--create', '--file', outputPath, '-C', classDir, '.'];
+  if (fs.existsSync(resourcesDir)) {
+    args.push('-C', resourcesDir, '.');
+  }
+  run('jar', args);
+}
+
+function manifestFor(dependsMinecraft, entrypointClass) {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    id: 'x-client',
+    version: MOD_VERSION,
+    name: 'X Client',
+    description: 'X Client menu with server-authorized admin tools.',
+    authors: ['X Client'],
+    icon: 'assets/x-client/icon.png',
+    environment: '*',
+    entrypoints: {
+      main: ['dev.xlauncher.client.XAdminFlightServer'],
+      client: [entrypointClass]
+    },
+    mixins: [
+      'x-client.mixins.json'
+    ],
+    depends: {
+      fabricloader: '>=0.18.0',
+      'fabric-lifecycle-events-v1': '*',
+      'fabric-networking-api-v1': '*',
+      'fabric-rendering-v1': '*',
+      minecraft: dependsMinecraft,
+      java: '>=21'
+    }
+  }, null, 2)}\n`;
+}
+
+function writeCommonResources(resourcesDir, dependsMinecraft, entrypointClass) {
+  writeFile(path.join(resourcesDir, 'fabric.mod.json'), manifestFor(dependsMinecraft, entrypointClass));
+  writeFile(path.join(resourcesDir, 'x-client.mixins.json'), `${JSON.stringify({
+    required: false,
+    package: 'dev.xlauncher.client.mixin',
+    compatibilityLevel: 'JAVA_21',
+    client: [
+      'XLauncherGammaValidationMixin',
+      'XLauncherFullbrightMixin',
+      'XLauncherLightmapStateMixin',
+      'XLauncherClientNightVisionMixin',
+      'XLauncherTimerScreenMixin',
+      'XLauncherLoginDisconnectMixin',
+      'XLauncherPlayDisconnectMixin',
+      'XLauncherTitleCopyrightMixin',
+      'XLauncherBlockOutlineMixin',
+      'XLauncherFriendsKeyMixin',
+      'XLauncherKeyboardMixin',
+      'XLauncherPauseScreenMixin',
+      'XLauncherSoundEngineMixin',
+      'XLauncherAttributeModifierSafetyMixin',
+      'XLauncherPlayerSkinMixin',
+      'XLauncherCapeLayerDebugMixin',
+      'XLauncherWingsLayerMixin',
+      'XLauncherOwnNameMixin',
+      'XLauncherOwnNamePrefixMixin',
+      'XLauncherCameraMixin',
+      'XLauncherFreecamMouseMixin',
+      'XLauncherWorldDataMixin',
+      'XLauncherRenderDistanceMixin'
+    ],
+    injectors: {
+      defaultRequire: 0
+    }
+  }, null, 2)}\n`);
+  writeFile(path.join(resourcesDir, 'assets', 'x-client', 'lang', 'en_us.json'), `${JSON.stringify({
+    'key.category.x-client.keybinds': 'X Client',
+    'key.xclient.menu': 'Open Menu',
+    'key.xclient.sprint': 'Sprint',
+    'key.xclient.nobob': 'NoBob',
+    'key.xclient.bright': 'Fullbright',
+    'key.xclient.zoom': 'Zoom',
+    'key.xclient.freecam': 'Free Cam',
+    'key.xclient.flight': 'Admin Flight',
+    'key.xclient.blockoutline': 'Block Outline',
+    'key.xclient.xray': 'Xray',
+    'key.xclient.mobtrack': 'MobTrack',
+    'key.xclient.autohit': 'Auto-Hit',
+    'key.xclient.atribute': 'Atribute',
+    'key.xclient.sounddisplay': 'Sound Display',
+    'key.xclient.speed': 'Speed',
+    'key.xclient.resistance': 'Resistance',
+    'key.xclient.invisibility': 'Invisibility',
+    'key.xclient.fps': 'FPS',
+    'key.xclient.fakefps': 'Fake FPS',
+    'key.xclient.coords': 'Coords',
+    'key.xclient.nethercoords': 'Nether Coords',
+    'key.xclient.direction': 'Direction & Biome',
+    'key.xclient.keys': 'Keys Overlay',
+    'key.xclient.cps': 'CPS',
+    'key.xclient.armor': 'Armor Status',
+    'key.xclient.inventory': 'Inventory HUD',
+    'key.xclient.combo': 'Combo Counter',
+    'key.xclient.session': 'Session Stats',
+    'key.xclient.crosshair': 'Crosshair',
+    'key.xclient.clock': 'Clock',
+    'key.xclient.timer': 'Timer',
+    'key.xclient.smartscreenshot': 'Smart Screenshot',
+    'key.xclient.code': 'Code',
+    'key.xclient.ui': 'UI Editor'
+  }, null, 2)}\n`);
+  writeFile(path.join(resourcesDir, 'assets', 'x-client', 'lang', 'de_de.json'), `${JSON.stringify({
+    'key.category.x-client.keybinds': 'X Client',
+    'key.xclient.menu': 'Menü öffnen',
+    'key.xclient.zoom': 'Zoom',
+    'key.xclient.sprint': 'Sprint',
+    'key.xclient.nobob': 'NoBob',
+    'key.xclient.bright': 'Fullbright',
+    'key.xclient.flight': 'Admin Flight',
+    'key.xclient.xray': 'Xray',
+    'key.xclient.mobtrack': 'MobTrack',
+    'key.xclient.autohit': 'Auto-Hit',
+    'key.xclient.atribute': 'Atribute',
+    'key.xclient.sounddisplay': 'Sound Display',
+    'key.xclient.speed': 'Speed',
+    'key.xclient.resistance': 'Resistance',
+    'key.xclient.invisibility': 'Invisibility',
+    'key.xclient.fps': 'FPS',
+    'key.xclient.fakefps': 'Fake FPS',
+    'key.xclient.coords': 'Koordinaten',
+    'key.xclient.nethercoords': 'Nether Coords',
+    'key.xclient.direction': 'Richtung & Biom',
+    'key.xclient.keys': 'Keystrokes',
+    'key.xclient.cps': 'CPS',
+    'key.xclient.armor': 'Armor Status',
+    'key.xclient.inventory': 'Inventar HUD',
+    'key.xclient.combo': 'Combo-Zähler',
+    'key.xclient.session': 'Sitzungsstatistik',
+    'key.xclient.crosshair': 'Crosshair',
+    'key.xclient.clock': 'Clock',
+    'key.xclient.timer': 'Timer',
+    'key.xclient.smartscreenshot': 'Smart Screenshot',
+    'key.xclient.code': 'Code',
+    'key.xclient.ui': 'UI Editor'
+  }, null, 2)}\n`);
+  const iconTarget = path.join(resourcesDir, 'assets', 'x-client', 'icon.png');
+  if (fs.existsSync(MOD_ICON_SOURCE)) {
+    ensureDir(path.dirname(iconTarget));
+    fs.copyFileSync(MOD_ICON_SOURCE, iconTarget);
+  }
+  const backgroundTarget = path.join(resourcesDir, 'assets', 'x-client', 'textures', 'gui', 'menu_blur.png');
+  if (fs.existsSync(MOD_MENU_BACKGROUND_SOURCE)) {
+    ensureDir(path.dirname(backgroundTarget));
+    fs.copyFileSync(MOD_MENU_BACKGROUND_SOURCE, backgroundTarget);
+  }
+  for (const [source, fileName] of [
+    [MOD_FAVORITE_ICON_SOURCE, 'favorite_star.png'],
+    [MOD_PICTURES_ICON_SOURCE, 'pictures_square.png']
+  ]) {
+    if (!fs.existsSync(source)) continue;
+    const target = path.join(resourcesDir, 'assets', 'x-client', 'textures', 'gui', fileName);
+    ensureDir(path.dirname(target));
+    fs.copyFileSync(source, target);
+  }
+  const keySoundNames = ['alpaca', 'blackink', 'bluealps', 'boxnavy', 'cream', 'holypanda', 'mxblack', 'mxblue', 'mxbrown', 'redink', 'topre', 'turquoise'];
+  const soundDefinitions = {};
+  for (let index = 0; index < keySoundNames.length; index += 1) {
+    const name = keySoundNames[index];
+    const source = path.join(MOD_KEY_SOUND_SOURCE, `${name}.mp3`);
+    if (!fs.existsSync(source)) throw new Error(`Missing X Client key sound: ${source}`);
+    const target = path.join(resourcesDir, 'assets', 'x-client', 'sounds', 'keyboard', `${name}.ogg`);
+    ensureDir(path.dirname(target));
+    run(FFMPEG_PATH, ['-y', '-i', source, '-acodec', 'libvorbis', '-q:a', '5', target]);
+    soundDefinitions[`keyboard.${index + 1}`] = { sounds: [`x-client:keyboard/${name}`] };
+  }
+  writeFile(path.join(resourcesDir, 'assets', 'x-client', 'sounds.json'), `${JSON.stringify(soundDefinitions, null, 2)}\n`);
+}
+
+const commonSources = {
+  'dev/xlauncher/client/XAdminFlightProtocol.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
+
+public final class XAdminFlightProtocol {
+  public static final CustomPacketPayload.Type<FlightRequest> REQUEST_TYPE =
+      new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("x-client", "admin_flight_request"));
+  public static final CustomPacketPayload.Type<FlightAuthorization> AUTHORIZATION_TYPE =
+      new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("x-client", "admin_flight_authorization"));
+  public static final StreamCodec<RegistryFriendlyByteBuf, FlightRequest> REQUEST_CODEC = StreamCodec.composite(
+      ByteBufCodecs.BOOL, FlightRequest::enable, FlightRequest::new);
+  public static final StreamCodec<RegistryFriendlyByteBuf, FlightAuthorization> AUTHORIZATION_CODEC = StreamCodec.composite(
+      ByteBufCodecs.BOOL, FlightAuthorization::authorized, FlightAuthorization::new);
+
+  private XAdminFlightProtocol() {}
+
+  public record FlightRequest(boolean enable) implements CustomPacketPayload {
+    @Override public Type<? extends CustomPacketPayload> type() { return REQUEST_TYPE; }
+  }
+
+  public record FlightAuthorization(boolean authorized) implements CustomPacketPayload {
+    @Override public Type<? extends CustomPacketPayload> type() { return AUTHORIZATION_TYPE; }
+  }
+}
+`,
+  'dev/xlauncher/client/XAdminFlightServer.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.level.ServerPlayer;
+
+public final class XAdminFlightServer implements ModInitializer {
+  private static final Path FLIGHT_PERMISSION_FILE = FabricLoader.getInstance().getConfigDir().resolve("x-client-flight-players.txt");
+  private static final Set<UUID> AUTHORIZED = new HashSet<>();
+  private static final Map<UUID, Boolean> ORIGINAL_MAYFLY = new HashMap<>();
+  private static final Map<UUID, Boolean> ORIGINAL_FLYING = new HashMap<>();
+
+  @Override
+  public void onInitialize() {
+    PayloadTypeRegistry.serverboundPlay().register(XAdminFlightProtocol.REQUEST_TYPE, XAdminFlightProtocol.REQUEST_CODEC);
+    PayloadTypeRegistry.clientboundPlay().register(XAdminFlightProtocol.AUTHORIZATION_TYPE, XAdminFlightProtocol.AUTHORIZATION_CODEC);
+    ServerPlayNetworking.registerGlobalReceiver(XAdminFlightProtocol.REQUEST_TYPE, (payload, context) ->
+        context.server().execute(() -> handleRequest(context.server(), context.player(), payload.enable())));
+    ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> revoke(handler.player));
+  }
+
+  private static void handleRequest(net.minecraft.server.MinecraftServer server, ServerPlayer player, boolean enable) {
+    if (player == null) {
+        return;
+    }
+
+    UUID uuid = player.getUUID();
+
+    if (!enable) {
+        revoke(player);
+        ServerPlayNetworking.send(
+            player,
+            new XAdminFlightProtocol.FlightAuthorization(false)
+        );
+        return;
+    }
+
+    if (!isFlightAuthorized(server, uuid)) {
+        ServerPlayNetworking.send(
+            player,
+            new XAdminFlightProtocol.FlightAuthorization(false)
+        );
+        return;
+    }
+
+    ORIGINAL_MAYFLY.putIfAbsent(uuid, player.getAbilities().mayfly);
+    ORIGINAL_FLYING.putIfAbsent(uuid, player.getAbilities().flying);
+
+    AUTHORIZED.add(uuid);
+
+    player.getAbilities().mayfly = true;
+    player.getAbilities().flying = true;
+    player.onUpdateAbilities();
+
+    ServerPlayNetworking.send(
+        player,
+        new XAdminFlightProtocol.FlightAuthorization(true)
+    );
+}
+
+  private static void revoke(ServerPlayer player) {
+    if (player == null) return;
+    UUID uuid = player.getUUID();
+    if (!AUTHORIZED.remove(uuid)) return;
+    boolean original = ORIGINAL_MAYFLY.remove(uuid) == Boolean.TRUE;
+    boolean originalFlying = ORIGINAL_FLYING.remove(uuid) == Boolean.TRUE;
+    player.getAbilities().flying = originalFlying;
+    player.getAbilities().mayfly = original;
+    player.resetFallDistance();
+    player.onUpdateAbilities();
+  }
+
+  private static boolean isFlightAuthorized(net.minecraft.server.MinecraftServer server, UUID uuid) {
+    if (!server.isDedicatedServer()
+        && server.getSingleplayerProfile() != null
+      && uuid.equals(server.getSingleplayerProfile().id())) {
+      return true;
+    }
+    try {
+      if (!Files.exists(FLIGHT_PERMISSION_FILE)) return false;
+      String expected = uuid.toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
+      for (String rawLine : Files.readAllLines(FLIGHT_PERMISSION_FILE, StandardCharsets.UTF_8)) {
+        String line = rawLine.trim();
+        if (line.isEmpty() || line.startsWith("#")) continue;
+        String configured = line.replace("-", "").toUpperCase(java.util.Locale.ROOT);
+        if (expected.equals(configured)) return true;
+      }
+    } catch (IOException ignored) {
+      return false;
+    }
+    return false;
+  }
+}
+`,
+  'dev/xlauncher/client/AdminFlightModule.java': String.raw`
+package dev.xlauncher.client;
+
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Abilities;
+import net.minecraft.world.phys.Vec3;
+
+final class AdminFlightModule {
+  private static Object sessionLevel;
+  private static boolean requested;
+  private static boolean authorized;
+  private static boolean applied;
+  private static boolean originalMayfly;
+  private static boolean originalFlying;
+  private static float originalFlyingSpeed;
+
+  private AdminFlightModule() {}
+
+  static void register() {
+    ClientPlayNetworking.registerGlobalReceiver(XAdminFlightProtocol.AUTHORIZATION_TYPE, (payload, context) ->
+        context.client().execute(() -> acceptAuthorization(context.client(), payload.authorized())));
+  }
+
+  static void tick(Minecraft client) {
+    if (client.level != sessionLevel) {
+      disable(client, false);
+      sessionLevel = client.level;
+      requested = false;
+      authorized = false;
+    }
+    LocalPlayer player = client.player;
+    boolean selected = MenuModules.enabled("flight");
+    if (player == null || client.level == null || !selected) {
+      disable(client, selected);
+      return;
+    }
+    if (!authorized) {
+      if (!requested && ClientPlayNetworking.canSend(XAdminFlightProtocol.REQUEST_TYPE)) {
+        requested = true;
+        ClientPlayNetworking.send(new XAdminFlightProtocol.FlightRequest(true));
+      }
+      return;
+    }
+    if (!applied) {
+      Abilities abilities = player.getAbilities();
+      originalMayfly = abilities.mayfly;
+      originalFlying = abilities.flying;
+      originalFlyingSpeed = abilities.getFlyingSpeed();
+      abilities.mayfly = true;
+      abilities.flying = true;
+      player.onUpdateAbilities();
+      applied = true;
+      notify(player, "X Client Flight: ON");
+    }
+    applyMovement(client, player);
+  }
+
+  static void moduleChanged(Minecraft client, boolean enabled) {
+    if (!enabled) disable(client, true);
+  }
+
+  private static void acceptAuthorization(Minecraft client, boolean value) {
+    authorized = value;
+    if (!value) rejectConfiguredModule(client, "X Client Flight authorization denied");
+  }
+
+  private static void applyMovement(Minecraft client, LocalPlayer player) {
+    double forward = (client.options.keyUp.isDown() ? 1.0D : 0.0D) - (client.options.keyDown.isDown() ? 1.0D : 0.0D);
+    double strafe = (client.options.keyRight.isDown() ? 1.0D : 0.0D) - (client.options.keyLeft.isDown() ? 1.0D : 0.0D);
+    double vertical = (client.options.keyJump.isDown() ? 1.0D : 0.0D) - (client.options.keyShift.isDown() ? 1.0D : 0.0D);
+    double length = Math.sqrt((forward * forward) + (strafe * strafe));
+    if (length > 1.0D) { forward /= length; strafe /= length; }
+    double yaw = Math.toRadians(player.getYRot());
+    double speed = MenuModules.flightSpeedBlocksPerTick();
+    double x = ((-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe)) * speed;
+    double z = ((Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe)) * speed;
+    player.setDeltaMovement(new Vec3(x, vertical * speed, z));
+    player.fallDistance = 0.0D;
+    player.getAbilities().mayfly = true;
+    player.getAbilities().flying = true;
+  }
+
+  private static void rejectConfiguredModule(Minecraft client, String reason) {
+    MenuModules.setEnabledById("flight", false);
+    disable(client, false);
+    if (client.player != null) notify(client.player, "X Client Flight: OFF (" + reason + ")");
+  }
+
+  private static void disable(Minecraft client, boolean notifyOff) {
+    if (requested && client.player != null && ClientPlayNetworking.canSend(XAdminFlightProtocol.REQUEST_TYPE)) {
+      ClientPlayNetworking.send(new XAdminFlightProtocol.FlightRequest(false));
+    }
+    requested = false;
+    authorized = false;
+    LocalPlayer player = client.player;
+    if (applied && player != null) {
+      Abilities abilities = player.getAbilities();
+      abilities.flying = originalFlying;
+      abilities.mayfly = originalMayfly;
+      abilities.setFlyingSpeed(originalFlyingSpeed);
+      player.setDeltaMovement(Vec3.ZERO);
+      player.fallDistance = 0.0D;
+      player.onUpdateAbilities();
+      if (notifyOff) notify(player, "X Client Flight: OFF");
+    }
+    applied = false;
+  }
+
+  private static void notify(LocalPlayer player, String message) {
+    player.sendOverlayMessage(Component.literal(message));
+  }
+}
+`,
+  'dev/xlauncher/client/XClientColorModes.java': String.raw`
+package dev.xlauncher.client;
+
+import java.awt.Color;
+import java.util.prefs.Preferences;
+
+public final class XClientColorModes {
+  public static final int MIN_OPACITY = 48;
+  private static final Preferences PREFS = Preferences.userNodeForPackage(XClientColorModes.class);
+
+  private XClientColorModes() {}
+
+  public static int resolve(String target, int fallback) {
+    String key = safe(target);
+    int alpha = opacity(target);
+    if (PREFS.getBoolean(key + ".rainbow", false)) {
+      float hue = (System.currentTimeMillis() % 6000L) / 6000.0F;
+      return (alpha << 24) | (Color.HSBtoRGB(hue, 0.88F, 1.0F) & 0xFFFFFF);
+    }
+    return (alpha << 24) | (PREFS.getInt(key + ".color", fallback) & 0xFFFFFF);
+  }
+
+  public static int staticColor(String target, int fallback) {
+    return PREFS.getInt(safe(target) + ".color", fallback) & 0xFFFFFF;
+  }
+
+  public static void setColor(String target, int rgb) {
+    String key = safe(target);
+    PREFS.putInt(key + ".color", rgb & 0xFFFFFF);
+    PREFS.putBoolean(key + ".rainbow", false);
+  }
+
+  public static boolean rainbow(String target) {
+    return PREFS.getBoolean(safe(target) + ".rainbow", false);
+  }
+
+  public static void setRainbow(String target, boolean enabled) {
+    PREFS.putBoolean(safe(target) + ".rainbow", enabled);
+  }
+
+  public static int opacity(String target) {
+    return Math.max(MIN_OPACITY, Math.min(255, PREFS.getInt(safe(target) + ".opacity", 255)));
+  }
+
+  public static void setOpacity(String target, int value) {
+    PREFS.putInt(safe(target) + ".opacity", Math.max(MIN_OPACITY, Math.min(255, value)));
+  }
+
+  public static boolean option(String target, boolean fallback) {
+    return PREFS.getBoolean(safe(target) + ".option", fallback);
+  }
+
+  public static void setOption(String target, boolean enabled) {
+    PREFS.putBoolean(safe(target) + ".option", enabled);
+  }
+
+  private static String safe(String target) {
+    return String.valueOf(target == null ? "color" : target).replaceAll("[^a-zA-Z0-9_.-]", "_");
+  }
+}
+`,
+  'dev/xlauncher/client/NameTagSettings.java': String.raw`
+package dev.xlauncher.client;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import net.minecraft.client.Minecraft;
+
+public final class NameTagSettings {
+  public static final int[] COLORS = {
+      0xFFFFFF, 0x55FFFF, 0x55FF55, 0xFFFF55,
+      0xFFAA00, 0xFF5555, 0xFF55FF, 0xAA55FF
+  };
+  private static int color = 0xFFFFFF;
+  private static boolean loaded;
+
+  private NameTagSettings() {
+  }
+
+  public static synchronized int color() {
+    load();
+    return XClientColorModes.resolve("nametag", color) & 0xFFFFFF;
+  }
+
+  public static synchronized void setColor(int rgb) {
+    color = rgb & 0xFFFFFF;
+    loaded = true;
+    try {
+      Path file = file();
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, String.format(java.util.Locale.ROOT, "%06X", color), StandardCharsets.UTF_8);
+    } catch (Throwable ignored) {
+      // The selected color remains active for this session if persistence fails.
+    }
+  }
+
+  private static void load() {
+    if (loaded) return;
+    loaded = true;
+    try {
+      String value = Files.readString(file(), StandardCharsets.UTF_8).trim();
+      if (value.matches("[0-9a-fA-F]{6}")) color = Integer.parseInt(value, 16);
+    } catch (Throwable ignored) {
+      color = 0xFFFFFF;
+    }
+  }
+
+  private static Path file() {
+    return Minecraft.getInstance().gameDirectory.toPath().resolve("config").resolve("x-client-name-color.txt");
+  }
+}
+`,
+  'dev/xlauncher/client/LauncherTheme.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public final class LauncherTheme {
+  private static final Pattern PRIMARY_COLOR_PATTERN = Pattern.compile("\"primaryColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern HIGHLIGHT_COLOR_PATTERN = Pattern.compile("\"highlightColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern PANEL_COLOR_PATTERN = Pattern.compile("\"panelColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern BUTTON_COLOR_PATTERN = Pattern.compile("\"buttonColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern BORDER_COLOR_PATTERN = Pattern.compile("\"borderColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern HOVER_COLOR_PATTERN = Pattern.compile("\"hoverColor\"\\s*:\\s*\"(#[0-9a-fA-F]{6})\"");
+  private static final Pattern APPEARANCE_MODE_PATTERN = Pattern.compile("\"appearanceMode\"\\s*:\\s*\"(light|dark)\"");
+  private static final int DEFAULT_ACCENT = 0x00D9FF;
+  private static final String DEFAULT_APPEARANCE_MODE = "dark";
+  // Theme files are launcher state, not frame state. Polling the filesystem at
+  // refresh rate causes avoidable I/O jitter, especially on synced folders.
+  private static final long CHECK_INTERVAL_MS = 1000L;
+  private static long lastCheckMs;
+  private static long lastLiveModifiedMs = -2L;
+  private static long lastConfigModifiedMs = -2L;
+  private static boolean lastSourceWasLive;
+  private static int accent = DEFAULT_ACCENT;
+  private static int highlight = 0x78B8FF;
+  private static int panel = 0x111A26;
+  private static int button = 0x182536;
+  private static int border = 0x34475D;
+  private static int hover = 0x22354B;
+  private static String appearanceMode = DEFAULT_APPEARANCE_MODE;
+
+  private LauncherTheme() {
+  }
+
+  public static int accent() {
+    return accent;
+  }
+
+  static int secondColor() {
+    return panel;
+  }
+
+  static int highlightArgb(int alpha) { return rawArgb(alpha, highlight); }
+  static int buttonArgb(int alpha) { return rawArgb(alpha, button); }
+  static int borderArgb(int alpha) { return rawArgb(alpha, border); }
+  static int hoverArgb(int alpha) { return rawArgb(alpha, hover); }
+
+  static int argb(int alpha, int rgb) {
+    refresh();
+    return ((alpha & 0xFF) << 24) | themeRgb(rgb);
+  }
+
+  static int accentArgb(int alpha) {
+    return rawArgb(alpha, accent());
+  }
+
+  static int secondArgb(int alpha) {
+    return rawArgb(alpha, secondColor());
+  }
+
+  static int rawArgb(int alpha, int rgb) {
+    return ((alpha & 0xFF) << 24) | (rgb & 0xFFFFFF);
+  }
+
+  static int textColor() {
+    return 0xFFFFFFFF;
+  }
+
+  static int mutedTextColor() {
+    return 0xFFFFFFFF;
+  }
+
+  static int accentTextColor() {
+    return 0xFF000000 | accent();
+  }
+
+  static int textOnAccentColor() {
+    int color = accent();
+    int red = (color >> 16) & 0xFF;
+    int green = (color >> 8) & 0xFF;
+    int blue = color & 0xFF;
+    int luminance = (red * 299) + (green * 587) + (blue * 114);
+    return luminance >= 150000 ? 0xFF050708 : 0xFFFFFFFF;
+  }
+
+  static boolean isLightMode() {
+    refresh();
+    return isLightModeNow();
+  }
+
+  static void toggleAppearanceMode() {
+    setAppearanceMode("dark");
+  }
+
+  static int pixelIconColor() {
+    return 0xFF000000 | accent();
+  }
+
+  static int pixelIconAltColor() {
+    return 0xFF000000;
+  }
+
+  private static void refresh() {
+    long now = System.currentTimeMillis();
+    if (now - lastCheckMs < CHECK_INTERVAL_MS) {
+      return;
+    }
+    lastCheckMs = now;
+
+    Path liveThemePath = getLiveThemePath();
+    Path configPath = getConfigPath();
+    try {
+      if (Files.exists(liveThemePath)) {
+        long liveModified = Files.getLastModifiedTime(liveThemePath).toMillis();
+        if (lastSourceWasLive && liveModified == lastLiveModifiedMs) {
+          return;
+        }
+        String liveConfig = Files.readString(liveThemePath, StandardCharsets.UTF_8);
+        int liveAccent = readAccent(liveConfig);
+        if (liveAccent >= 0) {
+          lastSourceWasLive = true;
+          lastLiveModifiedMs = liveModified;
+          accent = liveAccent;
+        }
+        readPalette(liveConfig);
+        appearanceMode = readAppearanceMode(liveConfig, appearanceMode);
+        return;
+      }
+
+      long configModified = Files.exists(configPath) ? Files.getLastModifiedTime(configPath).toMillis() : -1L;
+      if (!lastSourceWasLive && configModified == lastConfigModifiedMs) {
+        return;
+      }
+      lastSourceWasLive = false;
+      lastConfigModifiedMs = configModified;
+      if (configModified < 0L) {
+        accent = DEFAULT_ACCENT;
+        appearanceMode = DEFAULT_APPEARANCE_MODE;
+        return;
+      }
+
+      String config = Files.readString(configPath, StandardCharsets.UTF_8);
+      int configAccent = readAccent(config);
+      accent = configAccent >= 0 ? configAccent : DEFAULT_ACCENT;
+      readPalette(config);
+      appearanceMode = readAppearanceMode(config, DEFAULT_APPEARANCE_MODE);
+    } catch (IOException | RuntimeException ignored) {
+      // Keep the last valid accent. The launcher may be updating the live file right now.
+    }
+  }
+
+  private static int readAccent(String config) {
+    Matcher matcher = PRIMARY_COLOR_PATTERN.matcher(config);
+    return matcher.find() ? parseHexColor(matcher.group(1)) : -1;
+  }
+
+  private static int readColor(Pattern pattern, String config, int fallback) {
+    Matcher matcher = pattern.matcher(config);
+    int value = matcher.find() ? parseHexColor(matcher.group(1)) : -1;
+    return value >= 0 ? value : fallback;
+  }
+
+  private static void readPalette(String config) {
+    highlight = readColor(HIGHLIGHT_COLOR_PATTERN, config, highlight);
+    panel = readColor(PANEL_COLOR_PATTERN, config, panel);
+    button = readColor(BUTTON_COLOR_PATTERN, config, button);
+    border = readColor(BORDER_COLOR_PATTERN, config, border);
+    hover = readColor(HOVER_COLOR_PATTERN, config, hover);
+  }
+
+  private static String readAppearanceMode(String config, String fallback) {
+    Matcher matcher = APPEARANCE_MODE_PATTERN.matcher(config);
+    return matcher.find() ? normalizeAppearanceMode(matcher.group(1)) : normalizeAppearanceMode(fallback);
+  }
+
+  private static boolean isLightModeNow() {
+    return "light".equals(appearanceMode);
+  }
+
+  private static int themeRgb(int rgb) {
+    int value = rgb & 0xFFFFFF;
+    int activeAccent = accent();
+    if (value == 0xFFFFFF || value == (activeAccent & 0xFFFFFF)) {
+      return value;
+    }
+    int red = (value >> 16) & 0xFF;
+    int green = (value >> 8) & 0xFF;
+    int blue = value & 0xFF;
+    int max = Math.max(red, Math.max(green, blue));
+    int min = Math.min(red, Math.min(green, blue));
+    if (max - min > 42 && max > 70) {
+      return value;
+    }
+    int accentValue = activeAccent & 0xFFFFFF;
+    int accentRed = (accentValue >> 16) & 0xFF;
+    int accentGreen = (accentValue >> 8) & 0xFF;
+    int accentBlue = accentValue & 0xFF;
+    if (isLightModeNow()) {
+      int level = Math.max(220, 252 - (max / 7));
+      red = ((level * 88) + (accentRed * 12)) / 100;
+      green = ((level * 88) + (accentGreen * 12)) / 100;
+      blue = ((level * 88) + (accentBlue * 12)) / 100;
+    } else {
+      red = ((red * 84) + (accentRed * 16)) / 100;
+      green = ((green * 84) + (accentGreen * 16)) / 100;
+      blue = ((blue * 84) + (accentBlue * 16)) / 100;
+    }
+    return (red << 16) | (green << 8) | blue;
+  }
+
+  private static void setAppearanceMode(String value) {
+    appearanceMode = normalizeAppearanceMode(value);
+    try {
+      writeThemeState();
+    } catch (IOException | RuntimeException ignored) {
+      // The menu still changes immediately in memory; the launcher will resync on the next successful write.
+    }
+  }
+
+  private static void writeThemeState() throws IOException {
+    Path liveThemePath = getLiveThemePath();
+    String mode = normalizeAppearanceMode(appearanceMode);
+    Files.createDirectories(liveThemePath.getParent());
+    String color = String.format(java.util.Locale.ROOT, "#%06x", accent() & 0xFFFFFF);
+    Files.writeString(liveThemePath, "{\"primaryColor\":\"" + color + "\",\"appearanceMode\":\"" + mode
+        + "\",\"lightMode\":" + ("light".equals(mode) ? "true" : "false")
+        + ",\"updatedAt\":\"" + java.time.Instant.now().toString() + "\"}\n", StandardCharsets.UTF_8);
+    lastLiveModifiedMs = -2L;
+    lastConfigModifiedMs = -2L;
+  }
+
+  private static Path getConfigPath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "launcher-config.json");
+  }
+
+  private static Path getLiveThemePath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-launcher-theme.json");
+  }
+
+  private static int parseHexColor(String value) {
+    String normalized = value == null ? "" : value.trim();
+    if (normalized.startsWith("#")) {
+      normalized = normalized.substring(1);
+    }
+    if (!normalized.matches("[0-9a-fA-F]{6}")) {
+      return -1;
+    }
+    return Integer.parseInt(normalized, 16) & 0xFFFFFF;
+  }
+
+  private static String normalizeAppearanceMode(String value) {
+    return "light".equalsIgnoreCase(value) ? "light" : "dark";
+  }
+}
+`,
+  'dev/xlauncher/client/MenuModules.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+final class MenuModules {
+  private static final Pattern ENABLED_PATTERN = Pattern.compile("\"enabled\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+  private static final Pattern UNLOCKED_PATTERN = Pattern.compile("\"unlocked\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+  private static final Pattern FAVORITES_PATTERN = Pattern.compile("\"favorites\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+  private static final Pattern KEYS_PATTERN = Pattern.compile("\"keys\"\\s*:\\s*\\{(.*?)\\}", Pattern.DOTALL);
+  private static final Pattern KEY_MODIFIERS_PATTERN = Pattern.compile("\"keyModifiers\"\\s*:\\s*\\{(.*?)\\}", Pattern.DOTALL);
+  private static final Pattern LEVELS_PATTERN = Pattern.compile("\"levels\"\\s*:\\s*\\{(.*?)\\}", Pattern.DOTALL);
+  private static final Pattern ZOOM_STRENGTH_PATTERN = Pattern.compile("\"zoomStrength\"\\s*:\\s*(\\d+)");
+  private static final Pattern ZOOM_SMOOTHNESS_PATTERN = Pattern.compile("\"zoomSmoothness\"\\s*:\\s*(\\d+)");
+  private static final Pattern BREAK_SPEED_PATTERN = Pattern.compile("\"breakSpeed\"\\s*:\\s*(\\d+)");
+  private static final Pattern FLIGHT_SPEED_PATTERN = Pattern.compile("\"flightSpeed\"\\s*:\\s*(\\d+)");
+  private static final Pattern FAKE_FPS_PATTERN = Pattern.compile("\"fakeFps\"\\s*:\\s*(-?\\d+)");
+  private static final Pattern KEYBOARD_SOUND_PATTERN = Pattern.compile("\"keyboardSound\"\\s*:\\s*(\\d+)");
+  private static final Pattern KEYBOARD_VOLUME_PATTERN = Pattern.compile("\"keyboardVolume\"\\s*:\\s*(\\d+)");
+  private static final Pattern KEY_ENTRY_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*:\\s*(-?\\d+)");
+  private static final Pattern STRING_PATTERN = Pattern.compile("\"([^\"]+)\"");
+  private static final int MOD_SHIFT = 1;
+  private static final int MOD_CONTROL = 2;
+  private static final int MOD_ALT = 4;
+  private static final int MOD_SUPER = 8;
+  private static final int MODIFIER_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER;
+  static final int MIN_ZOOM_STRENGTH = 125;
+  static final int MAX_ZOOM_STRENGTH = 1200;
+  static final int MIN_ZOOM_SMOOTHNESS = 5;
+  static final int MAX_ZOOM_SMOOTHNESS = 100;
+  static final int MIN_BREAK_SPEED = 25;
+  static final int MAX_BREAK_SPEED = 800;
+  static final int MIN_FLIGHT_SPEED = 25;
+  static final int MAX_FLIGHT_SPEED = 500;
+  static final int MIN_KEYBOARD_VOLUME = 0;
+  static final int MAX_KEYBOARD_VOLUME = 100;
+  private static final int DEFAULT_ZOOM_STRENGTH = 300;
+  private static final int DEFAULT_ZOOM_SMOOTHNESS = 32;
+  private static final int DEFAULT_BREAK_SPEED = 100;
+  private static final int DEFAULT_FLIGHT_SPEED = 100;
+  private static final Set<String> unlocked = new LinkedHashSet<>();
+  private static final Set<String> favorites = new LinkedHashSet<>();
+  private static final Set<String> OWNER_ONLY_MODULES = Set.of("mobtrack", "xray", "autohit", "atribute", "flight");
+  private static boolean loaded;
+  private static int zoomStrength = DEFAULT_ZOOM_STRENGTH;
+  private static int zoomSmoothness = DEFAULT_ZOOM_SMOOTHNESS;
+  private static int breakSpeed = DEFAULT_BREAK_SPEED;
+  private static int flightSpeed = DEFAULT_FLIGHT_SPEED;
+  private static int fakeFps;
+  private static int keyboardSound = 1;
+  private static int keyboardVolume = 4;
+
+  static final Module[] MODULES = {
+      new Module("sprint", "Sprint", "Sprint", "Sprintet beim Vorwärtslaufen automatisch, ohne die Sprinttaste zu halten.", true, true),
+      new Module("bright", "Fullbright", "Fullbright", "Erhellt Höhlen clientseitig mit Gamma, Night Vision und Lightmap-Boost.", true, true),
+      new Module("zoom", "Zoom", "Zoom", "Verbindet den X-Client-Key mit Infinite Zoom. Mausrad-Zoom kommt direkt von Infinite Zoom.", true, true),
+      new Module("blockoutline", "Block Outline", "Outline", "Passt Farbe und Dicke der normalen Block-Markierung an.", true, false),
+      new Module("freecam", "Free Cam", "Freie Kamera", "Loest die Kamera lokal vom Spieler. WASD/Leertaste/Shift bewegen nur die Kamera; der Spieler bleibt am Server unveraendert.", true, true),
+      new Module("flight", "Admin Flight", "Authorized", "Server-authorized admin flight. Requires the X Admin Flight server companion and a server-granted UUID permission; WASD, Space and Shift control movement.", true, true),
+      new Module("xray", "Xray", "Erze", "Markiert ausgewaehlte Erze, Spawner, Spieler und Kisten aus bereits geladenen Server-Chunks. Reichweite und Ziele sind frei einstellbar.", true, true),
+      new Module("mobtrack", "MobTrack", "Target", "Keybind lockt Mob oder Spieler instant mit Höhe und gedämpftem Projektil-Vorhalten.", true, true, true),
+      new Module("autohit", "Auto-Hit", "Combat", "Greift Mobs oder Spieler im Fadenkreuz mit Vorwärtsimpuls und bei vollem Hit-Cooldown an.", true, true),
+      new Module("atribute", "Atribute", "Hotbar Hit", "Fuehrt beim Wechsel des ausgewaehlten Hotbar-Slots noch im selben Client-Tick einen normalen Linksklick aus.", true, true),
+      new Module("sounddisplay", "Sound Display", "Sounds", "Zeigt erkannte Spielgeräusche kurz und übersichtlich im HUD an.", true, false),
+      new Module("keysounds", "Key Sounds", "Keyboard", "Spielt bei jedem Tastendruck den ausgewählten mechanischen Tastatur-Sound ab.", true, false),
+      new Module("fps", "FPS", "Counter", "Zeigt deine aktuellen FPS oben links im HUD.", true, false),
+      new Module("fakefps", "Fake FPS", "FPS Bonus", "Addiert den eingestellten Wert zur FPS-Anzeige.", true, false),
+      new Module("coords", "Coords", "Coords", "Zeigt deine aktuelle X/Y/Z-Position im HUD.", true, false),
+      new Module("nethercoords", "Nether Coords", "Portal", "Zeigt in der Overworld die passenden Nether-Koordinaten und im Nether die passenden Overworld-Koordinaten.", true, false),
+      new Module("keys", "Keys", "Keys", "Zeigt WASD, Springen und Sneak live im HUD.", true, false),
+      new Module("cps", "CPS", "Clicks", "Zählt linke Mausklicks pro Sekunde im HUD.", true, false),
+      new Module("armor", "Armor Status", "Armor", "Zeigt echte Ruestungs-Items mit Haltbarkeit im HUD.", true, false),
+      new Module("crosshair", "Crosshair", "Crosshair", "Eigenes pixelbares Crosshair mit Vorlagen und Reichweiten-Farbe.", true, false),
+      new Module("clock", "Clock", "Clock", "Zeigt die lokale Uhrzeit im HUD.", true, false),
+      new Module("uptimer", "Timer", "Timer", "Zaehlt ohne Hintergrund von null aufwaerts: Tage, Stunden, Minuten und Sekunden.", true, false),
+      new Module("ui", "Editor", "Editor", "Positioniert HUD-Overlays per Drag auf dem Bildschirm.", false, false)
+  };
+  private static final java.util.Map<String, Module> MODULES_BY_ID = indexModules();
+  private static Module[] cachedAvailableModules;
+  private static int cachedPermissionMask = Integer.MIN_VALUE;
+
+  private MenuModules() {
+  }
+
+  static Module[] modules() {
+    load();
+    if (OwnerAccess.hasPermission()) {
+      return MODULES;
+    }
+    int permissionMask = 0;
+    int bit = 1;
+    for (String id : OWNER_ONLY_MODULES) {
+      if (OwnerAccess.hasPermission(id)) permissionMask |= bit;
+      bit <<= 1;
+    }
+    if (cachedAvailableModules != null && cachedPermissionMask == permissionMask) return cachedAvailableModules;
+    int count = 0;
+    for (Module module : MODULES) {
+      if (!OWNER_ONLY_MODULES.contains(module.id) || OwnerAccess.hasPermission(module.id)) count++;
+    }
+    Module[] available = new Module[count];
+    int index = 0;
+    for (Module module : MODULES) {
+      if (!OWNER_ONLY_MODULES.contains(module.id) || OwnerAccess.hasPermission(module.id)) available[index++] = module;
+    }
+    cachedPermissionMask = permissionMask;
+    cachedAvailableModules = available;
+    return available;
+  }
+
+  /** Allocation-free lookup for tick and render hot paths. */
+  static boolean enabled(String id) {
+    load();
+    Module module = MODULES_BY_ID.get(id);
+    if (module == null || !module.enabled) return false;
+    if (OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)) return false;
+    return !module.hiddenUntilUnlocked || unlocked.contains(module.id);
+  }
+
+  private static java.util.Map<String, Module> indexModules() {
+    java.util.HashMap<String, Module> result = new java.util.HashMap<>(MODULES.length * 2);
+    for (Module module : MODULES) result.put(module.id, module);
+    return java.util.Collections.unmodifiableMap(result);
+  }
+
+  static Module toggle(int index) {
+    load();
+    Module[] availableModules = modules();
+    if (index < 0 || index >= availableModules.length) {
+      return null;
+    }
+    Module module = availableModules[index];
+    if (ServerModulePolicy.isBlocked(module.id)) {
+      module.enabled = false;
+      module.keyDown = false;
+      return module;
+    }
+    if (module.hiddenUntilUnlocked && !unlocked.contains(module.id)) {
+      module.enabled = false;
+      return module;
+    }
+    if (!module.toggleable) {
+      return module;
+    }
+    module.enabled = !module.enabled;
+    save();
+    return module;
+  }
+
+  static Module setEnabled(int index, boolean enabled) {
+    load();
+    Module[] availableModules = modules();
+    if (index < 0 || index >= availableModules.length) {
+      return null;
+    }
+    Module module = availableModules[index];
+    if (enabled && ServerModulePolicy.isBlocked(module.id)) {
+      module.enabled = false;
+      module.keyDown = false;
+      return module;
+    }
+    if (module.hiddenUntilUnlocked && !unlocked.contains(module.id)) {
+      module.enabled = false;
+      return module;
+    }
+    if (!module.toggleable) {
+      return module;
+    }
+    module.enabled = enabled;
+    save();
+    return module;
+  }
+
+  static Module setEnabledById(String id, boolean enabled) {
+    load();
+    Module module = byId(id);
+    if (module == null || !module.toggleable) return module;
+    if (enabled && (ServerModulePolicy.isBlocked(module.id)
+        || (OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)))) {
+      enabled = false;
+    }
+    module.enabled = enabled;
+    module.keyDown = false;
+    save();
+    return module;
+  }
+
+  static Module setKeyCode(int index, int keyCode) {
+    return setKeyCombo(index, keyCode, 0);
+  }
+
+  static boolean isFavorite(String id) {
+    load();
+    Module module = byId(id);
+    return module != null && favorites.contains(module.id);
+  }
+
+  static boolean toggleFavorite(String id) {
+    load();
+    Module module = byId(id);
+    if (module == null) {
+      return false;
+    }
+    boolean favorite;
+    if (favorites.contains(module.id)) {
+      favorites.remove(module.id);
+      favorite = false;
+    } else {
+      favorites.add(module.id);
+      favorite = true;
+    }
+    save();
+    return favorite;
+  }
+
+  static String unlockCode(String code) {
+    load();
+    String moduleId = moduleIdForCode(code);
+    if (moduleId.isEmpty()) {
+      return "";
+    }
+    boolean changed = unlocked.add(moduleId);
+    if (changed) {
+      save();
+    }
+    return moduleId;
+  }
+
+  private static String moduleIdForCode(String code) {
+    String normalized = String.valueOf(code == null ? "" : code).trim().toLowerCase(java.util.Locale.ROOT);
+    if ("speed".equals(normalized)) {
+      return "speed";
+    }
+    if ("tracking".equals(normalized) || "track".equals(normalized) || "mobtrack".equals(normalized)) {
+      return "mobtrack";
+    }
+    if ("resistance".equals(normalized) || "resistenc".equals(normalized) || "resistenz".equals(normalized)) {
+      return "resistance";
+    }
+    if ("invisibility".equals(normalized) || "invisible".equals(normalized) || "invis".equals(normalized)
+        || "invisebiliti".equals(normalized) || "invisibiliti".equals(normalized) || "unsichtbar".equals(normalized)) {
+      return "invisibility";
+    }
+    return "";
+  }
+
+  static boolean isUnlocked(String id) {
+    load();
+    Module module = byId(id);
+    if (module != null && OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)) {
+      module.enabled = false;
+      module.keyDown = false;
+      return false;
+    }
+    return module == null || !module.hiddenUntilUnlocked || unlocked.contains(module.id);
+  }
+
+  static boolean isOwnerOnly(String id) {
+    return OWNER_ONLY_MODULES.contains(id);
+  }
+
+  static int effectLevel(String id) {
+    load();
+    Module module = byId(id);
+    return hasEffectLevel(module) ? clampEffectLevel(module.effectLevel) : 255;
+  }
+
+  static void setEffectLevel(String id, int level) {
+    load();
+    Module module = byId(id);
+    if (!hasEffectLevel(module)) {
+      return;
+    }
+    module.effectLevel = clampEffectLevel(level);
+    save();
+  }
+
+  static int zoomStrengthPercent() {
+    load();
+    return clampZoomStrength(zoomStrength);
+  }
+
+  static double zoomStrength() {
+    return zoomStrengthPercent() / 100.0D;
+  }
+
+  static void setZoomStrengthPercent(int percent) {
+    load();
+    zoomStrength = clampZoomStrength(percent);
+    save();
+  }
+
+  static void setZoomStrength(double factor) {
+    setZoomStrengthPercent((int) Math.round(factor * 100.0D));
+  }
+
+  static int zoomSmoothnessPercent() {
+    load();
+    return clampZoomSmoothness(zoomSmoothness);
+  }
+
+  static double zoomSmoothness() {
+    return zoomSmoothnessPercent() / 100.0D;
+  }
+
+  static void setZoomSmoothnessPercent(int percent) {
+    load();
+    zoomSmoothness = clampZoomSmoothness(percent);
+    save();
+  }
+
+  static int breakSpeedPercent() {
+    load();
+    return clampBreakSpeed(breakSpeed);
+  }
+
+  static double breakSpeedMultiplier() {
+    double ratio = (breakSpeedPercent() - MIN_BREAK_SPEED) / (double) Math.max(1, MAX_BREAK_SPEED - MIN_BREAK_SPEED);
+    return 0.25D * Math.pow(3200000.0D, Math.max(0.0D, Math.min(1.0D, ratio)));
+  }
+
+  static void setBreakSpeedPercent(int percent) {
+    load();
+    breakSpeed = clampBreakSpeed(percent);
+    save();
+  }
+
+  static int flightSpeedPercent() {
+    load();
+    return clampFlightSpeed(flightSpeed);
+  }
+
+  static double flightSpeedBlocksPerTick() {
+    return flightSpeedPercent() / 100.0D;
+  }
+
+  static void setFlightSpeedPercent(int percent) {
+    load();
+    flightSpeed = clampFlightSpeed(percent);
+    save();
+  }
+
+  static int fakeFps() {
+    load();
+    return fakeFps;
+  }
+
+  static void setFakeFps(int value) {
+    load();
+    fakeFps = value;
+    save();
+  }
+
+  static int keyboardSound() {
+    load();
+    return keyboardSound;
+  }
+
+  static void setKeyboardSound(int value) {
+    load();
+    keyboardSound = Math.max(1, Math.min(12, value));
+    save();
+  }
+
+  static int keyboardVolumePercent() {
+    load();
+    return keyboardVolume;
+  }
+
+  static void setKeyboardVolumePercent(int percent) {
+    load();
+    keyboardVolume = clampKeyboardVolume(percent);
+    save();
+  }
+
+
+  static Module setKeyCombo(int index, int keyCode, int keyModifiers) {
+    load();
+    Module[] availableModules = modules();
+    if (index < 0 || index >= availableModules.length) {
+      return null;
+    }
+    Module module = availableModules[index];
+    if (module.hiddenUntilUnlocked && !unlocked.contains(module.id)) {
+      module.keyCode = -1;
+      module.keyModifiers = 0;
+      save();
+      return module;
+    }
+    if (!module.keyBindable) {
+      module.keyCode = -1;
+      module.keyModifiers = 0;
+      save();
+      return module;
+    }
+    module.keyCode = keyCode;
+    module.keyModifiers = keyCode > 0 ? normalizeModifiersForKey(keyCode, keyModifiers) : 0;
+    save();
+    return module;
+  }
+
+  private static void load() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    unlocked.add("mobtrack");
+    Path path = statePath();
+    if (!Files.exists(path)) {
+      return;
+    }
+
+    try {
+      String json = Files.readString(path, StandardCharsets.UTF_8);
+      Matcher enabledMatcher = ENABLED_PATTERN.matcher(json);
+      if (enabledMatcher.find()) {
+        Set<String> enabledIds = new LinkedHashSet<>();
+        Matcher stringMatcher = STRING_PATTERN.matcher(enabledMatcher.group(1));
+        while (stringMatcher.find()) {
+          enabledIds.add(stringMatcher.group(1));
+        }
+        for (Module module : MODULES) {
+          module.enabled = module.toggleable && enabledIds.contains(module.id);
+        }
+      }
+      Matcher unlockedMatcher = UNLOCKED_PATTERN.matcher(json);
+      if (unlockedMatcher.find()) {
+        Matcher stringMatcher = STRING_PATTERN.matcher(unlockedMatcher.group(1));
+        while (stringMatcher.find()) {
+          Module module = byId(stringMatcher.group(1));
+          if (module != null && module.hiddenUntilUnlocked) {
+            unlocked.add(module.id);
+          }
+        }
+      }
+      Matcher favoritesMatcher = FAVORITES_PATTERN.matcher(json);
+      if (favoritesMatcher.find()) {
+        favorites.clear();
+        Matcher stringMatcher = STRING_PATTERN.matcher(favoritesMatcher.group(1));
+        while (stringMatcher.find()) {
+          Module module = byId(stringMatcher.group(1));
+          if (module != null) {
+            favorites.add(module.id);
+          }
+        }
+      }
+      Matcher keysMatcher = KEYS_PATTERN.matcher(json);
+      if (keysMatcher.find()) {
+        Matcher keyEntryMatcher = KEY_ENTRY_PATTERN.matcher(keysMatcher.group(1));
+        while (keyEntryMatcher.find()) {
+          Module module = byId(keyEntryMatcher.group(1));
+          if (module != null && module.keyBindable) {
+            module.keyCode = Integer.parseInt(keyEntryMatcher.group(2));
+          }
+        }
+      }
+      Matcher keyModifiersMatcher = KEY_MODIFIERS_PATTERN.matcher(json);
+      if (keyModifiersMatcher.find()) {
+        Matcher keyModifierEntryMatcher = KEY_ENTRY_PATTERN.matcher(keyModifiersMatcher.group(1));
+        while (keyModifierEntryMatcher.find()) {
+          Module module = byId(keyModifierEntryMatcher.group(1));
+          if (module != null && module.keyBindable && module.keyCode > 0) {
+            module.keyModifiers = normalizeModifiersForKey(module.keyCode, Integer.parseInt(keyModifierEntryMatcher.group(2)));
+          }
+        }
+      }
+      Matcher levelsMatcher = LEVELS_PATTERN.matcher(json);
+      if (levelsMatcher.find()) {
+        Matcher levelEntryMatcher = KEY_ENTRY_PATTERN.matcher(levelsMatcher.group(1));
+        while (levelEntryMatcher.find()) {
+          Module module = byId(levelEntryMatcher.group(1));
+          if (hasEffectLevel(module)) {
+            module.effectLevel = clampEffectLevel(Integer.parseInt(levelEntryMatcher.group(2)));
+          }
+        }
+      }
+      Matcher zoomStrengthMatcher = ZOOM_STRENGTH_PATTERN.matcher(json);
+      if (zoomStrengthMatcher.find()) {
+        zoomStrength = clampZoomStrength(Integer.parseInt(zoomStrengthMatcher.group(1)));
+      }
+      Matcher zoomSmoothnessMatcher = ZOOM_SMOOTHNESS_PATTERN.matcher(json);
+      if (zoomSmoothnessMatcher.find()) {
+        zoomSmoothness = clampZoomSmoothness(Integer.parseInt(zoomSmoothnessMatcher.group(1)));
+      }
+      Matcher breakSpeedMatcher = BREAK_SPEED_PATTERN.matcher(json);
+      if (breakSpeedMatcher.find()) {
+        breakSpeed = clampBreakSpeed(Integer.parseInt(breakSpeedMatcher.group(1)));
+      }
+      Matcher flightSpeedMatcher = FLIGHT_SPEED_PATTERN.matcher(json);
+      if (flightSpeedMatcher.find()) {
+        flightSpeed = clampFlightSpeed(Integer.parseInt(flightSpeedMatcher.group(1)));
+      }
+      Matcher fakeFpsMatcher = FAKE_FPS_PATTERN.matcher(json);
+      if (fakeFpsMatcher.find()) {
+        long parsed = Long.parseLong(fakeFpsMatcher.group(1));
+        fakeFps = (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, parsed));
+      }
+      Matcher keyboardSoundMatcher = KEYBOARD_SOUND_PATTERN.matcher(json);
+      if (keyboardSoundMatcher.find()) keyboardSound = Math.max(1, Math.min(12, Integer.parseInt(keyboardSoundMatcher.group(1))));
+      Matcher keyboardVolumeMatcher = KEYBOARD_VOLUME_PATTERN.matcher(json);
+      if (keyboardVolumeMatcher.find()) keyboardVolume = clampKeyboardVolume(Integer.parseInt(keyboardVolumeMatcher.group(1)) > MAX_KEYBOARD_VOLUME ? MAX_KEYBOARD_VOLUME : Integer.parseInt(keyboardVolumeMatcher.group(1)));
+      normalizeLoadedDefaults();
+    } catch (IOException | RuntimeException ignored) {
+      // Broken state should never prevent the menu from opening.
+    }
+  }
+
+  private static void normalizeLoadedDefaults() {
+    zoomStrength = clampZoomStrength(zoomStrength);
+    zoomSmoothness = clampZoomSmoothness(zoomSmoothness);
+    breakSpeed = clampBreakSpeed(breakSpeed);
+    flightSpeed = clampFlightSpeed(flightSpeed);
+    keyboardSound = Math.max(1, Math.min(12, keyboardSound));
+    keyboardVolume = clampKeyboardVolume(keyboardVolume);
+    for (Module module : MODULES) {
+      if (OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)) {
+        module.enabled = false;
+        module.keyDown = false;
+        module.keyCode = -1;
+        module.keyModifiers = 0;
+        favorites.remove(module.id);
+        continue;
+      }
+      if (module.hiddenUntilUnlocked && !unlocked.contains(module.id)) {
+        module.enabled = false;
+        module.keyDown = false;
+      }
+    }
+  }
+
+  private static void save() {
+    Path path = statePath();
+    try {
+      Files.createDirectories(path.getParent());
+      StringBuilder enabled = new StringBuilder();
+      for (Module module : MODULES) {
+        if (OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)) {
+          continue;
+        }
+        if (!module.toggleable || !ServerModulePolicy.preferredEnabled(module)) {
+          continue;
+        }
+        if (enabled.length() > 0) {
+          enabled.append(", ");
+        }
+        enabled.append('"').append(module.id).append('"');
+      }
+      StringBuilder unlockedIds = new StringBuilder();
+      for (String id : unlocked) {
+        Module module = byId(id);
+        if (module == null || !module.hiddenUntilUnlocked) {
+          continue;
+        }
+        if (unlockedIds.length() > 0) {
+          unlockedIds.append(", ");
+        }
+        unlockedIds.append('"').append(module.id).append('"');
+      }
+      StringBuilder favoritesJson = new StringBuilder();
+      for (String id : favorites) {
+        Module module = byId(id);
+        if (module == null) {
+          continue;
+        }
+        if (favoritesJson.length() > 0) {
+          favoritesJson.append(", ");
+        }
+        favoritesJson.append('"').append(module.id).append('"');
+      }
+      StringBuilder keys = new StringBuilder();
+      StringBuilder keyModifiers = new StringBuilder();
+      StringBuilder levels = new StringBuilder();
+      for (Module module : MODULES) {
+        if (module.keyBindable && module.keyCode != 0) {
+          if (keys.length() > 0) {
+            keys.append(", ");
+          }
+          keys.append('"').append(module.id).append("\": ").append(module.keyCode);
+          if (module.keyModifiers > 0) {
+            if (keyModifiers.length() > 0) {
+              keyModifiers.append(", ");
+            }
+            keyModifiers.append('"').append(module.id).append("\": ").append(module.keyModifiers);
+          }
+        }
+        if (hasEffectLevel(module)) {
+          if (levels.length() > 0) {
+            levels.append(", ");
+          }
+          levels.append('"').append(module.id).append("\": ").append(clampEffectLevel(module.effectLevel));
+        }
+      }
+      Files.writeString(path, "{\n  \"enabled\": [" + enabled + "],\n  \"unlocked\": [" + unlockedIds + "],\n  \"favorites\": [" + favoritesJson + "],\n  \"keys\": {" + keys + "},\n  \"keyModifiers\": {" + keyModifiers + "},\n  \"levels\": {" + levels + "},\n  \"zoomStrength\": " + clampZoomStrength(zoomStrength) + ",\n  \"zoomSmoothness\": " + clampZoomSmoothness(zoomSmoothness) + ",\n  \"breakSpeed\": " + clampBreakSpeed(breakSpeed) + ",\n  \"flightSpeed\": " + clampFlightSpeed(flightSpeed) + ",\n  \"keyboardSound\": " + keyboardSound + ",\n  \"keyboardVolume\": " + clampKeyboardVolume(keyboardVolume) + ",\n  \"fakeFps\": " + fakeFps + "\n}\n", StandardCharsets.UTF_8);
+    } catch (IOException ignored) {
+      // Settings persistence is optional.
+    }
+  }
+
+  private static boolean hasEffectLevel(Module module) {
+    return module != null && "mobtrack".equals(module.id);
+  }
+
+  private static int clampEffectLevel(int level) {
+    return Math.max(30, Math.min(100, level));
+  }
+
+  private static int clampZoomStrength(int percent) {
+    return Math.max(MIN_ZOOM_STRENGTH, Math.min(MAX_ZOOM_STRENGTH, percent));
+  }
+
+  private static int clampZoomSmoothness(int percent) {
+    return Math.max(MIN_ZOOM_SMOOTHNESS, Math.min(MAX_ZOOM_SMOOTHNESS, percent));
+  }
+
+  private static int clampBreakSpeed(int percent) {
+    return Math.max(MIN_BREAK_SPEED, Math.min(MAX_BREAK_SPEED, percent));
+  }
+
+  private static int clampFlightSpeed(int percent) {
+    return Math.max(MIN_FLIGHT_SPEED, Math.min(MAX_FLIGHT_SPEED, percent));
+  }
+
+  private static int clampKeyboardVolume(int percent) {
+    return Math.max(MIN_KEYBOARD_VOLUME, Math.min(MAX_KEYBOARD_VOLUME, percent));
+  }
+
+  private static int readInt(String json, Pattern pattern, int fallback) {
+    Matcher matcher = pattern.matcher(json);
+    return matcher.find() ? Integer.parseInt(matcher.group(1)) : fallback;
+  }
+
+  private static int normalizeModifiersForKey(int keyCode, int keyModifiers) {
+    int modifiers = keyModifiers & MODIFIER_MASK;
+    if (keyCode == 340 || keyCode == 344) {
+      modifiers &= ~MOD_SHIFT;
+    } else if (keyCode == 341 || keyCode == 345) {
+      modifiers &= ~MOD_CONTROL;
+    } else if (keyCode == 342 || keyCode == 346) {
+      modifiers &= ~MOD_ALT;
+    } else if (keyCode == 343 || keyCode == 347) {
+      modifiers &= ~MOD_SUPER;
+    }
+    return modifiers;
+  }
+
+  private static Module byId(String id) {
+    return MODULES_BY_ID.get(id);
+  }
+
+  private static Path statePath() {
+    String profileSettingsFile = System.getenv("X_LAUNCHER_PROFILE_SETTINGS_FILE");
+    if (profileSettingsFile != null && !profileSettingsFile.isBlank()) {
+      return Path.of(profileSettingsFile).toAbsolutePath().normalize();
+    }
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-launcher-menu.json");
+  }
+
+  static final class Module {
+    final String id;
+    final String title;
+    final String subtitle;
+    final String description;
+    final boolean toggleable;
+    final boolean keyBindable;
+    final boolean hiddenUntilUnlocked;
+    boolean enabled;
+    int keyCode;
+    int keyModifiers;
+    int effectLevel;
+    boolean keyDown;
+
+    Module(String id, String title, String subtitle, String description, boolean toggleable, boolean keyBindable) {
+      this(id, title, subtitle, description, toggleable, keyBindable, false, 0, 0);
+    }
+
+    Module(String id, String title, String subtitle, String description, boolean toggleable, boolean keyBindable, boolean hiddenUntilUnlocked) {
+      this(id, title, subtitle, description, toggleable, keyBindable, hiddenUntilUnlocked, 0, 0);
+    }
+
+    Module(String id, String title, String subtitle, String description, boolean toggleable, boolean keyBindable, int keyCode, int keyModifiers) {
+      this(id, title, subtitle, description, toggleable, keyBindable, false, keyCode, keyModifiers);
+    }
+
+    Module(String id, String title, String subtitle, String description, boolean toggleable, boolean keyBindable, boolean hiddenUntilUnlocked, int keyCode, int keyModifiers) {
+      this.id = id;
+      this.title = title;
+      this.subtitle = subtitle;
+      this.description = description;
+      this.toggleable = toggleable;
+      this.keyBindable = keyBindable;
+      this.hiddenUntilUnlocked = hiddenUntilUnlocked;
+      this.keyCode = keyCode;
+      this.keyModifiers = keyCode > 0 ? normalizeModifiersForKey(keyCode, keyModifiers) : 0;
+      this.effectLevel = "mobtrack".equals(id) ? 100 : 1;
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/OwnerAccess.java': String.raw`
+package dev.xlauncher.client;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+final class OwnerAccess {
+  private static final String OWNER_UUID = "990911BD9C284FC69ED6A7C9E231C1F2";
+  private static long lastReadMs;
+  private static String permissionState = "";
+
+  private OwnerAccess() {}
+
+  static boolean hasPermission() {
+    return OWNER_UUID.equals(normalize(System.getProperty("xclient.accountUuid", "")));
+  }
+
+  static boolean hasPermission(String moduleId) {
+    if (hasPermission()) return true;
+    String target = String.valueOf(moduleId == null ? "" : moduleId).trim().toLowerCase(Locale.ROOT);
+    refreshPermissions();
+    String uuid = normalize(System.getProperty("xclient.accountUuid", ""));
+    if (uuid.isEmpty() || target.isEmpty()) return false;
+    Matcher player = Pattern.compile("\\\"" + Pattern.quote(uuid) + "\\\"\\s*:\\s*\\{([^}]*)\\}", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(permissionState);
+    if (!player.find()) return false;
+    return Pattern.compile("\\\"xclient_" + Pattern.quote(target) + "\\\"\\s*:\\s*true", Pattern.CASE_INSENSITIVE).matcher(player.group(1)).find();
+  }
+
+  private static void refreshPermissions() {
+    long now = System.currentTimeMillis();
+    if (now - lastReadMs < 500L) return;
+    lastReadMs = now;
+    try {
+      String appData = System.getenv("APPDATA");
+      if (appData == null || appData.isBlank()) appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+      Path path = Path.of(appData, ".minecraft-launcher", "admin-directory.json");
+      permissionState = Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
+    } catch (Exception ignored) {
+      permissionState = "";
+    }
+  }
+
+  private static String normalize(String uuid) {
+    return String.valueOf(uuid == null ? "" : uuid)
+        .replace("-", "")
+        .trim()
+        .toUpperCase(Locale.ROOT);
+  }
+}
+`,
+  'dev/xlauncher/client/ServerModulePolicy.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Applies address-specific X Client module rules without changing the user's
+ * persistent module choices. Rules live in x-client-server-rules.json.
+ */
+public final class ServerModulePolicy {
+  private static final Pattern RULE_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+  private static final Pattern STRING_PATTERN = Pattern.compile("\"([^\"]+)\"");
+  // Ordinary multiplayer must not silently override persisted toggles. Server
+  // owners can still block modules through x-client-server-rules.json.
+  private static final Set<String> DEFAULT_MULTIPLAYER_BLOCKS = Set.of(
+      "speed", "resistance", "invisibility");
+  private static final Map<String, Set<String>> RULES = new LinkedHashMap<>();
+  private static final Map<String, Boolean> PREFERRED = new LinkedHashMap<>();
+  private static boolean loaded;
+  private static String activeServer = "";
+  private static Set<String> blocked = Set.of();
+
+  private ServerModulePolicy() {
+  }
+
+  public static synchronized void tick(Object client) {
+    load();
+    String server = currentServerAddress(client);
+    if (server.equals(activeServer)) {
+      enforce();
+      return;
+    }
+    restore();
+    activeServer = server;
+    blocked = server.isEmpty() ? Set.of() : blockedFor(server);
+    if (!blocked.isEmpty()) {
+      for (MenuModules.Module module : MenuModules.modules()) {
+        if (blocked.contains(module.id)) {
+          PREFERRED.put(module.id, module.enabled);
+          module.enabled = false;
+          module.keyDown = false;
+        }
+      }
+    }
+  }
+
+  static synchronized boolean isBlocked(String moduleId) {
+    return blocked.contains(moduleId);
+  }
+
+  static synchronized boolean preferredEnabled(MenuModules.Module module) {
+    if (module == null) {
+      return false;
+    }
+    Boolean preferred = PREFERRED.get(module.id);
+    return preferred != null ? preferred.booleanValue() : module.enabled;
+  }
+
+  static synchronized String activeServer() {
+    return activeServer;
+  }
+
+  static synchronized Set<String> blockedModules() {
+    return Set.copyOf(blocked);
+  }
+
+  private static void enforce() {
+    if (blocked.isEmpty()) {
+      return;
+    }
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if (blocked.contains(module.id)) {
+        module.enabled = false;
+        module.keyDown = false;
+      }
+    }
+  }
+
+  private static void restore() {
+    if (PREFERRED.isEmpty()) {
+      return;
+    }
+    for (MenuModules.Module module : MenuModules.modules()) {
+      Boolean enabled = PREFERRED.get(module.id);
+      if (enabled != null) {
+        module.enabled = enabled.booleanValue();
+        module.keyDown = false;
+      }
+    }
+    PREFERRED.clear();
+  }
+
+  private static Set<String> blockedFor(String server) {
+    Set<String> result = new LinkedHashSet<>();
+    for (Map.Entry<String, Set<String>> entry : RULES.entrySet()) {
+      if (matches(entry.getKey(), server)) {
+        result.addAll(entry.getValue());
+      }
+    }
+    return Set.copyOf(result);
+  }
+
+  private static boolean matches(String pattern, String server) {
+    String rule = normalizeAddress(pattern);
+    if ("*".equals(rule)) {
+      return true;
+    }
+    if (rule.startsWith("*.")) {
+      String suffix = rule.substring(1);
+      return server.endsWith(suffix) || server.equals(rule.substring(2));
+    }
+    return server.equals(rule);
+  }
+
+  private static void load() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    Path path = rulesPath();
+    try {
+      if (!Files.exists(path)) {
+        Files.createDirectories(path.getParent());
+        Files.writeString(path,
+            "{\n"
+            + "  \"*\": [\"speed\", \"resistance\", \"invisibility\"],\n"
+            + "  \"example.org\": [\"hitboxes\"]\n"
+            + "}\n",
+            StandardCharsets.UTF_8);
+      }
+      String json = Files.readString(path, StandardCharsets.UTF_8);
+      Matcher ruleMatcher = RULE_PATTERN.matcher(json);
+      while (ruleMatcher.find()) {
+        String address = normalizeAddress(ruleMatcher.group(1));
+        Set<String> ids = new LinkedHashSet<>();
+        Matcher idMatcher = STRING_PATTERN.matcher(ruleMatcher.group(2));
+        while (idMatcher.find()) {
+          ids.add(idMatcher.group(1).trim().toLowerCase(Locale.ROOT));
+        }
+        // Migrate the launcher-created legacy wildcard. Address-specific rules
+        // remain authoritative and can still explicitly block these modules.
+        if ("*".equals(address) && ids.containsAll(Set.of(
+            "mobtrack", "ghostblocks", "speed", "resistance", "invisibility"))) {
+          ids.remove("mobtrack");
+          ids.remove("ghostblocks");
+        }
+        if (!address.isEmpty()) {
+          RULES.put(address, Set.copyOf(ids));
+        }
+      }
+      if (RULES.isEmpty()) {
+        RULES.put("*", DEFAULT_MULTIPLAYER_BLOCKS);
+      }
+    } catch (Throwable ignored) {
+      RULES.clear();
+      RULES.put("*", DEFAULT_MULTIPLAYER_BLOCKS);
+    }
+  }
+
+  private static String currentServerAddress(Object client) {
+    if (client == null || fieldValue(client, "player", "field_1724") == null) {
+      return "";
+    }
+    Object server = invokeNoArgs(client, "getCurrentServer", "getCurrentServerEntry", "method_1558");
+    if (server == null) {
+      server = fieldValue(client, "currentServer", "currentServerData", "serverData", "field_1754");
+    }
+    if (server == null) {
+      return "";
+    }
+    Object address = invokeNoArgs(server, "ip", "address", "getAddress", "method_2954");
+    if (address == null) {
+      address = fieldValue(server, "ip", "address", "field_3761");
+    }
+    return normalizeAddress(String.valueOf(address == null ? "" : address));
+  }
+
+  private static String normalizeAddress(String value) {
+    String result = String.valueOf(value == null ? "" : value).trim().toLowerCase(Locale.ROOT);
+    if (result.startsWith("[")) {
+      int close = result.indexOf(']');
+      return close > 0 ? result.substring(1, close) : result;
+    }
+    int colon = result.lastIndexOf(':');
+    if (colon > 0 && result.indexOf(':') == colon && result.substring(colon + 1).matches("\\d+")) {
+      result = result.substring(0, colon);
+    }
+    return result.endsWith(".") ? result.substring(0, result.length() - 1) : result;
+  }
+
+  private static Object invokeNoArgs(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        method.setAccessible(true);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        // Try the next mapping.
+      }
+    }
+    return null;
+  }
+
+  private static Object fieldValue(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable ignored) {
+          type = type.getSuperclass();
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Path rulesPath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-client-server-rules.json");
+  }
+}
+`,  'dev/xlauncher/client/GameTimer.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDate;
+import java.util.concurrent.Executor;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+final class GameTimer {
+  private static final Pattern MINUTES_PATTERN = Pattern.compile("\"minutes\"\\s*:\\s*(\\d+)");
+  private static final Pattern AUTO_PATTERN = Pattern.compile("\"autoStartDaily\"\\s*:\\s*(true|false)");
+  private static final Pattern LAST_AUTO_DATE_PATTERN = Pattern.compile("\"lastAutoDate\"\\s*:\\s*\"([^\"]*)\"");
+  private static final int DEFAULT_MINUTES = 30;
+  private static final int MIN_MINUTES = 1;
+  private static final int MAX_MINUTES = 1440;
+  private static final long NOTICE_MS = 3500L;
+  private static final Object UNSUPPORTED_ARG = new Object();
+  private static boolean loaded;
+  private static int minutes = DEFAULT_MINUTES;
+  private static boolean autoStartDaily;
+  private static String lastAutoDate = "";
+  private static boolean running;
+  private static boolean finished;
+  private static boolean startedFromAuto;
+  private static boolean halfwayNotified;
+  private static boolean tenPercentNotified;
+  private static boolean leaveQueued;
+  private static boolean moduleWasEnabled;
+  private static boolean pausedByScreen;
+  private static long totalMs;
+  private static long remainingMs;
+  private static long lastTickMs;
+  private static long noticeUntilMs;
+  private static String noticeText = "";
+
+  private GameTimer() {
+  }
+
+  static synchronized void tick(Object client) {
+    load();
+    boolean enabled = moduleEnabled();
+    long now = System.currentTimeMillis();
+    if (!enabled) {
+      resetRun();
+      moduleWasEnabled = false;
+      pausedByScreen = false;
+      return;
+    }
+    if (!moduleWasEnabled) {
+      resetRun();
+      finished = false;
+      moduleWasEnabled = true;
+    }
+
+    boolean inWorld = hasWorld(client);
+    boolean screenOpen = hasOpenScreen(client);
+    pausedByScreen = inWorld && screenOpen;
+    if (!inWorld) {
+      lastTickMs = now;
+      return;
+    }
+    if (!running && !finished) {
+      if (autoStartDaily) {
+        if (!today().equals(lastAutoDate)) {
+          start(now, true);
+        }
+      } else {
+        start(now, false);
+      }
+    }
+    if (!running) {
+      lastTickMs = now;
+      return;
+    }
+    if (screenOpen) {
+      lastTickMs = now;
+      return;
+    }
+    if (lastTickMs <= 0L) {
+      lastTickMs = now;
+      return;
+    }
+
+    long elapsed = Math.max(0L, now - lastTickMs);
+    lastTickMs = now;
+    if (elapsed <= 0L) {
+      return;
+    }
+    remainingMs = Math.max(0L, remainingMs - elapsed);
+    if (!halfwayNotified && remainingMs <= totalMs / 2L) {
+      halfwayNotified = true;
+      showNotice("Timer: Hälfte erreicht");
+    }
+    if (!tenPercentNotified && remainingMs <= Math.max(1L, totalMs / 10L)) {
+      tenPercentNotified = true;
+      showNotice("Timer: noch 10 Prozent");
+    }
+    if (remainingMs <= 0L) {
+      finish(client);
+    }
+  }
+
+  static synchronized int minutes() {
+    load();
+    return minutes;
+  }
+
+  static synchronized void adjustMinutes(int delta) {
+    setMinutes(minutes() + delta);
+  }
+
+  static synchronized void setMinutes(int value) {
+    load();
+    int next = clamp(value, MIN_MINUTES, MAX_MINUTES);
+    if (next == minutes) {
+      return;
+    }
+    minutes = next;
+    lastAutoDate = "";
+    resetRun();
+    finished = false;
+    save();
+    showNotice("Timer: " + minutes + " min");
+  }
+
+  static synchronized boolean autoStartDaily() {
+    load();
+    return autoStartDaily;
+  }
+
+  static synchronized void setAutoStartDaily(boolean enabled) {
+    load();
+    if (autoStartDaily == enabled) {
+      return;
+    }
+    autoStartDaily = enabled;
+    lastAutoDate = "";
+    resetRun();
+    finished = false;
+    save();
+    showNotice(enabled ? "Timer: Auto täglich an" : "Timer: Auto aus");
+  }
+
+  static synchronized String remainingText() {
+    load();
+    return remainingLabel();
+  }
+
+  static synchronized String statusText() {
+    load();
+    if (!moduleEnabled()) {
+      return "Aus";
+    }
+    if (running && pausedByScreen) {
+      return "Pausiert im Menü";
+    }
+    if (running) {
+      return "Läuft";
+    }
+    if (finished) {
+      return autoStartDaily && today().equals(lastAutoDate) ? "Heute fertig" : "Fertig";
+    }
+    return autoStartDaily ? "Wartet auf Tagesstart" : "Wartet auf Welt";
+  }
+
+  static synchronized float progress() {
+    load();
+    if (totalMs <= 0L) {
+      return 0.0F;
+    }
+    return Math.max(0.0F, Math.min(1.0F, 1.0F - (remainingMs / (float) totalMs)));
+  }
+
+  static synchronized String noticeText() {
+    if (noticeUntilMs <= System.currentTimeMillis()) {
+      return "";
+    }
+    return noticeText + " - Rest " + remainingLabel();
+  }
+
+  static synchronized String pauseOverlayText() {
+    load();
+    if (!moduleEnabled() || !pausedByScreen || (!running && !finished && totalMs <= 0L)) {
+      return "";
+    }
+    return "Timer Rest " + remainingLabel();
+  }
+
+  private static void start(long now, boolean autoStarted) {
+    totalMs = Math.max(60000L, minutes * 60000L);
+    remainingMs = totalMs;
+    lastTickMs = now;
+    running = true;
+    finished = false;
+    startedFromAuto = autoStarted;
+    halfwayNotified = false;
+    tenPercentNotified = false;
+    leaveQueued = false;
+    showNotice("Timer gestartet: " + minutes + " min");
+  }
+
+  private static void finish(Object client) {
+    running = false;
+    finished = true;
+    remainingMs = 0L;
+    lastTickMs = System.currentTimeMillis();
+    if (startedFromAuto) {
+      lastAutoDate = today();
+      save();
+    }
+    showNotice("Timer abgelaufen");
+    if (leaveQueued) {
+      return;
+    }
+    leaveQueued = true;
+    Runnable task = () -> leaveWorld(client);
+    if (client instanceof Executor executor) {
+      executor.execute(task);
+    } else {
+      task.run();
+    }
+  }
+
+  private static void resetRun() {
+    running = false;
+    finished = false;
+    startedFromAuto = false;
+    halfwayNotified = false;
+    tenPercentNotified = false;
+    leaveQueued = false;
+    pausedByScreen = false;
+    totalMs = 0L;
+    remainingMs = 0L;
+    lastTickMs = 0L;
+  }
+
+  private static boolean moduleEnabled() {
+    return MenuModules.enabled("timer");
+  }
+
+  private static boolean hasWorld(Object client) {
+    return getAnyField(client, "player", "field_1724") != null || getAnyField(client, "level", "world", "field_1687") != null;
+  }
+
+  private static boolean hasOpenScreen(Object client) {
+    return getAnyField(client, "screen", "field_1755") != null;
+  }
+
+  private static void showNotice(String text) {
+    noticeText = text;
+    noticeUntilMs = System.currentTimeMillis() + NOTICE_MS;
+  }
+
+  private static String remainingLabel() {
+    if (running || finished || totalMs > 0L) {
+      return formatTime(remainingMs);
+    }
+    return minutes + " min";
+  }
+
+  private static String formatTime(long millis) {
+    long seconds = Math.max(0L, (millis + 999L) / 1000L);
+    long minutesPart = seconds / 60L;
+    long secondsPart = seconds % 60L;
+    return minutesPart + ":" + (secondsPart < 10L ? "0" : "") + secondsPart;
+  }
+
+  private static void leaveWorld(Object client) {
+    if (client == null) {
+      return;
+    }
+    boolean disconnected = invokeDisconnect(client);
+    if (!disconnected) {
+      Object connection = getAnyField(client, "connection", "field_1705");
+      Object player = getAnyField(client, "player", "field_1724");
+      if (connection == null && player != null) {
+        connection = getAnyField(player, "connection", "networkHandler", "field_3944");
+      }
+      disconnected = invokeDisconnect(connection);
+    }
+    Object titleScreen = titleScreen();
+    if (titleScreen != null || disconnected) {
+      setScreen(client, titleScreen);
+    }
+  }
+
+  private static boolean invokeDisconnect(Object target) {
+    if (target == null) {
+      return false;
+    }
+    for (Method method : allMethods(target.getClass())) {
+      if (!isDisconnectMethod(method.getName())) {
+        continue;
+      }
+      Object[] args = argsFor(method.getParameterTypes());
+      if (args == null) {
+        continue;
+      }
+      try {
+        method.setAccessible(true);
+        method.invoke(target, args);
+        return true;
+      } catch (Throwable ignored) {
+        // Try another runtime mapping/signature.
+      }
+    }
+    return false;
+  }
+
+  private static boolean isDisconnectMethod(String name) {
+    return "disconnect".equals(name) || "clearLevel".equals(name) || "method_18096".equals(name)
+        || "method_2951".equals(name) || "method_48296".equals(name) || "method_52787".equals(name);
+  }
+
+  private static Object[] argsFor(Class<?>[] parameterTypes) {
+    Object[] args = new Object[parameterTypes.length];
+    for (int index = 0; index < parameterTypes.length; index += 1) {
+      Object value = argumentFor(parameterTypes[index]);
+      if (value == UNSUPPORTED_ARG) {
+        return null;
+      }
+      args[index] = value;
+    }
+    return args;
+  }
+
+  private static Object argumentFor(Class<?> type) {
+    if (type == Boolean.TYPE || type == Boolean.class) {
+      return Boolean.FALSE;
+    }
+    if (type == String.class) {
+      return "X Client Timer";
+    }
+    if (isComponentType(type)) {
+      Object component = literalComponent("Timer abgelaufen");
+      return component == null ? UNSUPPORTED_ARG : component;
+    }
+    if (isScreenType(type)) {
+      return titleScreen();
+    }
+    if (!type.isPrimitive()) {
+      return null;
+    }
+    return UNSUPPORTED_ARG;
+  }
+
+  private static void setScreen(Object client, Object screen) {
+    for (Method method : allMethods(client.getClass())) {
+      if (!("setScreen".equals(method.getName()) || "method_1507".equals(method.getName())) || method.getParameterCount() != 1) {
+        continue;
+      }
+      Class<?> type = method.getParameterTypes()[0];
+      if (screen != null && !type.isInstance(screen)) {
+        continue;
+      }
+      try {
+        method.setAccessible(true);
+        method.invoke(client, screen);
+        return;
+      } catch (Throwable ignored) {
+        // Try another screen setter.
+      }
+    }
+  }
+
+  private static Object titleScreen() {
+    for (String className : new String[] { "net.minecraft.client.gui.screens.TitleScreen", "net.minecraft.class_442" }) {
+      try {
+        java.lang.reflect.Constructor<?> constructor = Class.forName(className).getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
+      } catch (Throwable ignored) {
+        // Try the next known title screen class.
+      }
+    }
+    return null;
+  }
+
+  private static Object literalComponent(String text) {
+    for (String className : new String[] { "net.minecraft.network.chat.Component", "net.minecraft.class_2561" }) {
+      try {
+        Class<?> componentClass = Class.forName(className);
+        for (String methodName : new String[] { "literal", "method_30163", "a", "b", "c" }) {
+          try {
+            Object value = componentClass.getMethod(methodName, String.class).invoke(null, text);
+            if (componentClass.isInstance(value)) {
+              return value;
+            }
+          } catch (Throwable ignored) {
+            // Try the next text factory.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next component class.
+      }
+    }
+    return null;
+  }
+
+  private static boolean isScreenType(Class<?> type) {
+    String name = type.getName();
+    return name.endsWith(".Screen") || name.endsWith(".class_437") || name.contains("gui.screens") || "net.minecraft.class_437".equals(name);
+  }
+
+  private static boolean isComponentType(Class<?> type) {
+    String name = type.getName();
+    return name.endsWith(".Component") || "net.minecraft.class_2561".equals(name);
+  }
+
+  private static Method[] allMethods(Class<?> type) {
+    Method[] publicMethods = type.getMethods();
+    Method[] declaredMethods = type.getDeclaredMethods();
+    Method[] methods = new Method[publicMethods.length + declaredMethods.length];
+    System.arraycopy(publicMethods, 0, methods, 0, publicMethods.length);
+    System.arraycopy(declaredMethods, 0, methods, publicMethods.length, declaredMethods.length);
+    return methods;
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getField(name).get(target);
+      } catch (Throwable ignored) {
+        try {
+          java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable alsoIgnored) {
+          // Try the next known field name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void load() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    Path path = statePath();
+    if (!Files.exists(path)) {
+      return;
+    }
+    try {
+      String json = Files.readString(path, StandardCharsets.UTF_8);
+      Matcher minutesMatcher = MINUTES_PATTERN.matcher(json);
+      if (minutesMatcher.find()) {
+        minutes = clamp(Integer.parseInt(minutesMatcher.group(1)), MIN_MINUTES, MAX_MINUTES);
+      }
+      Matcher autoMatcher = AUTO_PATTERN.matcher(json);
+      if (autoMatcher.find()) {
+        autoStartDaily = Boolean.parseBoolean(autoMatcher.group(1));
+      }
+      Matcher dateMatcher = LAST_AUTO_DATE_PATTERN.matcher(json);
+      if (dateMatcher.find()) {
+        lastAutoDate = dateMatcher.group(1);
+      }
+    } catch (IOException | RuntimeException ignored) {
+      minutes = DEFAULT_MINUTES;
+      autoStartDaily = false;
+      lastAutoDate = "";
+    }
+  }
+
+  private static void save() {
+    Path path = statePath();
+    try {
+      Files.createDirectories(path.getParent());
+      Files.writeString(path, "{\n  \"minutes\": " + minutes + ",\n  \"autoStartDaily\": " + autoStartDaily
+          + ",\n  \"lastAutoDate\": \"" + escape(lastAutoDate) + "\"\n}\n", StandardCharsets.UTF_8);
+    } catch (IOException ignored) {
+      // Timer persistence is optional.
+    }
+  }
+
+  private static Path statePath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-client-timer.json");
+  }
+
+  private static String today() {
+    return LocalDate.now().toString();
+  }
+
+  private static int clamp(int value, int min, int max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static String escape(String value) {
+    return String.valueOf(value == null ? "" : value).replace("\\", "\\\\").replace("\"", "\\\"");
+  }
+}
+`,
+  'dev/xlauncher/client/ScreenshotGallery.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.File;
+import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
+
+final class ScreenshotGallery {
+  private static final int MAX_ENTRIES = 60;
+  private static final long REFRESH_INTERVAL_MS = 5000L;
+  private static final Object LOAD_LOCK = new Object();
+  private static final Map<String, TextureHandle> TEXTURES = new ConcurrentHashMap<>();
+  private static volatile List<Entry> cachedEntries = List.of();
+  private static volatile long nextRefreshMs;
+  private static volatile boolean loading;
+  private static volatile boolean refreshAfterLoad;
+  private static volatile Path lastLoadDir;
+
+  private ScreenshotGallery() {
+  }
+
+  static List<Entry> entries(Object client) {
+    long now = System.currentTimeMillis();
+    if (now >= nextRefreshMs) {
+      scheduleLoad(screenshotsDir(client), false);
+    }
+    return cachedEntries;
+  }
+
+  static void refresh(Object client) {
+    scheduleLoad(screenshotsDir(client), true);
+  }
+
+  static boolean isLoading() {
+    return loading;
+  }
+
+  private static void scheduleLoad(Path dir, boolean force) {
+    if (dir == null || !Files.isDirectory(dir)) {
+      cachedEntries = List.of();
+      nextRefreshMs = System.currentTimeMillis() + REFRESH_INTERVAL_MS;
+      return;
+    }
+    long now = System.currentTimeMillis();
+    if (!force && now < nextRefreshMs && !cachedEntries.isEmpty()) {
+      return;
+    }
+    synchronized (LOAD_LOCK) {
+      lastLoadDir = dir;
+      if (loading) {
+        refreshAfterLoad = true;
+        return;
+      }
+      loading = true;
+      nextRefreshMs = now + REFRESH_INTERVAL_MS;
+    }
+    Thread worker = new Thread(() -> {
+      try {
+        cachedEntries = load(dir);
+      } finally {
+        Path retryDir = null;
+        synchronized (LOAD_LOCK) {
+          loading = false;
+          if (refreshAfterLoad) {
+            refreshAfterLoad = false;
+            retryDir = lastLoadDir;
+          }
+        }
+        if (retryDir != null) {
+          scheduleLoad(retryDir, true);
+        }
+      }
+    }, "X Client Screenshot Gallery");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  private static List<Entry> load(Path dir) {
+    if (dir == null || !Files.isDirectory(dir)) {
+      return List.of();
+    }
+    try (var stream = Files.list(dir)) {
+      List<Path> files = stream
+          .filter(Files::isRegularFile)
+          .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png"))
+          .sorted(Comparator.comparingLong(ScreenshotGallery::modifiedMs).reversed())
+          .limit(MAX_ENTRIES)
+          .toList();
+      List<Entry> entries = new ArrayList<>();
+      for (Path file : files) {
+        Entry entry = readEntry(file);
+        if (entry != null) {
+          entries.add(entry);
+        }
+      }
+      return List.copyOf(entries);
+    } catch (Throwable ignored) {
+      return List.of();
+    }
+  }
+
+  private static Entry readEntry(Path file) {
+    try {
+      long modified = modifiedMs(file);
+      long size = Files.size(file);
+      int[] dimensions = dimensions(file);
+      return new Entry(file, file.getFileName().toString(), modified, size, dimensions[0], dimensions[1]);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static int[] dimensions(Path file) {
+    try (ImageInputStream input = ImageIO.createImageInputStream(file.toFile())) {
+      if (input == null) {
+        return new int[] { 0, 0 };
+      }
+      var readers = ImageIO.getImageReaders(input);
+      if (!readers.hasNext()) {
+        return new int[] { 0, 0 };
+      }
+      ImageReader reader = readers.next();
+      try {
+        reader.setInput(input, true, true);
+        return new int[] { reader.getWidth(0), reader.getHeight(0) };
+      } finally {
+        reader.dispose();
+      }
+    } catch (Throwable ignored) {
+      return new int[] { 0, 0 };
+    }
+  }
+
+  static Object textureId(Entry entry, Object client) {
+    if (entry == null || entry.path == null || client == null) {
+      return null;
+    }
+    String key = textureKey(entry);
+    TextureHandle handle = TEXTURES.computeIfAbsent(key, ignored -> new TextureHandle(entry.path, entry.modifiedMs));
+    Object existingId = handle.textureId;
+    if (existingId != null) {
+      return existingId;
+    }
+    Object nativeImage = handle.nativeImage;
+    if (nativeImage != null) {
+      Object registered = registerTexture(client, key, nativeImage);
+      if (registered != null) {
+        handle.textureId = registered;
+        handle.nativeImage = null;
+        return registered;
+      }
+    }
+    if (!handle.loading && !handle.failed) {
+      handle.loading = true;
+      Thread worker = new Thread(() -> {
+        try {
+          handle.nativeImage = readNativeImage(handle.path);
+          if (handle.nativeImage == null) {
+            handle.failed = true;
+          }
+        } catch (Throwable ignored) {
+          handle.failed = true;
+        } finally {
+          handle.loading = false;
+        }
+      }, "X Client Screenshot Texture");
+      worker.setDaemon(true);
+      worker.start();
+    }
+    return null;
+  }
+
+  static boolean textureLoading(Entry entry) {
+    if (entry == null) {
+      return false;
+    }
+    TextureHandle handle = TEXTURES.get(textureKey(entry));
+    return handle != null && handle.loading;
+  }
+
+  private static Object readNativeImage(Path path) {
+    Class<?> nativeImageClass = classForNames(
+        "com.mojang.blaze3d.platform.NativeImage",
+        "net.minecraft.class_1011");
+    if (nativeImageClass == null) {
+      return null;
+    }
+    try (InputStream input = Files.newInputStream(path)) {
+      Method read = nativeImageClass.getMethod("read", InputStream.class);
+      return read.invoke(null, input);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static Object registerTexture(Object client, String key, Object nativeImage) {
+    Object textureManager = textureManager(client);
+    if (textureManager == null || nativeImage == null) {
+      return null;
+    }
+    Object texture = dynamicTexture(nativeImage);
+    if (texture == null) {
+      return null;
+    }
+    applyHighQualityFiltering(texture);
+    Object id = identifier("x-client", "screenshots/" + safeId(key));
+    if (id == null) {
+      return null;
+    }
+    for (Method method : textureManager.getClass().getMethods()) {
+      if (method.getParameterCount() != 2) {
+        continue;
+      }
+      Class<?>[] types = method.getParameterTypes();
+      if (!types[0].isInstance(id) || !types[1].isInstance(texture)) {
+        continue;
+      }
+      try {
+        method.invoke(textureManager, id, texture);
+        return id;
+      } catch (Throwable ignored) {
+        // Try the next texture manager registration signature.
+      }
+    }
+    closeQuietly(texture);
+    return null;
+  }
+
+  private static Object dynamicTexture(Object nativeImage) {
+    Class<?> dynamicTextureClass = classForNames(
+        "net.minecraft.client.renderer.texture.DynamicTexture",
+        "net.minecraft.class_1043");
+    if (dynamicTextureClass == null) {
+      return null;
+    }
+    for (var constructor : dynamicTextureClass.getConstructors()) {
+      Class<?>[] types = constructor.getParameterTypes();
+      try {
+        if (types.length == 2 && Supplier.class.isAssignableFrom(types[0]) && types[1].isInstance(nativeImage)) {
+          return constructor.newInstance((Supplier<String>) () -> "X Client Screenshot", nativeImage);
+        }
+        if (types.length == 2 && String.class.equals(types[0]) && types[1].isInstance(nativeImage)) {
+          return constructor.newInstance("X Client Screenshot", nativeImage);
+        }
+        if (types.length == 1 && types[0].isInstance(nativeImage)) {
+          return constructor.newInstance(nativeImage);
+        }
+      } catch (Throwable ignored) {
+        // Try the next constructor.
+      }
+    }
+    return null;
+  }
+
+  private static void applyHighQualityFiltering(Object texture) {
+    for (String name : new String[] { "setFilter", "setBlurMipmap", "method_4524", "method_4525" }) {
+      Class<?> type = texture.getClass();
+      while (type != null) {
+        try {
+          Method method = type.getDeclaredMethod(name, Boolean.TYPE, Boolean.TYPE);
+          method.setAccessible(true);
+          method.invoke(texture, true, false);
+          return;
+        } catch (Throwable ignored) {
+          // Try the superclass or next mapping name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+  }
+
+  private static Object textureManager(Object client) {
+    Object manager = invokeNoArgs(client, "getTextureManager", "method_1531");
+    if (manager != null) {
+      return manager;
+    }
+    for (Method method : client.getClass().getMethods()) {
+      if (method.getParameterCount() != 0) {
+        continue;
+      }
+      String returnName = method.getReturnType().getName();
+      if (!returnName.endsWith("TextureManager") && !returnName.endsWith("class_1060")) {
+        continue;
+      }
+      try {
+        Object value = method.invoke(client);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next no-arg texture manager getter.
+      }
+    }
+    return null;
+  }
+
+  private static Object identifier(String namespace, String path) {
+    Class<?> identifierClass = classForNames(
+        "net.minecraft.resources.Identifier",
+        "net.minecraft.resources.ResourceLocation",
+        "net.minecraft.util.Identifier",
+        "net.minecraft.class_2960");
+    if (identifierClass == null) {
+      return null;
+    }
+    for (String methodName : new String[] { "fromNamespaceAndPath", "tryBuild", "of", "method_60655", "method_60654" }) {
+      try {
+        Method method = identifierClass.getMethod(methodName, String.class, String.class);
+        Object value = method.invoke(null, namespace, path);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next Identifier factory.
+      }
+    }
+    for (Method method : identifierClass.getMethods()) {
+      if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())
+          || !identifierClass.isAssignableFrom(method.getReturnType())
+          || method.getParameterCount() != 2
+          || method.getParameterTypes()[0] != String.class
+          || method.getParameterTypes()[1] != String.class) {
+        continue;
+      }
+      try {
+        Object value = method.invoke(null, namespace, path);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next Identifier factory.
+      }
+    }
+    try {
+      var constructor = identifierClass.getDeclaredConstructor(String.class, String.class);
+      constructor.setAccessible(true);
+      return constructor.newInstance(namespace, path);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  static Object renderPipeline() {
+    Class<?> pipelineClass = classForNames(
+        "net.minecraft.client.renderer.RenderPipelines",
+        "net.minecraft.client.render.RenderLayer",
+        "net.minecraft.class_4668");
+    if (pipelineClass == null) {
+      return null;
+    }
+    for (String fieldName : new String[] { "GUI_TEXTURED", "field_53786" }) {
+      try {
+        return pipelineClass.getField(fieldName).get(null);
+      } catch (Throwable ignored) {
+        // Try the next known field.
+      }
+    }
+    for (Field field : pipelineClass.getFields()) {
+      String name = field.getName().toLowerCase(Locale.ROOT);
+      if (!name.contains("textured") && !name.contains("gui")) {
+        continue;
+      }
+      try {
+        Object value = field.get(null);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next field.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeNoArgs(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          return method.invoke(target);
+        } catch (Throwable alsoIgnored) {
+          // Try the next name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Class<?> classForNames(String... names) {
+    for (String name : names) {
+      Class<?> direct = directClass(name);
+      if (direct != null) {
+        return direct;
+      }
+      for (String namespace : new String[] { "named", "intermediary" }) {
+        String mapped = mappedClassName(namespace, name);
+        if (mapped == null || mapped.equals(name)) {
+          continue;
+        }
+        Class<?> mappedClass = directClass(mapped);
+        if (mappedClass != null) {
+          return mappedClass;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Class<?> directClass(String name) {
+    try {
+      return Class.forName(name);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static String mappedClassName(String namespace, String name) {
+    try {
+      Class<?> loaderClass = Class.forName("net.fabricmc.loader.api.FabricLoader");
+      Object loader = loaderClass.getMethod("getInstance").invoke(null);
+      Object resolver = loaderClass.getMethod("getMappingResolver").invoke(loader);
+      return (String) resolver.getClass().getMethod("mapClassName", String.class, String.class).invoke(resolver, namespace, name);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static String textureKey(Entry entry) {
+    return entry.path.toAbsolutePath().normalize() + "@" + entry.modifiedMs + "@" + entry.sizeBytes;
+  }
+
+  private static String safeId(String value) {
+    return Integer.toHexString(value.hashCode());
+  }
+
+  private static void closeQuietly(Object value) {
+    try {
+      if (value instanceof AutoCloseable closeable) {
+        closeable.close();
+      }
+    } catch (Throwable ignored) {
+      // Optional cleanup.
+    }
+  }
+
+  static void saveWithWindowsDialog(Entry entry) {
+    if (entry == null || entry.path == null) {
+      return;
+    }
+    Thread worker = new Thread(() -> saveWithWindowsDialogBlocking(entry), "X Client Screenshot Save");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  static void shareWithWindows(Entry entry) {
+    if (entry == null || entry.path == null) {
+      return;
+    }
+    Thread worker = new Thread(() -> shareWithWindowsBlocking(entry), "X Client Screenshot Share");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  private static void saveWithWindowsDialogBlocking(Entry entry) {
+    java.awt.Frame owner = null;
+    java.awt.FileDialog dialog = null;
+    try {
+      if (java.awt.GraphicsEnvironment.isHeadless()) {
+        showInExplorer(entry);
+        return;
+      }
+      owner = new java.awt.Frame();
+      owner.setAlwaysOnTop(true);
+      dialog = new java.awt.FileDialog(owner, "Screenshot speichern", java.awt.FileDialog.SAVE);
+      Path initialDir = picturesDir();
+      if (initialDir != null) {
+        dialog.setDirectory(initialDir.toString());
+      }
+      dialog.setFile(defaultFileName(entry));
+      dialog.setVisible(true);
+      String directory = dialog.getDirectory();
+      String file = dialog.getFile();
+      if (directory == null || file == null || file.isBlank()) {
+        return;
+      }
+      Path target = Path.of(directory, ensurePngFileName(file));
+      Files.copy(entry.path, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    } catch (Throwable ignored) {
+      showInExplorer(entry);
+    } finally {
+      if (dialog != null) {
+        dialog.dispose();
+      }
+      if (owner != null) {
+        owner.dispose();
+      }
+    }
+  }
+
+  private static void shareWithWindowsBlocking(Entry entry) {
+    try {
+      if (isWindows()) {
+        invokeWindowsShare(entry.path);
+      }
+    } catch (Throwable ignored) {
+      // Native Windows share is best-effort.
+    }
+  }
+
+  private static boolean invokeWindowsShare(Path path) {
+    if (path == null || !Files.exists(path)) {
+      return false;
+    }
+    String psPath = psSingleQuoted(path.toAbsolutePath().normalize().toString());
+    String script = "$p=" + psPath + ";"
+        + "$shell=New-Object -ComObject Shell.Application;"
+        + "$folder=$shell.Namespace((Split-Path -LiteralPath $p));"
+        + "if($null -eq $folder){exit 1};"
+        + "$item=$folder.ParseName((Split-Path -Leaf $p));"
+        + "if($null -eq $item){exit 1};"
+        + "$done=$false;"
+        + "foreach($verbName in @('share','Share','Windows.ModernShare','ModernShare')){"
+        + "try{$item.InvokeVerb($verbName);$done=$true;break}catch{}"
+        + "};"
+        + "if(-not $done){foreach($verb in $item.Verbs()){"
+        + "$name=$verb.Name.Replace('&','');"
+        + "if($name -match 'Share|Teilen|Freigeben'){ $verb.DoIt(); $done=$true; break }"
+        + "}};"
+        + "if(-not $done){"
+        + "Start-Process explorer.exe -ArgumentList ('/select,\"' + $p + '\"');"
+        + "Start-Sleep -Milliseconds 900;"
+        + "$ws=New-Object -ComObject WScript.Shell;"
+        + "$folderName=Split-Path -Leaf (Split-Path -Parent $p);"
+        + "$ws.AppActivate($folderName)|Out-Null;"
+        + "Start-Sleep -Milliseconds 180;"
+        + "$ws.SendKeys('+{F10}');"
+        + "Start-Sleep -Milliseconds 220;"
+        + "$ws.SendKeys('f');"
+        + "Start-Sleep -Milliseconds 120;"
+        + "$ws.SendKeys('{ENTER}');"
+        + "$done=$true"
+        + "};"
+        + "if($done){exit 0}else{exit 1}";
+    try {
+      Process process = new ProcessBuilder(windowsPowerShell(), "-NoProfile", "-NonInteractive", "-Command", script).start();
+      if (!process.waitFor(2L, java.util.concurrent.TimeUnit.SECONDS)) {
+        return true;
+      }
+      return process.exitValue() == 0;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static void showInExplorer(Entry entry) {
+    try {
+      if (entry == null || entry.path == null) {
+        return;
+      }
+      Path path = entry.path.toAbsolutePath().normalize();
+      if (isWindows()) {
+        new ProcessBuilder("explorer.exe", "/select," + path).start();
+      } else if (java.awt.Desktop.isDesktopSupported()) {
+        java.awt.Desktop.getDesktop().open(path.toFile());
+      }
+    } catch (Throwable ignored) {
+      // Native integration is best-effort.
+    }
+  }
+
+  private static Path picturesDir() {
+    try {
+      String home = System.getProperty("user.home");
+      if (home == null || home.isBlank()) {
+        return null;
+      }
+      Path pictures = Path.of(home, "Pictures");
+      return Files.isDirectory(pictures) ? pictures : Path.of(home);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static boolean isWindows() {
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+  }
+
+  private static String windowsPowerShell() {
+    String root = System.getenv("SystemRoot");
+    if (root != null && !root.isBlank()) {
+      Path bundled = Path.of(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      if (Files.isRegularFile(bundled)) {
+        return bundled.toString();
+      }
+    }
+    return "powershell.exe";
+  }
+
+  private static String psSingleQuoted(String value) {
+    return "'" + String.valueOf(value).replace("'", "''") + "'";
+  }
+
+  private static String defaultFileName(Entry entry) {
+    String name = entry.name == null || entry.name.isBlank() ? "screenshot.png" : entry.name;
+    return ensurePngFileName(name);
+  }
+
+  private static String ensurePngFileName(String value) {
+    String safe = String.valueOf(value == null ? "screenshot" : value).trim();
+    if (safe.isEmpty()) {
+      safe = "screenshot";
+    }
+    return safe.toLowerCase(Locale.ROOT).endsWith(".png") ? safe : safe + ".png";
+  }
+
+  private static Path screenshotsDir(Object client) {
+    Path gameDir = gameDir(client);
+    if (gameDir != null) {
+      return gameDir.resolve("screenshots");
+    }
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft", "screenshots");
+  }
+
+  private static Path gameDir(Object client) {
+    Object value = field(client, "gameDirectory", "runDirectory", "field_1697", "field_1703");
+    if (value instanceof File file) {
+      return file.toPath();
+    }
+    if (value instanceof Path path) {
+      return path;
+    }
+    return null;
+  }
+
+  private static Object field(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the superclass or next name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+    return null;
+  }
+
+  private static long modifiedMs(Path file) {
+    try {
+      return Files.getLastModifiedTime(file).toMillis();
+    } catch (Throwable ignored) {
+      return 0L;
+    }
+  }
+
+  static String shortDate(long modifiedMs) {
+    if (modifiedMs <= 0L) {
+      return "";
+    }
+    java.time.LocalDateTime date = java.time.LocalDateTime.ofInstant(
+        java.time.Instant.ofEpochMilli(modifiedMs),
+        java.time.ZoneId.systemDefault());
+    return String.format(Locale.ROOT, "%02d.%02d. %02d:%02d", date.getDayOfMonth(), date.getMonthValue(), date.getHour(), date.getMinute());
+  }
+
+  static String sizeLabel(long bytes) {
+    if (bytes >= 1024L * 1024L) {
+      return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0D * 1024.0D));
+    }
+    if (bytes >= 1024L) {
+      return String.format(Locale.ROOT, "%.0f KB", bytes / 1024.0D);
+    }
+    return bytes + " B";
+  }
+
+  static final class Entry {
+    final Path path;
+    final String name;
+    final long modifiedMs;
+    final long sizeBytes;
+    final int width;
+    final int height;
+
+    Entry(Path path, String name, long modifiedMs, long sizeBytes, int width, int height) {
+      this.path = path;
+      this.name = name;
+      this.modifiedMs = modifiedMs;
+      this.sizeBytes = sizeBytes;
+      this.width = width;
+      this.height = height;
+    }
+  }
+
+  private static final class TextureHandle {
+    final Path path;
+    final long modifiedMs;
+    volatile Object nativeImage;
+    volatile Object textureId;
+    volatile boolean loading;
+    volatile boolean failed;
+
+    TextureHandle(Path path, long modifiedMs) {
+      this.path = path;
+      this.modifiedMs = modifiedMs;
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/AutoHitController.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+/** Owner-only combat helper. It never scans the world: Minecraft's crosshair hit is authoritative. */
+final class AutoHitController {
+  private static Object pendingTarget;
+  private static boolean syntheticForward;
+  private static boolean releaseForwardAfterHit;
+  private static int forwardReleaseDelayTicks;
+
+  private AutoHitController() {}
+
+  static void update(Object client, boolean enabled) {
+    // Do not rely on menu visibility as the security boundary.
+    if (!enabled || !OwnerAccess.hasPermission() || client == null) {
+      reset(client);
+      return;
+    }
+    Object player = field(client, "player", "field_1724");
+    Object gameMode = field(client, "gameMode", "interactionManager", "field_1761");
+    if (player == null || gameMode == null) {
+      reset(client);
+      return;
+    }
+
+    if (releaseForwardAfterHit) {
+      // Never cancel W while the player is still physically holding it.
+      if (forwardReleaseDelayTicks > 0) {
+        forwardReleaseDelayTicks--;
+        setForward(client, true);
+      } else if (!physicalForwardDown(client)) {
+        setForward(client, false);
+        syntheticForward = false;
+        releaseForwardAfterHit = false;
+      } else {
+        setForward(client, true);
+      }
+    }
+
+    Object lookedAt = crosshairEntity(client);
+    if (!validTarget(player, lookedAt)) {
+      if (pendingTarget != null && syntheticForward) releaseForwardAfterHit = true;
+      pendingTarget = null;
+      return;
+    }
+
+    if (pendingTarget != lookedAt) {
+      if (attackStrength(player) < 0.999F) return;
+      pendingTarget = lookedAt;
+      // Keep forward active through the attack packet; releasing it before attack makes
+      // sprint hits unreliable on remote servers.
+      setForward(client, true);
+      syntheticForward = true;
+      invoke(player, new String[] { "setSprinting", "method_5728" }, true);
+    }
+
+    if (attackStrength(player) < 0.999F) return;
+    if (!validTarget(player, pendingTarget) || crosshairEntity(client) != pendingTarget) {
+      pendingTarget = null;
+      return;
+    }
+    if (invoke(gameMode, new String[] { "attack", "attackEntity", "method_2918" }, player, pendingTarget)) {
+      invoke(player, new String[] { "swing", "swingHand", "method_6104" }, mainHand());
+      pendingTarget = null;
+      releaseForwardAfterHit = true;
+      // A short stable follow-through avoids a one-tick W flicker and feels smoother,
+      // while remaining brief enough not to turn into permanent automatic movement.
+      forwardReleaseDelayTicks = 2;
+    }
+  }
+
+  private static float attackStrength(Object player) {
+    Object value = invokeValue(player, new String[] { "getAttackStrengthScale", "getAttackCooldownProgress", "method_7261" }, 0.0F);
+    return value instanceof Number number ? number.floatValue() : 0.0F;
+  }
+
+  private static Object crosshairEntity(Object client) {
+    // The EntityHitResult is produced by Minecraft's own reach/visibility ray cast and also
+    // works on remote multiplayer servers. A separately cached targetedEntity may be stale.
+    Object hit = field(client, "hitResult", "field_1765");
+    Object entity = invokeValue(hit, new String[] { "getEntity", "method_17782" });
+    return entity != null ? entity : field(client, "crosshairPickEntity", "targetedEntity", "field_3213", "field_1692");
+  }
+
+  private static boolean validTarget(Object player, Object entity) {
+    if (entity == null || entity == player || !isLiving(entity)) return false;
+    Object alive = invokeValue(entity, new String[] { "isAlive", "method_5805" });
+    if (alive instanceof Boolean bool && !bool) return false;
+    return true;
+  }
+
+  private static boolean isLiving(Object entity) {
+    return isInstance(entity, "net.minecraft.world.entity.LivingEntity", "net.minecraft.class_1309")
+        || invokeValue(entity, new String[] { "getHealth", "method_6032" }) instanceof Number;
+  }
+
+  private static boolean isInstance(Object value, String... names) {
+    for (String name : names) try { if (Class.forName(name).isInstance(value)) return true; } catch (Throwable ignored) {}
+    return false;
+  }
+
+  private static void setForward(Object client, boolean down) {
+    Object options = field(client, "options", "field_1690");
+    Object key = field(options, "keyUp", "forwardKey", "field_1894");
+    invoke(key, new String[] { "setDown", "setPressed", "method_1416" }, down);
+  }
+
+  private static boolean physicalForwardDown(Object client) {
+    try {
+      Object window = invokeValue(client, new String[] { "getWindow", "method_22683" });
+      Object handle = invokeValue(window, new String[] { "getWindow", "handle", "method_4490" });
+      if (!(handle instanceof Number number)) return false;
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int state = ((Number) glfw.getMethod("glfwGetKey", long.class, int.class).invoke(null, number.longValue(), 87)).intValue();
+      return state == glfw.getField("GLFW_PRESS").getInt(null) || state == glfw.getField("GLFW_REPEAT").getInt(null);
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static Object mainHand() {
+    for (String name : new String[] { "net.minecraft.world.InteractionHand", "net.minecraft.class_1268" }) {
+      try {
+        Class<?> type = Class.forName(name);
+        try { return Enum.valueOf((Class) type, "MAIN_HAND"); } catch (Throwable ignored) {}
+        Object[] constants = type.getEnumConstants();
+        if (constants != null && constants.length > 0) return constants[0];
+      } catch (Throwable ignored) {}
+    }
+    return null;
+  }
+
+  private static void reset(Object client) {
+    if (syntheticForward && !physicalForwardDown(client)) setForward(client, false);
+    syntheticForward = false;
+    releaseForwardAfterHit = false;
+    forwardReleaseDelayTicks = 0;
+    pendingTarget = null;
+  }
+
+  private static Object field(Object target, String... names) {
+    if (target == null) return null;
+    for (String name : names) for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) try {
+      Field f = type.getDeclaredField(name); f.setAccessible(true); return f.get(target);
+    } catch (Throwable ignored) {}
+    return null;
+  }
+
+  private static boolean invoke(Object target, String[] names, Object... args) {
+    if (target == null) return false;
+    for (String name : names) for (Method method : target.getClass().getMethods()) {
+      if (!name.equals(method.getName()) || method.getParameterCount() != args.length) continue;
+      try { method.invoke(target, args); return true; } catch (Throwable ignored) {}
+    }
+    return false;
+  }
+
+  private static Object invokeValue(Object target, String[] names, Object... args) {
+    if (target == null) return null;
+    for (String name : names) for (Method method : target.getClass().getMethods()) {
+      if (!name.equals(method.getName()) || method.getParameterCount() != args.length) continue;
+      try { return method.invoke(target, args); } catch (Throwable ignored) {}
+    }
+    return null;
+  }
+}
+`,
+  'dev/xlauncher/client/HotbarAttributeController.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+/** Owner-only: runs Minecraft's own attack action once when the selected hotbar slot changes. */
+final class HotbarAttributeController {
+  private static Object trackedPlayer;
+  private static int previousSlot = -1;
+  private static int pendingTicks;
+
+  private HotbarAttributeController() {}
+
+  static void update(Object client, boolean enabled) {
+    if (!enabled || !OwnerAccess.hasPermission("atribute") || client == null) {
+      reset();
+      return;
+    }
+    Object player = field(client, "player", "field_1724");
+    if (player == null) {
+      reset();
+      return;
+    }
+    Object inventory = invokeValue(player, "getInventory", "method_31548");
+    if (inventory == null) inventory = field(player, "inventory", "field_7514");
+    int slot = selectedSlot(inventory);
+    if (slot < 0 || slot > 8) {
+      reset();
+      return;
+    }
+    if (trackedPlayer != player || previousSlot < 0) {
+      trackedPlayer = player;
+      previousSlot = slot;
+      return;
+    }
+    if (slot != previousSlot) {
+      previousSlot = slot;
+      pendingTicks = 1;
+      return;
+    }
+    if (pendingTicks <= 0) return;
+    pendingTicks--;
+    if (pendingTicks == 0) invokeAttack(client);
+  }
+
+  private static int selectedSlot(Object inventory) {
+    Object value = invokeValue(inventory, "getSelectedSlot", "getSelected", "method_67532");
+    if (value instanceof Number number) return number.intValue();
+    value = field(inventory, "selected", "selectedSlot", "field_7545");
+    return value instanceof Number number ? number.intValue() : -1;
+  }
+
+  private static void invokeAttack(Object client) {
+    // Minecraft may suppress repeated miss clicks locally. The real server-side
+    // attack/item cooldown remains authoritative and is not changed here.
+    setIntField(client, 0, "missTime", "attackCooldown", "field_1771");
+    for (String name : new String[] { "startAttack", "doAttack", "method_1536" }) {
+      for (Class<?> type = client.getClass(); type != null; type = type.getSuperclass()) {
+        try {
+          Method method = type.getDeclaredMethod(name);
+          method.setAccessible(true);
+          method.invoke(client);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next mapped name or superclass.
+        }
+      }
+    }
+  }
+
+  private static void reset() {
+    trackedPlayer = null;
+    previousSlot = -1;
+    pendingTicks = 0;
+  }
+
+  private static void setIntField(Object target, int value, String... names) {
+    if (target == null) return;
+    for (String name : names) for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+      try {
+        Field field = type.getDeclaredField(name);
+        if (field.getType() != Integer.TYPE) continue;
+        field.setAccessible(true);
+        field.setInt(target, value);
+        return;
+      } catch (Throwable ignored) {}
+    }
+  }
+
+  private static Object invokeValue(Object target, String... names) {
+    if (target == null) return null;
+    for (String name : names) for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+      try {
+        Method method = type.getDeclaredMethod(name);
+        method.setAccessible(true);
+        return method.invoke(target);
+      } catch (Throwable ignored) {}
+    }
+    return null;
+  }
+
+  private static Object field(Object target, String... names) {
+    if (target == null) return null;
+    for (String name : names) for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+      try {
+        Field field = type.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+      } catch (Throwable ignored) {}
+    }
+    return null;
+  }
+}
+`,
+  'dev/xlauncher/client/MobCameraTracker.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.Locale;
+
+final class MobCameraTracker {
+  private static final double RANGE = 48.0D;
+  private static final double RANGE_SQUARED = RANGE * RANGE;
+  private static final double SELECTION_RANGE = 64.0D;
+  private static final double PROJECTILE_LAUNCH_Y_OFFSET = 0.10000000149011612D;
+  private static final double MAX_LEAD_TICKS = 18.0D;
+  private static final double MAX_TARGET_SPEED = 0.72D;
+  private static final double MAX_VERTICAL_LEAD_SPEED = 0.20D;
+  private static final long RESCAN_MS = 110L;
+  private static final int MAX_ENTITY_SCAN = 768;
+  private static volatile Object target;
+  private static volatile Object targetLevel;
+  private static volatile Object lockedTarget;
+  private static volatile long lastScanMs;
+  private static Object motionEntity;
+  private static double motionVelocityX;
+  private static double motionVelocityY;
+  private static double motionVelocityZ;
+  private static boolean motionReady;
+  private static long lastRotationNs;
+  private static Object filteredAimEntity;
+  private static double filteredAimX;
+  private static double filteredAimY;
+  private static double filteredAimZ;
+  private static boolean filteredAimReady;
+
+  private MobCameraTracker() {
+  }
+
+  static void update(Object client, boolean enabled) {
+    if (!enabled || client == null) {
+      clear();
+      return;
+    }
+
+    Object player = getAnyField(client, "player", "field_1724");
+    Object level = getAnyField(client, "level", "world", "field_1687");
+    if (player == null || level == null) {
+      clear();
+      return;
+    }
+
+    Object locked = lockedTarget;
+    if (locked != null) {
+      if (isValidTarget(locked, player)) {
+        rotateViewToward(player, locked);
+        return;
+      }
+      disableModule();
+      return;
+    }
+
+    Object current = target;
+    if (current != null && !isValidTarget(current, player)) {
+      disableModule();
+      return;
+    }
+    long now = System.currentTimeMillis();
+    if (current == null || targetLevel != level || now - lastScanMs >= RESCAN_MS) {
+      current = nearestTarget(level, player);
+      target = current;
+      targetLevel = level;
+      lastScanMs = now;
+    }
+
+    if (current != null) {
+      rotateViewToward(player, current);
+    }
+  }
+
+  static boolean lockLookedAt(Object client) {
+    if (client == null) {
+      return false;
+    }
+    Object player = getAnyField(client, "player", "field_1724");
+    Object level = getAnyField(client, "level", "world", "field_1687");
+    Object selected = crosshairTarget(client);
+    if (player == null || level == null || !isValidTarget(selected, player)) {
+      return false;
+    }
+    lockedTarget = selected;
+    target = selected;
+    targetLevel = level;
+    lastScanMs = System.currentTimeMillis();
+    return true;
+  }
+
+  static Object trackedTarget() {
+    return lockedTarget != null ? lockedTarget : target;
+  }
+
+  static void clear() {
+    target = null;
+    targetLevel = null;
+    lockedTarget = null;
+    lastScanMs = 0L;
+    clearMotionSample();
+    lastRotationNs = 0L;
+    filteredAimEntity = null;
+    filteredAimReady = false;
+  }
+
+  private static void disableModule() {
+    clear();
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      if ("mobtrack".equals(modules[index].id)) {
+        MenuModules.setEnabled(index, false);
+        return;
+      }
+    }
+  }
+
+  private static Object crosshairTarget(Object client) {
+    Object entity = getAnyField(client, "crosshairPickEntity", "targetedEntity", "field_3213", "field_1692");
+    if (entity != null) {
+      return entity;
+    }
+    Object hitResult = getAnyField(client, "hitResult", "field_1765");
+    entity = invokeAny(hitResult, "getEntity", "method_17782");
+    if (entity != null) {
+      return entity;
+    }
+    Object player = getAnyField(client, "player", "field_1724");
+    Object level = getAnyField(client, "level", "world", "field_1687");
+    return rayTarget(level, player);
+  }
+
+  private static Object nearestTarget(Object level, Object player) {
+    TargetSearch search = new TargetSearch(player);
+    addCandidates(search, invokeAny(level, "entitiesForRendering", "getEntities", "getAllEntities"));
+    if (search.target == null) {
+      scanCandidateCollections(search, level);
+    }
+    return search.target;
+  }
+
+  private static Object rayTarget(Object level, Object player) {
+    if (level == null || player == null) {
+      return null;
+    }
+    double x = readDouble(player, Double.NaN, "getX", "method_23317", "x");
+    double y = readDouble(player, Double.NaN, "getEyeY", "method_23320", "getY", "method_23318", "y");
+    double z = readDouble(player, Double.NaN, "getZ", "method_23321", "z");
+    if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+      return null;
+    }
+
+    double yaw = readDouble(player, 0.0D, "getYRot", "getYaw", "method_36454", "method_5705", "yRot", "yaw");
+    double pitch = readDouble(player, 0.0D, "getXRot", "getPitch", "method_36455", "method_5695", "xRot", "pitch");
+    double yawRad = Math.toRadians(yaw);
+    double pitchRad = Math.toRadians(pitch);
+    double cosPitch = Math.cos(pitchRad);
+    RaySearch search = new RaySearch(player, x, y, z, -Math.sin(yawRad) * cosPitch, -Math.sin(pitchRad), Math.cos(yawRad) * cosPitch);
+    addRayCandidates(search, invokeAny(level, "entitiesForRendering", "getEntities", "getAllEntities"));
+    if (search.target == null) {
+      scanRayCandidateCollections(search, level);
+    }
+    return search.target;
+  }
+
+  private static void scanCandidateCollections(TargetSearch search, Object level) {
+    if (level == null) {
+      return;
+    }
+    for (Method method : level.getClass().getMethods()) {
+      if (search.scanned >= MAX_ENTITY_SCAN || method.getParameterCount() != 0) {
+        continue;
+      }
+      Class<?> returnType = method.getReturnType();
+      if (!Iterable.class.isAssignableFrom(returnType) && !returnType.isArray()) {
+        continue;
+      }
+      try {
+        addCandidates(search, method.invoke(level));
+      } catch (Throwable ignored) {
+        // Try the next collection-like method.
+      }
+      if (search.target != null) {
+        return;
+      }
+    }
+  }
+
+  private static void scanRayCandidateCollections(RaySearch search, Object level) {
+    if (level == null) {
+      return;
+    }
+    for (Method method : level.getClass().getMethods()) {
+      if (search.scanned >= MAX_ENTITY_SCAN || method.getParameterCount() != 0) {
+        continue;
+      }
+      Class<?> returnType = method.getReturnType();
+      if (!Iterable.class.isAssignableFrom(returnType) && !returnType.isArray()) {
+        continue;
+      }
+      try {
+        addRayCandidates(search, method.invoke(level));
+      } catch (Throwable ignored) {
+        // Try the next collection-like method.
+      }
+      if (search.target != null) {
+        return;
+      }
+    }
+  }
+
+  private static void addCandidates(TargetSearch search, Object value) {
+    if (value == null || search.scanned >= MAX_ENTITY_SCAN) {
+      return;
+    }
+    if (value instanceof Iterable<?> iterable) {
+      for (Object entity : iterable) {
+        addCandidate(search, entity);
+        if (search.scanned >= MAX_ENTITY_SCAN) {
+          return;
+        }
+      }
+      return;
+    }
+    if (value.getClass().isArray()) {
+      int length = Math.min(MAX_ENTITY_SCAN - search.scanned, java.lang.reflect.Array.getLength(value));
+      for (int index = 0; index < length; index += 1) {
+        addCandidate(search, java.lang.reflect.Array.get(value, index));
+      }
+    }
+  }
+
+  private static void addCandidate(TargetSearch search, Object entity) {
+    search.scanned += 1;
+    if (!isValidTarget(entity, search.player)) {
+      return;
+    }
+    double distanceSquared = horizontalDistanceSquared(search.player, entity);
+    if (distanceSquared >= 0.04D && distanceSquared < search.distanceSquared) {
+      search.target = entity;
+      search.distanceSquared = distanceSquared;
+    }
+  }
+
+  private static void addRayCandidates(RaySearch search, Object value) {
+    if (value == null || search.scanned >= MAX_ENTITY_SCAN) {
+      return;
+    }
+    if (value instanceof Iterable<?> iterable) {
+      for (Object entity : iterable) {
+        addRayCandidate(search, entity);
+        if (search.scanned >= MAX_ENTITY_SCAN) {
+          return;
+        }
+      }
+      return;
+    }
+    if (value.getClass().isArray()) {
+      int length = Math.min(MAX_ENTITY_SCAN - search.scanned, java.lang.reflect.Array.getLength(value));
+      for (int index = 0; index < length; index += 1) {
+        addRayCandidate(search, java.lang.reflect.Array.get(value, index));
+      }
+    }
+  }
+
+  private static void addRayCandidate(RaySearch search, Object entity) {
+    search.scanned += 1;
+    if (!isValidTarget(entity, search.player)) {
+      return;
+    }
+    Object box = invokeAny(entity, "getBoundingBox", "method_5829");
+    double distance = rayBoxDistance(search.x, search.y, search.z, search.directionX, search.directionY, search.directionZ, box, 0.35D);
+    if (distance >= 0.0D && distance <= SELECTION_RANGE && distance < search.distance) {
+      search.target = entity;
+      search.distance = distance;
+    }
+  }
+
+  private static boolean isValidTarget(Object entity, Object player) {
+    if (entity == null || entity == player || !isLivingEntity(entity)) {
+      return false;
+    }
+    if (booleanValue(invokeAny(entity, "isRemoved", "method_31481"), false)
+        || booleanValue(invokeAny(entity, "isSpectator", "method_7325"), false)) {
+      return false;
+    }
+    Object alive = invokeAny(entity, "isAlive", "method_5805");
+    if (alive instanceof Boolean bool && !bool.booleanValue()) {
+      return false;
+    }
+    double distanceSquared = horizontalDistanceSquared(player, entity);
+    return distanceSquared >= 0.0D && distanceSquared <= RANGE_SQUARED;
+  }
+
+  private static boolean isLivingEntity(Object entity) {
+    for (String className : new String[] { "net.minecraft.world.entity.LivingEntity", "net.minecraft.class_1309" }) {
+      try {
+        if (Class.forName(className).isInstance(entity)) {
+          return true;
+        }
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    return invokeAny(entity, "getHealth", "method_6032") instanceof Number;
+  }
+
+  private static boolean isPlayerEntity(Object entity) {
+    for (String className : new String[] {
+        "net.minecraft.world.entity.player.Player",
+        "net.minecraft.client.player.AbstractClientPlayer",
+        "net.minecraft.client.player.LocalPlayer",
+        "net.minecraft.class_1657",
+        "net.minecraft.class_742"
+    }) {
+      try {
+        if (Class.forName(className).isInstance(entity)) {
+          return true;
+        }
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    return invokeAny(entity, "getGameProfile", "getProfile", "method_7334", "method_12593") != null;
+  }
+
+  private static void rotateViewToward(Object player, Object entity) {
+    double playerX = readDouble(player, Double.NaN, "getX", "method_23317", "x");
+    double playerY = readDouble(player, Double.NaN, "getEyeY", "method_23320", "getY", "method_23318", "y");
+    double playerZ = readDouble(player, Double.NaN, "getZ", "method_23321", "z");
+    ProjectileAim projectile = heldProjectile(player);
+    double targetX = readDouble(entity, Double.NaN, "getX", "method_23317", "x");
+    double targetY = targetAimY(entity, projectile != null);
+    double targetZ = readDouble(entity, Double.NaN, "getZ", "method_23321", "z");
+    if (!Double.isFinite(playerX) || !Double.isFinite(playerY) || !Double.isFinite(playerZ)
+        || !Double.isFinite(targetX) || !Double.isFinite(targetY) || !Double.isFinite(targetZ)) {
+      return;
+    }
+    long nowNs = System.nanoTime();
+    double deltaSeconds = lastRotationNs == 0L ? 0.05D : Math.min(0.10D, Math.max(0.001D, (nowNs - lastRotationNs) / 1_000_000_000.0D));
+    lastRotationNs = nowNs;
+    // Low-pass the aim point first. Tiny mob animation changes therefore do not become camera jitter.
+    double positionAlpha = 1.0D - Math.exp(-deltaSeconds / 0.085D);
+    if (!filteredAimReady || filteredAimEntity != entity) {
+      filteredAimX = targetX;
+      filteredAimY = targetY;
+      filteredAimZ = targetZ;
+      filteredAimEntity = entity;
+      filteredAimReady = true;
+    } else {
+      filteredAimX += (targetX - filteredAimX) * positionAlpha;
+      filteredAimY += (targetY - filteredAimY) * positionAlpha;
+      filteredAimZ += (targetZ - filteredAimZ) * positionAlpha;
+    }
+    targetX = filteredAimX;
+    targetY = filteredAimY;
+    targetZ = filteredAimZ;
+    double launchY = projectile == null ? playerY : playerY - PROJECTILE_LAUNCH_Y_OFFSET;
+    if (projectile != null) {
+      double[] predicted = predictedProjectileTarget(player, entity, projectile, playerX, launchY, playerZ, targetX, targetY, targetZ);
+      targetX = predicted[0];
+      targetY = predicted[1];
+      targetZ = predicted[2];
+    }
+    double dx = targetX - playerX;
+    double dz = targetZ - playerZ;
+    double horizontal = Math.sqrt((dx * dx) + (dz * dz));
+    if (horizontal < 0.02D) {
+      return;
+    }
+
+    float sensitivity = MenuModules.effectLevel("mobtrack") / 100.0F;
+    double smoothTime = 0.31D - (0.245D * sensitivity);
+    float rotationAlpha = (float) (1.0D - Math.exp(-deltaSeconds / smoothTime));
+    float maxStep = (float) ((80.0D + (240.0D * sensitivity)) * deltaSeconds);
+    float currentYaw = (float) readDouble(player, 0.0D, "getYRot", "getYaw", "method_36454", "method_5705", "yRot", "yaw");
+    float targetYaw = wrapDegrees((float) Math.toDegrees(Math.atan2(-dx, dz)));
+    float yawError = wrapDegrees(targetYaw - currentYaw);
+    float smoothedYaw = Math.abs(yawError) < 0.035F
+        ? targetYaw
+        : currentYaw + clamp(yawError * rotationAlpha, -maxStep, maxStep);
+    setYaw(player, wrapDegrees(smoothedYaw));
+
+    float currentPitch = (float) readDouble(player, 0.0D, "getXRot", "getPitch", "method_36455", "method_5695", "xRot", "pitch");
+    float targetPitch = clamp(projectilePitch(horizontal, targetY - launchY, projectile, player), -89.0F, 89.0F);
+    float pitchError = targetPitch - currentPitch;
+    float smoothedPitch = Math.abs(pitchError) < 0.035F
+        ? targetPitch
+        : currentPitch + clamp(pitchError * rotationAlpha, -maxStep, maxStep);
+    setPitch(player, clamp(smoothedPitch, -89.0F, 89.0F));
+  }
+
+  private static double[] predictedProjectileTarget(Object player, Object entity, ProjectileAim projectile,
+      double playerX, double launchY, double playerZ, double targetX, double targetY, double targetZ) {
+    double[] velocity = smoothedTargetVelocity(entity);
+    if ((velocity[0] * velocity[0]) + (velocity[1] * velocity[1]) + (velocity[2] * velocity[2]) < 0.000001D) {
+      return new double[] { targetX, targetY, targetZ };
+    }
+    double predictedX = targetX;
+    double predictedY = targetY;
+    double predictedZ = targetZ;
+    for (int pass = 0; pass < 2; pass += 1) {
+      double dx = predictedX - playerX;
+      double dz = predictedZ - playerZ;
+      double horizontal = Math.sqrt((dx * dx) + (dz * dz));
+      double time = projectileFlightTime(horizontal, predictedY - launchY, projectile, player);
+      if (time <= 0.0D) {
+        break;
+      }
+      time = Math.min(MAX_LEAD_TICKS, time * leadScale(horizontal, projectile));
+      predictedX = targetX + (velocity[0] * time);
+      predictedY = targetY + (velocity[1] * time);
+      predictedZ = targetZ + (velocity[2] * time);
+    }
+    return new double[] { predictedX, predictedY, predictedZ };
+  }
+
+  private static double projectileFlightTime(double horizontal, double dy, ProjectileAim projectile, Object player) {
+    if (projectile == null || horizontal < 0.02D) {
+      return 0.0D;
+    }
+    double speed = projectileSpeed(projectile, player);
+    if (speed <= 0.02D) {
+      return 0.0D;
+    }
+    if (projectile.gravity <= 0.0D) {
+      return Math.sqrt((horizontal * horizontal) + (dy * dy)) / speed;
+    }
+    double speedSquared = speed * speed;
+    double gravity = projectile.gravity;
+    double discriminant = (speedSquared * speedSquared) - (gravity * ((gravity * horizontal * horizontal) + (2.0D * dy * speedSquared)));
+    if (discriminant < 0.0D) {
+      return horizontal / speed;
+    }
+    double launchAngle = Math.atan((speedSquared - Math.sqrt(discriminant)) / (gravity * horizontal));
+    double horizontalSpeed = speed * Math.cos(launchAngle);
+    return Math.abs(horizontalSpeed) <= 0.02D ? horizontal / speed : horizontal / horizontalSpeed;
+  }
+
+  private static double leadScale(double horizontal, ProjectileAim projectile) {
+    double scale = projectile.speed >= 2.5D ? 0.72D : 0.46D;
+    if (projectile.speed <= 0.8D) {
+      scale = 0.32D;
+    }
+    if (horizontal < 8.0D) {
+      scale *= 0.35D;
+    } else if (horizontal < 16.0D) {
+      scale *= 0.65D;
+    }
+    return Math.max(0.0D, Math.min(0.78D, scale));
+  }
+
+  private static float projectilePitch(double horizontal, double dy, ProjectileAim projectile, Object player) {
+    if (projectile == null || horizontal < 0.02D) {
+      return clamp((float) -Math.toDegrees(Math.atan2(dy, horizontal)), -89.0F, 89.0F);
+    }
+    double speed = projectileSpeed(projectile, player);
+    if (speed <= 0.02D || projectile.gravity <= 0.0D) {
+      return clamp((float) -Math.toDegrees(Math.atan2(dy, horizontal)) - (float) projectile.pitchOffset, -89.0F, 89.0F);
+    }
+    double speedSquared = speed * speed;
+    double gravity = projectile.gravity;
+    double discriminant = (speedSquared * speedSquared) - (gravity * ((gravity * horizontal * horizontal) + (2.0D * dy * speedSquared)));
+    if (discriminant < 0.0D) {
+      return clamp((float) -Math.toDegrees(Math.atan2(dy, horizontal)) - (float) projectile.pitchOffset, -89.0F, 89.0F);
+    }
+    double launchAngle = Math.atan((speedSquared - Math.sqrt(discriminant)) / (gravity * horizontal));
+    return clamp((float) -Math.toDegrees(launchAngle) - (float) projectile.pitchOffset, -89.0F, 89.0F);
+  }
+
+  private static double targetAimY(Object entity, boolean projectile) {
+    if (!projectile) {
+      double eyeY = readDouble(entity, Double.NaN, "getEyeY", "method_23320");
+      if (Double.isFinite(eyeY)) {
+        return eyeY;
+      }
+    }
+    Object box = invokeAny(entity, "getBoundingBox", "method_5829");
+    double minY = readDouble(box, Double.NaN, "minY", "field_1322");
+    double maxY = readDouble(box, Double.NaN, "maxY", "field_1325");
+    if (Double.isFinite(minY) && Double.isFinite(maxY) && maxY > minY) {
+      return minY + ((maxY - minY) * (projectile ? 0.55D : 0.75D));
+    }
+    double eyeY = readDouble(entity, Double.NaN, "getEyeY", "method_23320");
+    if (Double.isFinite(eyeY)) {
+      return eyeY;
+    }
+    double y = readDouble(entity, Double.NaN, "getY", "method_23318", "y");
+    if (!Double.isFinite(y)) {
+      return Double.NaN;
+    }
+    double height = readDouble(entity, 1.8D, "getBbHeight", "getHeight", "method_17682");
+    return y + (height * (projectile ? 0.55D : 0.75D));
+  }
+
+  private static double[] smoothedTargetVelocity(Object entity) {
+    double[] raw = rawTargetVelocity(entity);
+    if (motionEntity != entity || !motionReady) {
+      storeMotionSample(entity, raw);
+      return raw;
+    }
+    double velocityX = (motionVelocityX * 0.38D) + (raw[0] * 0.62D);
+    double velocityY = (motionVelocityY * 0.25D) + (raw[1] * 0.75D);
+    double velocityZ = (motionVelocityZ * 0.38D) + (raw[2] * 0.62D);
+    double[] sanitized = sanitizedVelocity(velocityX, velocityY, velocityZ);
+    storeMotionSample(entity, sanitized);
+    return sanitized;
+  }
+
+  private static double[] rawTargetVelocity(Object entity) {
+    Object movement = invokeAny(entity, "getDeltaMovement", "getVelocity", "method_18798");
+    double velocityX = readDouble(movement, Double.NaN, "x", "getX", "method_10216");
+    double velocityY = readDouble(movement, Double.NaN, "y", "getY", "method_10214");
+    double velocityZ = readDouble(movement, Double.NaN, "z", "getZ", "method_10215");
+    if (Double.isFinite(velocityX) && Double.isFinite(velocityY) && Double.isFinite(velocityZ)
+        && ((velocityX * velocityX) + (velocityY * velocityY) + (velocityZ * velocityZ)) > 0.000001D) {
+      return sanitizedVelocity(velocityX, velocityY, velocityZ);
+    }
+
+    double currentX = readDouble(entity, Double.NaN, "getX", "method_23317", "x");
+    double currentY = readDouble(entity, Double.NaN, "getY", "method_23318", "y");
+    double currentZ = readDouble(entity, Double.NaN, "getZ", "method_23321", "z");
+    double previousX = readDouble(entity, Double.NaN, "getXOld", "getPrevX", "xo", "xOld", "prevX", "field_6014");
+    double previousY = readDouble(entity, Double.NaN, "getYOld", "getPrevY", "yo", "yOld", "prevY", "field_6036");
+    double previousZ = readDouble(entity, Double.NaN, "getZOld", "getPrevZ", "zo", "zOld", "prevZ", "field_5969");
+    if (!Double.isFinite(currentX) || !Double.isFinite(currentY) || !Double.isFinite(currentZ)
+        || !Double.isFinite(previousX) || !Double.isFinite(previousY) || !Double.isFinite(previousZ)) {
+      return new double[] { 0.0D, 0.0D, 0.0D };
+    }
+    return sanitizedVelocity(currentX - previousX, currentY - previousY, currentZ - previousZ);
+  }
+
+  private static double[] sanitizedVelocity(double velocityX, double velocityY, double velocityZ) {
+    if (!Double.isFinite(velocityX) || !Double.isFinite(velocityY) || !Double.isFinite(velocityZ)) {
+      return new double[] { 0.0D, 0.0D, 0.0D };
+    }
+    double horizontal = Math.sqrt((velocityX * velocityX) + (velocityZ * velocityZ));
+    if (horizontal > MAX_TARGET_SPEED) {
+      double scale = MAX_TARGET_SPEED / horizontal;
+      velocityX *= scale;
+      velocityZ *= scale;
+    }
+    velocityY = Math.max(-MAX_VERTICAL_LEAD_SPEED, Math.min(MAX_VERTICAL_LEAD_SPEED, velocityY));
+    return new double[] { velocityX, velocityY, velocityZ };
+  }
+
+  private static void storeMotionSample(Object entity, double[] velocity) {
+    motionEntity = entity;
+    motionVelocityX = velocity[0];
+    motionVelocityY = velocity[1];
+    motionVelocityZ = velocity[2];
+    motionReady = true;
+  }
+
+  private static void clearMotionSample() {
+    motionEntity = null;
+    motionVelocityX = 0.0D;
+    motionVelocityY = 0.0D;
+    motionVelocityZ = 0.0D;
+    motionReady = false;
+  }
+
+  private static ProjectileAim heldProjectile(Object player) {
+    Object main = invokeAny(player, "getMainHandItem", "getMainHandStack", "method_6047");
+    ProjectileAim mainSpec = projectileSpec(main, player);
+    if (mainSpec != null) {
+      return mainSpec;
+    }
+    return projectileSpec(invokeAny(player, "getOffhandItem", "getOffHandStack", "method_6079"), player);
+  }
+
+  private static ProjectileAim projectileSpec(Object stack, Object player) {
+    if (stack == null || booleanValue(invokeAny(stack, "isEmpty", "method_7960"), false)) {
+      return null;
+    }
+    Object item = invokeAny(stack, "getItem", "method_7909");
+    String raw = (String.valueOf(invokeAny(stack, "getDescriptionId", "method_7866")) + " "
+        + textValue(invokeAny(stack, "getHoverName", "getName", "method_7964")) + " "
+        + String.valueOf(stack) + " " + String.valueOf(item) + " " + (item == null ? "" : item.getClass().getName())).toLowerCase(Locale.ROOT);
+    if (raw.contains("spawn_egg") || raw.contains("spawn egg") || raw.contains("turtle_egg") || raw.contains("sniffer_egg") || raw.contains("frogspawn")) {
+      return null;
+    }
+    if (raw.contains("crossbow")) {
+      Boolean charged = isChargedCrossbow(stack, item);
+      if (Boolean.FALSE.equals(charged)) {
+        return null;
+      }
+      if (raw.contains("firework_rocket") || raw.contains("firework rocket")) {
+        return new ProjectileAim(1.6D, 0.0D, 0.0D, false);
+      }
+      return new ProjectileAim(3.15D, 0.05D, 0.0D, false);
+    }
+    if (raw.contains("bow")) {
+      return new ProjectileAim(3.0D, 0.05D, 0.0D, true);
+    }
+    if (raw.contains("trident")) {
+      return new ProjectileAim(2.5D, 0.05D, 0.0D, false);
+    }
+    if (raw.contains("ender_pearl") || raw.contains("ender pearl")
+        || raw.contains("snowball") || raw.contains("item.minecraft.egg") || raw.contains("minecraft:egg") || raw.contains(" egg ")) {
+      return new ProjectileAim(1.5D, 0.03D, 0.0D, false);
+    }
+    if (raw.contains("splash_potion") || raw.contains("lingering_potion") || raw.contains("splash potion") || raw.contains("lingering potion")) {
+      return new ProjectileAim(0.5D, 0.05D, -20.0D, false);
+    }
+    if (raw.contains("experience_bottle") || raw.contains("experience bottle")) {
+      return new ProjectileAim(0.7D, 0.07D, -20.0D, false);
+    }
+    if (raw.contains("wind_charge")) {
+      return new ProjectileAim(1.5D, 0.0D, 0.0D, false);
+    }
+    return null;
+  }
+
+  private static double projectileSpeed(ProjectileAim projectile, Object player) {
+    if (!projectile.chargeable) {
+      return projectile.speed;
+    }
+    if (!booleanValue(invokeAny(player, "isUsingItem", "isUsing", "method_6115"), false)) {
+      return projectile.speed;
+    }
+    int ticks = intValue(invokeAny(player, "getTicksUsingItem", "getItemUseTime", "method_6014"), 20);
+    double charge = Math.max(0.0D, Math.min(20.0D, ticks)) / 20.0D;
+    double power = ((charge * charge) + (charge * 2.0D)) / 3.0D;
+    if (power < 0.1D) {
+      return 0.0D;
+    }
+    return projectile.speed * Math.min(1.0D, power);
+  }
+
+  private static Boolean isChargedCrossbow(Object stack, Object item) {
+    Object direct = invokeStaticBooleanWithAssignable(item == null ? null : item.getClass(), stack, "isCharged", "method_7765");
+    if (direct instanceof Boolean bool) {
+      return bool;
+    }
+    for (String className : new String[] { "net.minecraft.world.item.CrossbowItem", "net.minecraft.class_1764" }) {
+      try {
+        Object value = invokeStaticBooleanWithAssignable(Class.forName(className), stack, "isCharged", "method_7765");
+        if (value instanceof Boolean bool) {
+          return bool;
+        }
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeStaticBooleanWithAssignable(Class<?> type, Object argument, String... names) {
+    if (type == null || argument == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (Method method : type.getMethods()) {
+        if (!name.equals(method.getName()) || !java.lang.reflect.Modifier.isStatic(method.getModifiers())
+            || method.getParameterCount() != 1 || !method.getParameterTypes()[0].isInstance(argument)) {
+          continue;
+        }
+        try {
+          return method.invoke(null, argument);
+        } catch (Throwable ignored) {
+          // Try the next compatible method.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static double rayBoxDistance(double originX, double originY, double originZ, double directionX, double directionY, double directionZ, Object box, double inflate) {
+    if (box == null) {
+      return -1.0D;
+    }
+    double minX = readDouble(box, Double.NaN, "minX", "field_1323") - inflate;
+    double minY = readDouble(box, Double.NaN, "minY", "field_1322") - inflate;
+    double minZ = readDouble(box, Double.NaN, "minZ", "field_1321") - inflate;
+    double maxX = readDouble(box, Double.NaN, "maxX", "field_1320") + inflate;
+    double maxY = readDouble(box, Double.NaN, "maxY", "field_1325") + inflate;
+    double maxZ = readDouble(box, Double.NaN, "maxZ", "field_1324") + inflate;
+    if (!Double.isFinite(minX) || !Double.isFinite(minY) || !Double.isFinite(minZ)
+        || !Double.isFinite(maxX) || !Double.isFinite(maxY) || !Double.isFinite(maxZ)) {
+      return -1.0D;
+    }
+    double tMin = 0.0D;
+    double tMax = Double.POSITIVE_INFINITY;
+    double[] range = slab(originX, directionX, minX, maxX, tMin, tMax);
+    if (range == null) {
+      return -1.0D;
+    }
+    tMin = range[0];
+    tMax = range[1];
+    range = slab(originY, directionY, minY, maxY, tMin, tMax);
+    if (range == null) {
+      return -1.0D;
+    }
+    tMin = range[0];
+    tMax = range[1];
+    range = slab(originZ, directionZ, minZ, maxZ, tMin, tMax);
+    return range == null ? -1.0D : Math.max(0.0D, range[0]);
+  }
+
+  private static double[] slab(double origin, double direction, double min, double max, double tMin, double tMax) {
+    if (Math.abs(direction) < 0.0000001D) {
+      return origin >= min && origin <= max ? new double[] { tMin, tMax } : null;
+    }
+    double t1 = (min - origin) / direction;
+    double t2 = (max - origin) / direction;
+    if (t1 > t2) {
+      double swap = t1;
+      t1 = t2;
+      t2 = swap;
+    }
+    double nextMin = Math.max(tMin, t1);
+    double nextMax = Math.min(tMax, t2);
+    return nextMax >= nextMin ? new double[] { nextMin, nextMax } : null;
+  }
+
+  private static void setYaw(Object entity, float yaw) {
+    invokeFloatSetter(entity, yaw, "setYRot", "setYaw", "method_36456");
+    invokeFloatSetter(entity, yaw, "setYHeadRot", "setHeadYaw", "method_5847");
+    invokeFloatSetter(entity, yaw, "setYBodyRot", "setBodyYaw", "method_5784");
+    setFloatFields(entity, yaw, "yRot", "yaw", "field_6031", "field_5982");
+    setFloatFields(entity, yaw, "yHeadRot", "headYaw", "field_6241", "field_6259");
+    setFloatFields(entity, yaw, "yBodyRot", "bodyYaw", "field_6283");
+  }
+
+  private static void setPitch(Object entity, float pitch) {
+    invokeFloatSetter(entity, pitch, "setXRot", "setPitch", "method_36457");
+    setFloatFields(entity, pitch, "xRot", "pitch", "field_5965", "field_6030");
+  }
+
+  private static double horizontalDistanceSquared(Object left, Object right) {
+    double leftX = readDouble(left, Double.NaN, "getX", "method_23317", "x");
+    double leftZ = readDouble(left, Double.NaN, "getZ", "method_23321", "z");
+    double rightX = readDouble(right, Double.NaN, "getX", "method_23317", "x");
+    double rightZ = readDouble(right, Double.NaN, "getZ", "method_23321", "z");
+    if (!Double.isFinite(leftX) || !Double.isFinite(leftZ) || !Double.isFinite(rightX) || !Double.isFinite(rightZ)) {
+      return -1.0D;
+    }
+    double dx = rightX - leftX;
+    double dz = rightZ - leftZ;
+    return (dx * dx) + (dz * dz);
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the superclass or next field name.
+        }
+        type = type.getSuperclass();
+      }
+      try {
+        Object value = target.getClass().getField(name).get(target);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next field name.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeAny(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        if (method.getParameterCount() == 0) {
+          return method.invoke(target);
+        }
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          if (method.getParameterCount() == 0) {
+            return method.invoke(target);
+          }
+        } catch (Throwable alsoIgnored) {
+          // Try the next method name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static double readDouble(Object target, double fallback, String... names) {
+    if (target == null) {
+      return fallback;
+    }
+    for (String name : names) {
+      Object value = invokeAny(target, name);
+      if (value instanceof Number number) {
+        return number.doubleValue();
+      }
+      Object fieldValue = getAnyField(target, name);
+      if (fieldValue instanceof Number number) {
+        return number.doubleValue();
+      }
+    }
+    return fallback;
+  }
+
+  private static float readFloat(Object target, float fallback, String... names) {
+    return (float) readDouble(target, fallback, names);
+  }
+
+  private static void invokeFloatSetter(Object target, float value, String... names) {
+    if (target == null) {
+      return;
+    }
+    for (String name : names) {
+      for (Method method : target.getClass().getMethods()) {
+        if (!name.equals(method.getName()) || method.getParameterCount() != 1 || method.getParameterTypes()[0] != Float.TYPE) {
+          continue;
+        }
+        try {
+          method.invoke(target, Float.valueOf(value));
+          return;
+        } catch (Throwable ignored) {
+          // Try the next setter.
+        }
+      }
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Method method = type.getDeclaredMethod(name, Float.TYPE);
+          method.setAccessible(true);
+          method.invoke(target, Float.valueOf(value));
+          return;
+        } catch (Throwable ignored) {
+          type = type.getSuperclass();
+        }
+      }
+    }
+  }
+
+  private static void setFloatFields(Object target, float value, String... names) {
+    if (target == null) {
+      return;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())
+              && (field.getType() == Float.TYPE || field.getType() == Float.class)) {
+            field.setAccessible(true);
+            if (field.getType() == Float.TYPE) {
+              field.setFloat(target, value);
+            } else {
+              field.set(target, Float.valueOf(value));
+            }
+            return;
+          }
+        } catch (Throwable ignored) {
+          // Try the superclass or next field name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+  }
+
+  private static boolean booleanValue(Object value, boolean fallback) {
+    return value instanceof Boolean bool ? bool.booleanValue() : fallback;
+  }
+
+  private static int intValue(Object value, int fallback) {
+    return value instanceof Number number ? number.intValue() : fallback;
+  }
+
+  private static String textValue(Object value) {
+    if (value == null) {
+      return "";
+    }
+    if (value instanceof String string) {
+      return string;
+    }
+    Object text = invokeAny(value, "getString", "getLiteralString", "method_10851");
+    return text instanceof String string ? string : String.valueOf(value);
+  }
+
+  private static float clamp(float value, float min, float max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static float wrapDegrees(float value) {
+    float result = value % 360.0F;
+    if (result >= 180.0F) {
+      result -= 360.0F;
+    }
+    if (result < -180.0F) {
+      result += 360.0F;
+    }
+    return result;
+  }
+
+  private static final class ProjectileAim {
+    final double speed;
+    final double gravity;
+    final double pitchOffset;
+    final boolean chargeable;
+
+    ProjectileAim(double speed, double gravity, double pitchOffset, boolean chargeable) {
+      this.speed = speed;
+      this.gravity = gravity;
+      this.pitchOffset = pitchOffset;
+      this.chargeable = chargeable;
+    }
+  }
+
+  private static final class TargetSearch {
+    final Object player;
+    Object target;
+    double distanceSquared = RANGE_SQUARED + 1.0D;
+    int scanned;
+
+    TargetSearch(Object player) {
+      this.player = player;
+    }
+  }
+
+  private static final class RaySearch {
+    final Object player;
+    final double x;
+    final double y;
+    final double z;
+    final double directionX;
+    final double directionY;
+    final double directionZ;
+    Object target;
+    double distance = SELECTION_RANGE + 1.0D;
+    int scanned;
+
+    RaySearch(Object player, double x, double y, double z, double directionX, double directionY, double directionZ) {
+      this.player = player;
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      this.directionX = directionX;
+      this.directionY = directionY;
+      this.directionZ = directionZ;
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/GlowSettings.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+final class GlowSettings {
+  static final int MODE_SELECTED = 0;
+  static final int MODE_MOBS = 1;
+  static final int MODE_PLAYERS = 2;
+  static final int MODE_ALL = 3;
+  private static final Pattern MODE_PATTERN = Pattern.compile("\"mode\"\\s*:\\s*(-?\\d+)");
+  private static boolean loaded;
+  private static int mode = MODE_SELECTED;
+
+  private GlowSettings() {
+  }
+
+  static int mode() {
+    load();
+    return mode;
+  }
+
+  static String modeLabel() {
+    return switch (mode()) {
+      case MODE_MOBS -> "Mobs";
+      case MODE_PLAYERS -> "Players";
+      case MODE_ALL -> "All";
+      default -> "Selected";
+    };
+  }
+
+  static void nextMode() {
+    load();
+    mode = (mode + 1) % 4;
+    save();
+  }
