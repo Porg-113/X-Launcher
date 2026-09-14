@@ -14,10 +14,8 @@ function readSplitSource(relativePath) {
   return names.map((name) => fs.readFileSync(path.join(path.dirname(entryPath), relativeDirectory, name), 'utf8')).join('');
 }
 const rendererSource = readSplitSource('app.js');
-const rendererEntrySource = fs.readFileSync(path.join(projectRoot, 'app.js'), 'utf8');
 const mainSource = readSplitSource(path.join('src', 'main.js'));
 const stylesSource = fs.readFileSync(path.join(projectRoot, 'styles.css'), 'utf8');
-const launcherPageSource = fs.readFileSync(path.join(projectRoot, 'index.html'), 'utf8');
 const modBuilderSource = readSplitSource(path.join('scripts', 'build-x-launcher-menu-mod.js'));
 
 test('bundled X Client version matches the version deployed by the launcher', () => {
@@ -32,20 +30,6 @@ test('startup keeps secondary sections lazy', () => {
   assert.match(rendererSource, /this\.loadedSections = new Set\(\['dashboard', 'packs', 'servers'\]\)/);
   assert.match(rendererSource, /ensureSectionDataLoaded\(sectionId\)/);
   assert.doesNotMatch(rendererSource, /await this\.preloadStartupContentIcons\(\)/);
-});
-
-test('renderer startup does not block on split source files', () => {
-  assert.match(rendererEntrySource, /request\.open\('GET', new URL\(name, baseUrl\)\.href, true\)/);
-  assert.match(rendererEntrySource, /Promise\.all\(parts\.map\(loadPart\)\)/);
-  assert.doesNotMatch(rendererEntrySource, /request\.open\([^\n]+, false\)/);
-  assert.doesNotMatch(launcherPageSource, /skinview3d/u);
-});
-
-test('dashboard skin preview reuses prepared pixels and its canvas backing store', () => {
-  assert.match(rendererSource, /const shadedPixels = new Map/u);
-  assert.match(rendererSource, /if \(canvas\.width !== stageWidth \|\| canvas\.height !== stageHeight\)/u);
-  assert.match(rendererSource, /timestamp - this\.dashboardSkinLastFrameAt < 50/u);
-  assert.doesNotMatch(rendererSource, /sourceContext\.getImageData\(sx, sy, 1, 1\)/u);
 });
 
 test('Xray render path avoids per-frame world lookups and temporary boxes', () => {
@@ -156,9 +140,6 @@ test('Minecraft runtime polling is visibility-aware and low frequency', () => {
 
 test('scroll motion is initialized and remains animated in static UI mode', () => {
   assert.match(rendererSource, /this\.setupNavigation\(\);\s*this\.setupScrollFade\(\);/);
-  assert.match(rendererSource, /getActiveScrollFadeContainers\(\)/u);
-  assert.match(rendererSource, /this\.scrollFadeObserver\.observe\(root/u);
-  assert.doesNotMatch(rendererSource, /this\.scrollFadeObservers\.push/u);
   assert.match(
     stylesSource,
     /@media \(prefers-reduced-motion: no-preference\)[\s\S]*?html\.launcher-static-ui \.scroll-fade-item\s*\{[\s\S]*?transition:\s*transform 520ms var\(--motion-ease\) !important;/

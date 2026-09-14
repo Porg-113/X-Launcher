@@ -1009,11 +1009,7 @@ class MinecraftLauncher {
     this.pendingConfirm = null;
     this.pendingSkinVariantChoice = null;
     this.scrollFadeFrame = null;
-    this.scrollFadeObserver = null;
-    this.scrollFadeObservedRoot = null;
-    this.scrollFadeDirty = true;
-    this.scrollFadeItemCache = new WeakMap();
-    this.scrollFadeTrackedContainers = new Set();
+    this.scrollFadeObservers = [];
     this.reactBitsMotionFrame = null;
     this.reactBitsMotionObserver = null;
     this.reactBitsPointerFrame = null;
@@ -3699,7 +3695,6 @@ class MinecraftLauncher {
 
     this.activeSectionId = sectionId;
     this.windowGroupState.activeSectionId = sectionId;
-    this.refreshScrollFadeTracking();
     this.refreshSectionFromPreloadedState(sectionId);
     void this.ensureSectionDataLoaded(sectionId);
     if (sectionId === 'hosting') {

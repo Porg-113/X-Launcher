@@ -945,43 +945,22 @@
   }
 
   setupScrollFade() {
-    document.addEventListener('scroll', (event) => {
-      const root = this.getScrollFadeTrackingRoot();
-      const target = event.target;
-      if (target === document || target === root || (target instanceof Node && root?.contains(target))) {
-        this.scheduleScrollFadeUpdate();
+    const sections = this.getScrollFadeContainers();
+    const scheduleUpdate = () => this.scheduleScrollFadeUpdate();
+
+    sections.forEach((section) => {
+      section.addEventListener('scroll', scheduleUpdate, { passive: true });
+
+      if (typeof MutationObserver !== 'undefined') {
+        const observer = new MutationObserver(scheduleUpdate);
+        observer.observe(section, { childList: true, subtree: true });
+        this.scrollFadeObservers.push(observer);
       }
-    }, { passive: true, capture: true });
-    window.addEventListener('resize', () => this.scheduleScrollFadeUpdate());
-    this.refreshScrollFadeTracking();
+    });
+
+    document.addEventListener('scroll', scheduleUpdate, { passive: true, capture: true });
+    window.addEventListener('resize', scheduleUpdate);
     this.scheduleScrollFadeUpdate();
-  }
-
-  getScrollFadeTrackingRoot() {
-    return document.querySelector('.content-section.active')
-      || document.querySelector('#login-screen.active')
-      || document.body;
-  }
-
-  refreshScrollFadeTracking() {
-    const root = this.getScrollFadeTrackingRoot();
-    if (root === this.scrollFadeObservedRoot) {
-      this.scrollFadeDirty = true;
-      return;
-    }
-
-    this.scrollFadeObserver?.disconnect();
-    this.scrollFadeObserver = null;
-    this.scrollFadeObservedRoot = root;
-    this.scrollFadeDirty = true;
-
-    if (root && typeof MutationObserver !== 'undefined') {
-      this.scrollFadeObserver = new MutationObserver(() => {
-        this.scrollFadeDirty = true;
-        this.scheduleScrollFadeUpdate();
-      });
-      this.scrollFadeObserver.observe(root, { childList: true, subtree: true });
-    }
   }
 
   getNeonFrameSelector() {
@@ -1519,13 +1498,6 @@
       .filter((element) => element instanceof HTMLElement);
   }
 
-  getActiveScrollFadeContainers() {
-    const root = this.getScrollFadeTrackingRoot();
-    return this.getScrollFadeContainers().filter((container) => (
-      container === root || root?.contains(container)
-    ));
-  }
-
   getScrollFadeItems(section) {
     const blockSelector = [
       '.modrinth-type-tabs',
@@ -1653,14 +1625,11 @@
   }
 
   updateScrollFade() {
-    const sections = this.getActiveScrollFadeContainers();
-    const activeSections = new Set(sections);
-    this.scrollFadeTrackedContainers.forEach((section) => {
-      if (!activeSections.has(section)) this.resetScrollFadeContainer(section);
-    });
-    this.scrollFadeTrackedContainers = activeSections;
-
-    sections.forEach((section) => {
+    this.getScrollFadeContainers().forEach((section) => {
+      if (section.classList.contains('content-section') && !section.classList.contains('active')) {
+        this.resetScrollFadeContainer(section);
+        return;
+      }
 
       const containerStyle = window.getComputedStyle(section);
       const sectionRect = section.getBoundingClientRect();
@@ -1669,16 +1638,13 @@
         return;
       }
 
-      let items = this.scrollFadeItemCache.get(section);
-      if (this.scrollFadeDirty || !items) {
-        const previousItems = items || [];
-        items = this.getScrollFadeItems(section);
-        const visibleItems = new Set(items);
-        previousItems.forEach((item) => {
-          if (!visibleItems.has(item)) this.resetScrollFadeItem(item);
-        });
-        this.scrollFadeItemCache.set(section, items);
-      }
+      const items = this.getScrollFadeItems(section);
+      const visibleItems = new Set(items);
+      section.querySelectorAll('.scroll-fade-item').forEach((item) => {
+        if (!visibleItems.has(item)) {
+          this.resetScrollFadeItem(item);
+        }
+      });
 
       if (!this.isScrollableFadeContainer(section)) {
         if (!this.hasScrollableFadeAncestor(section)) {
@@ -1710,7 +1676,6 @@
         item.style.setProperty('--scroll-fade-y', `${translateY}px`);
       });
     });
-    this.scrollFadeDirty = false;
   }
 
   async handleLogin() {
@@ -2007,7 +1972,6 @@
     this.updateLoginScreenAccountUI();
     document.getElementById('login-screen').classList.add('active');
     document.getElementById('main-screen').classList.remove('active');
-    this.refreshScrollFadeTracking();
     this.scheduleScrollFadeUpdate();
   }
 
