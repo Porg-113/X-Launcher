@@ -1,0 +1,4562 @@
+  private static final int MAX_ZOOM_SCROLL_STEPS = 12;
+  private static volatile double zoomFactor = 3.0D;
+  private static volatile double currentZoomFactor = 1.0D;
+  private static volatile double lastBaseFov = 70.0D;
+  private static volatile boolean zoomApplied;
+  private static volatile boolean zoomKeyHeld;
+  private static volatile boolean zoomJustActivated;
+  private static long scrollCallbackHandle;
+  private static Object previousScrollCallback;
+  private static Object scrollCallbackProxy;
+  private static volatile boolean freecamApplied;
+  private static volatile double freecamX;
+  private static volatile double freecamY;
+  private static volatile double freecamZ;
+  private static volatile float freecamYaw;
+  private static volatile float freecamPitch;
+  private static volatile double freecamSpeed = 1.15D;
+  private static volatile long lastFreecamMoveMs;
+  private static volatile boolean freecamMouseReady;
+  private static volatile double lastFreecamMouseX;
+  private static volatile double lastFreecamMouseY;
+  private static final long SMART_SCREENSHOT_CAPTURE_DELAY_MS = 45L;
+  private static volatile boolean smartScreenshotRunning;
+
+  @Override
+  public void onInitializeClient() {
+    MenuModules.modules();
+    menuKey = new class_304(MENU_KEY_ID, RIGHT_SHIFT, X_CLIENT_KEY_CATEGORY);
+    syncModuleKeyMappings(null);
+    syncZoomKeyMapping(null);
+    tryFabricKeyBindingHelper();
+    HudOverlay.register();
+    TrajectoryPreview.register();
+    EspRenderPipeline26.register();
+    TargetFrameRenderer.register();
+    applyLauncherLocalSkin();
+    startWatcher();
+  }
+
+  private static void applyLauncherLocalSkin() {
+    String skinPath = System.getProperty("xlauncher.skin.path", "").trim();
+    if (skinPath.isEmpty()) {
+      return;
+    }
+    try {
+      Path path = Path.of(skinPath);
+      if (!Files.isRegularFile(path)) {
+        log("Local skin file not found: " + skinPath);
+        return;
+      }
+      String id = System.getProperty("xlauncher.skin.id", "active");
+      String name = System.getProperty("xlauncher.skin.name", "Skin");
+      String model = System.getProperty("xlauncher.skin.model", "classic");
+      byte[] skinBytes = Files.readAllBytes(path);
+      Object client = minecraftClientReflective();
+      if (LocalSkinOverride.apply(client, id, name, skinBytes, model)) {
+        log("Local launcher skin applied: " + name);
+      } else {
+        log("Local launcher skin could not be applied.");
+      }
+    } catch (Throwable error) {
+      log("Local launcher skin failed: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+    }
+  }
+
+  private static Object minecraftClientReflective() {
+    for (String className : new String[] { "net.minecraft.client.Minecraft", "net.minecraft.class_310" }) {
+      try {
+        Class<?> clientClass = Class.forName(className);
+        for (String methodName : new String[] { "getInstance", "method_1551" }) {
+          try {
+            Method method = clientClass.getMethod(methodName);
+            if (java.lang.reflect.Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 0) {
+              return method.invoke(null);
+            }
+          } catch (Throwable ignored) {
+            // Try the next accessor.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next client class name.
+      }
+    }
+    return null;
+  }
+
+  static void toggleModule(int index) {
+    MenuModules.Module module = MenuModules.toggle(index);
+    if (module != null) {
+      applyModule(module);
+    }
+  }
+
+  static void setModuleEnabled(int index, boolean enabled) {
+    MenuModules.Module module = MenuModules.setEnabled(index, enabled);
+    if (module != null) {
+      applyModule(module);
+    }
+  }
+
+  static void refreshModule(int index) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    if (index >= 0 && index < modules.length) {
+      applyModule(modules[index]);
+    }
+  }
+
+  static void setModuleKey(int index, int keyCode) {
+    setModuleKey(index, keyCode, 0);
+  }
+
+  static void setModuleKey(int index, int keyCode, int keyModifiers) {
+    MenuModules.Module module = MenuModules.setKeyCombo(index, keyCode, keyModifiers);
+    resetModuleKeyMapping(index);
+    if (module != null && "zoom".equals(module.id)) {
+      try {
+        class_310 client = class_310.method_1551();
+        if (client != null && client.field_1690 != null) {
+          restoreZoomSensitivity(client.field_1690);
+        }
+      } catch (Throwable ignored) {
+        // The next client tick will finish cleanup if Minecraft is not ready.
+      }
+      zoomKeyHeld = false;
+      zoomApplied = false;
+      currentZoomFactor = 1.0D;
+      zoomKey = null;
+      zoomKeyCodeSnapshot = Integer.MIN_VALUE;
+      zoomKeyRegistered = false;
+      try {
+        syncInfiniteZoomKeyMapping(class_310.method_1551());
+      } catch (Throwable ignored) {
+        // The next client tick will update the Infinite Zoom bridge.
+      }
+    }
+  }
+
+  static int getLeftCps() {
+    return countRecentClicks(LEFT_CLICK_TIMES);
+  }
+
+  static int getRightCps() {
+    return countRecentClicks(RIGHT_CLICK_TIMES);
+  }
+
+  static boolean isLeftMouseDown() {
+    return leftMouseDown;
+  }
+
+  static boolean isRightMouseDown() {
+    return rightMouseDown;
+  }
+
+  private static int countRecentClicks(long[] clickTimes) {
+    long cutoff = System.currentTimeMillis() - 1000L;
+    int count = 0;
+    for (long clickTime : clickTimes) {
+      if (clickTime >= cutoff) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  static boolean isKeyDown(Object client, int keyCode) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int state = ((Number) glfw.getMethod("glfwGetKey", long.class, int.class).invoke(null, handle, keyCode)).intValue();
+      return state == press;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  static boolean isKeyComboDown(Object client, int keyCode, int keyModifiers) {
+    if (keyCode <= 0 || !isKeyDown(client, keyCode)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_SHIFT) != 0 && !isAnyKeyDown(client, 340, 344)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_CONTROL) != 0 && !isAnyKeyDown(client, 341, 345)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_ALT) != 0 && !isAnyKeyDown(client, 342, 346)) {
+      return false;
+    }
+    return (keyModifiers & MOD_SUPER) == 0 || isAnyKeyDown(client, 343, 347);
+  }
+
+  public static void setVirtualInput(Object client, int code, boolean mouseButton, boolean down) {
+    if (client == null || code < 0) {
+      return;
+    }
+    Object options = getAnyField(client, "field_1690", "options");
+    Object mappings = getAnyField(options, "field_1839", "keyMappings");
+    if (mappings == null || !mappings.getClass().isArray()) {
+      return;
+    }
+    int length = java.lang.reflect.Array.getLength(mappings);
+    for (int index = 0; index < length; index += 1) {
+      Object mapping = java.lang.reflect.Array.get(mappings, index);
+      if (mapping == null || !mappingMatches(mapping, code, mouseButton)) {
+        continue;
+      }
+      setMappingDown(mapping, down);
+    }
+  }
+
+  private static boolean mappingMatches(Object mapping, int code, boolean mouseButton) {
+    Object key = getAnyField(mapping, "field_1655", "key", "boundKey");
+    int value = readIntFromObject(key, Integer.MIN_VALUE, "method_1444", "getValue");
+    if (value == Integer.MIN_VALUE) {
+      value = readIntFromObject(mapping, Integer.MIN_VALUE, "method_1429", "getKey", "getDefaultKey");
+    }
+    if (mouseButton) {
+      return value == code || value == -100 - code;
+    }
+    return value == code;
+  }
+
+  private static int readIntFromObject(Object target, int fallback, String... methods) {
+    if (target instanceof Number number) {
+      return number.intValue();
+    }
+    if (target == null) {
+      return fallback;
+    }
+    for (String methodName : methods) {
+      try {
+        Object value = target.getClass().getMethod(methodName).invoke(target);
+        if (value instanceof Number number) {
+          return number.intValue();
+        }
+      } catch (Throwable ignored) {
+      }
+    }
+    return fallback;
+  }
+
+  private static void setMappingDown(Object mapping, boolean down) {
+    for (String methodName : new String[] { "method_23481", "setDown" }) {
+      try {
+        Method method = mapping.getClass().getMethod(methodName, Boolean.TYPE);
+        method.invoke(mapping, Boolean.valueOf(down));
+        return;
+      } catch (Throwable ignored) {
+      }
+    }
+    for (String fieldName : new String[] { "field_1653", "pressed", "isDown" }) {
+      try {
+        Field field = mapping.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        if (field.getType() == Boolean.TYPE) {
+          field.setBoolean(mapping, down);
+          return;
+        }
+      } catch (Throwable ignored) {
+      }
+    }
+  }
+
+  private static boolean isAnyKeyDown(Object client, int leftKeyCode, int rightKeyCode) {
+    return isKeyDown(client, leftKeyCode) || isKeyDown(client, rightKeyCode);
+  }
+
+  private static void startWatcher() {
+    if (watcherStarted) {
+      return;
+    }
+    watcherStarted = true;
+    Thread watcher = new Thread(XLauncherMenuClient::watchKeybind, "X Client Keybind");
+    watcher.setDaemon(true);
+    watcher.start();
+  }
+
+  private static void watchKeybind() {
+    while (true) {
+      try {
+        class_310 client = class_310.method_1551();
+        if (client != null && menuKey != null && watcherTickQueued.compareAndSet(false, true)) {
+          ((Executor) client).execute(() -> runWatcherTick(client));
+        }
+        Thread.sleep(50L);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      } catch (Throwable ignored) {
+        sleepQuietly(250L);
+      }
+    }
+  }
+
+  private static void runWatcherTick(class_310 client) {
+    try {
+      ensureKeyRegistered(client);
+      suppressScreenBlur(client);
+      updateClicks(client);
+      updateZoom(client);
+      updateFullbright(client);
+      updateClientWorldOverrides(client);
+      updateMovementTweaks(client);
+      GameTimer.tick(client);
+      if (menuKey.method_1436() && System.currentTimeMillis() >= menuKeyConsumedUntilMs) {
+        toggleMenu(client);
+      }
+      if (!isXClientMenuOpen(client)) {
+        pollModuleKeys(client);
+      }
+    } finally {
+      watcherTickQueued.set(false);
+    }
+  }
+
+  private static void toggleMenu(class_310 client) {
+    if (isXClientMenuOpen(client)) {
+      setMenuScreenSafely(client, null);
+      return;
+    }
+    Object current = currentScreen(client);
+    if (isBlurProneOverlay(current)) {
+      setMenuScreenSafely(client, null);
+    }
+    suppressScreenBlur(client);
+    setMenuScreenSafely(client, new XLauncherMenuScreen());
+  }
+
+  public static boolean handleMenuKeyPress(int keyCode, int action) {
+    class_310 client = class_310.method_1551();
+    if (keyCode == 256) {
+      return false;
+    }
+    int activeMenuKey = menuKey == null ? RIGHT_SHIFT : keyCodeFromMapping(menuKey);
+    if (activeMenuKey <= 0) {
+      activeMenuKey = RIGHT_SHIFT;
+    }
+    if (keyCode != activeMenuKey || action != 1) {
+      return false;
+    }
+    if (client == null) {
+      return false;
+    }
+    menuKeyConsumedUntilMs = System.currentTimeMillis() + 250L;
+    setMappingDown(menuKey, false);
+    releaseConflictingMenuKeyMappings(client);
+    ((Executor) client).execute(() -> toggleMenu(client));
+    return true;
+  }
+
+  public static void openMenuFromPause() {
+    class_310 client = class_310.method_1551();
+    if (client != null) {
+      setMenuScreenSafely(client, new XLauncherMenuScreen());
+    }
+  }
+
+  public static boolean closeMenuScreen(XLauncherMenuScreen screen) {
+    class_310 client = class_310.method_1551();
+    if (client == null) {
+      return false;
+    }
+    Object current = currentScreen(client);
+    if (current != null && current != screen) {
+      return false;
+    }
+    setMenuScreenSafely(client, null);
+    return true;
+  }
+
+  private static void setMenuScreenSafely(class_310 client, class_437 screen) {
+    try {
+      if (client != null) {
+        invokeSetScreen(client, screen);
+      }
+    } catch (Throwable error) {
+      System.out.println("[X Client] Menu screen failed to open: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+    }
+  }
+
+  private static boolean isXClientMenuOpen(Object client) {
+    return currentScreen(client) instanceof XLauncherMenuScreen;
+  }
+
+  private static Object currentScreen(Object client) {
+    return getAnyField(client, "field_1755", "screen");
+  }
+
+  private static boolean isBlurProneOverlay(Object screen) {
+    if (screen == null) {
+      return false;
+    }
+    String name = screen.getClass().getName();
+    return name.contains("FriendsOverlayScreen") || name.contains("SocialInteractionsScreen");
+  }
+
+  private static void invokeSetScreen(Object client, Object screen) throws ReflectiveOperationException {
+    ReflectiveOperationException failure = null;
+    Class<?> wantedScreenType = screen != null ? screen.getClass() : XLauncherMenuScreen.class;
+    for (String methodName : new String[] { "method_1507", "setScreen", "a", "m_91152_" }) {
+      ReflectiveOperationException namedFailure = tryInvokeScreenMethod(client, screen, wantedScreenType, methodName);
+      if (namedFailure == null) {
+        return;
+      }
+      failure = namedFailure;
+    }
+    ReflectiveOperationException scannedFailure = tryInvokeScreenMethod(client, screen, wantedScreenType, null);
+    if (scannedFailure == null) {
+      return;
+    }
+    throw failure != null ? failure : scannedFailure;
+  }
+
+  private static ReflectiveOperationException tryInvokeScreenMethod(Object client, Object screen, Class<?> wantedScreenType, String methodName) {
+    ReflectiveOperationException failure = null;
+    Class<?> type = client.getClass();
+    while (type != null) {
+      for (Method method : type.getDeclaredMethods()) {
+        if (methodName != null && !methodName.equals(method.getName())) {
+          continue;
+        }
+        if (method.getParameterCount() != 1 || method.getReturnType() != Void.TYPE) {
+          continue;
+        }
+        Class<?> parameterType = method.getParameterTypes()[0];
+        if (!parameterType.isAssignableFrom(wantedScreenType)) {
+          continue;
+        }
+        try {
+          method.setAccessible(true);
+          method.invoke(client, screen);
+          return null;
+        } catch (ReflectiveOperationException exception) {
+          failure = exception;
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return failure == null ? new NoSuchMethodException(methodName == null ? "screen setter" : methodName) : failure;
+  }
+  static void playMenuClickSound() {
+    try {
+      class_310 client = class_310.method_1551();
+      if (client != null) {
+        class_339.method_25354(client.method_1483());
+        class_339.method_25354(client.method_1483());
+        class_339.method_25354(client.method_1483());
+        class_339.method_25354(client.method_1483());
+      }
+    } catch (Throwable ignored) {
+      // Missing sound APIs should not block menu interaction.
+    }
+  }
+
+  private static int currentZoomKeyCode() {
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if ("zoom".equals(module.id)) {
+        return module.keyCode > 0 ? module.keyCode : -1;
+      }
+    }
+    return -1;
+  }
+
+  private static void syncZoomKeyMapping(class_310 client) {
+    syncModuleKeyMappings(client);
+    int zoomIndex = moduleIndex("zoom");
+    zoomKey = zoomIndex >= 0 && zoomIndex < moduleKeys.length ? moduleKeys[zoomIndex] : null;
+    zoomKeyRegistered = zoomKey == null || (zoomIndex >= 0 && zoomIndex < moduleKeyRegistered.length && moduleKeyRegistered[zoomIndex]);
+  }
+
+  private static void syncModuleKeyMappings(class_310 client) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    ensureModuleKeyArrays(modules.length);
+    for (int index = 0; index < modules.length; index += 1) {
+      MenuModules.Module module = modules[index];
+      if (!module.keyBindable) {
+        moduleKeys[index] = null;
+        moduleKeyRegistered[index] = true;
+        moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+        continue;
+      }
+      int keyCode = module.keyCode > 0 ? module.keyCode : -1;
+      String keyId = moduleKeyId(module);
+      if (moduleKeys[index] != null && moduleKeyCodeSnapshots[index] == keyCode && isNamedKey(moduleKeys[index], keyId)) {
+        continue;
+      }
+      moduleKeys[index] = "zoom".equals(module.id) ? new BridgedZoomKeyMapping(index, keyCode) : new ModuleKeyMapping(index, keyCode);
+      moduleKeyCodeSnapshots[index] = keyCode;
+      moduleKeyRegistered[index] = false;
+      if ("zoom".equals(module.id)) {
+        zoomKey = moduleKeys[index];
+        zoomKeyCodeSnapshot = keyCode;
+        zoomKeyRegistered = false;
+      }
+    }
+  }
+
+  private static void ensureModuleKeyArrays(int length) {
+    if (moduleKeys.length == length && moduleKeyCodeSnapshots.length == length && moduleKeyRegistered.length == length) {
+      return;
+    }
+    moduleKeys = Arrays.copyOf(moduleKeys, length);
+    int oldLength = moduleKeyCodeSnapshots.length;
+    moduleKeyCodeSnapshots = Arrays.copyOf(moduleKeyCodeSnapshots, length);
+    moduleKeyRegistered = Arrays.copyOf(moduleKeyRegistered, length);
+    for (int index = oldLength; index < length; index += 1) {
+      moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+      moduleKeyRegistered[index] = false;
+    }
+  }
+
+  private static void resetModuleKeyMapping(int index) {
+    ensureModuleKeyArrays(MenuModules.modules().length);
+    if (index < 0 || index >= moduleKeys.length) {
+      return;
+    }
+    moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+    moduleKeyRegistered[index] = false;
+    if ("zoom".equals(MenuModules.modules()[index].id)) {
+      zoomKey = null;
+      zoomKeyCodeSnapshot = Integer.MIN_VALUE;
+      zoomKeyRegistered = false;
+    }
+  }
+
+  private static String moduleKeyId(MenuModules.Module module) {
+    return MODULE_KEY_PREFIX + module.id;
+  }
+
+  private static int moduleIndex(String id) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      if (modules[index].id.equals(id)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private static void syncInfiniteZoomKeyMapping(class_310 client) {
+    try {
+      Class<?> infiniteZoomClient = Class.forName("de.n8M4.infinitezoom.client.InfinitezoomClient");
+      Field keyField = infiniteZoomClient.getField("KEY_TOGGLE_ZOOM");
+      Object currentKey = keyField.get(null);
+      if (!originalInfiniteZoomKeyCaptured) {
+        originalInfiniteZoomKey = currentKey;
+        originalInfiniteZoomKeyCaptured = true;
+      }
+      MenuModules.Module module = zoomModule();
+      if (module == null || module.keyCode <= 0) {
+        if (originalInfiniteZoomKey != null && keyField.getType().isInstance(originalInfiniteZoomKey)
+            && currentKey != originalInfiniteZoomKey) {
+          keyField.set(null, originalInfiniteZoomKey);
+        }
+        return;
+      }
+      syncZoomKeyMapping(client);
+      if (zoomKey != null && keyField.getType().isInstance(zoomKey) && currentKey != zoomKey) {
+        keyField.set(null, zoomKey);
+      }
+    } catch (Throwable ignored) {
+      // Infinite Zoom is optional at runtime; the launcher installs it for normal X Client profiles.
+    }
+  }
+
+  private static class ModuleKeyMapping extends class_304 {
+    private final int moduleIndex;
+
+    ModuleKeyMapping(int moduleIndex, int keyCode) {
+      super(moduleKeyId(MenuModules.modules()[moduleIndex]), keyCode, X_CLIENT_KEY_CATEGORY);
+      this.moduleIndex = moduleIndex;
+    }
+
+    @Override
+    public boolean method_1434() {
+      MenuModules.Module[] modules = MenuModules.modules();
+      if (moduleIndex < 0 || moduleIndex >= modules.length) {
+        return false;
+      }
+      MenuModules.Module module = modules[moduleIndex];
+      class_310 client = class_310.method_1551();
+      if (module.keyModifiers == 0) {
+        return super.method_1434() || (module.keyCode > 0 && client != null && isKeyComboDown(client, module.keyCode, 0));
+      }
+      return module.keyCode > 0 && client != null && isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+  }
+
+  private static final class BridgedZoomKeyMapping extends ModuleKeyMapping {
+    BridgedZoomKeyMapping(int moduleIndex, int keyCode) {
+      super(moduleIndex, keyCode);
+    }
+  }
+
+  private static boolean isZoomKeyDown(class_310 client, MenuModules.Module module) {
+    if (module == null) {
+      return false;
+    }
+    if (module.keyModifiers != 0 && module.keyCode > 0) {
+      return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+    try {
+      syncZoomKeyMapping(client);
+      if (zoomKey != null && zoomKey.method_1434()) {
+        return true;
+      }
+    } catch (RuntimeException ignored) {
+      // Fall back to direct GLFW polling below.
+    }
+    return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+  }
+
+  private static boolean isModuleKeyDown(class_310 client, int index, MenuModules.Module module) {
+    if ("zoom".equals(module.id)) {
+      return isZoomKeyDown(client, module);
+    }
+    if (module.keyModifiers != 0 && module.keyCode > 0) {
+      return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+    try {
+      syncModuleKeyMappings(client);
+      class_304 keyMapping = index >= 0 && index < moduleKeys.length ? moduleKeys[index] : null;
+      if (keyMapping != null && keyMapping.method_1434()) {
+        return true;
+      }
+    } catch (RuntimeException ignored) {
+      // Fall back to direct GLFW polling below.
+    }
+    return module.keyCode > 0 && isKeyComboDown(client, module.keyCode, module.keyModifiers);
+  }
+
+  private static void pollModuleKeys(class_310 client) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      MenuModules.Module module = modules[index];
+      if (!module.keyBindable || !MenuModules.isUnlocked(module.id)) {
+        if ("zoom".equals(module.id)) {
+          zoomKeyHeld = false;
+        }
+        module.keyDown = false;
+        continue;
+      }
+      boolean down = isModuleKeyDown(client, index, module);
+      if ("zoom".equals(module.id)) {
+        zoomKeyHeld = down;
+        module.keyDown = down;
+        continue;
+      }
+      if (down && !module.keyDown) {
+        final int moduleIndex = index;
+        if ("mobtrack".equals(module.id)) {
+          ((Executor) client).execute(() -> triggerMobTrackKey(client, moduleIndex));
+        } else if ("smartscreenshot".equals(module.id)) {
+          ((Executor) client).execute(() -> triggerSmartScreenshot(client));
+        } else if ("ui".equals(module.id)) {
+          ((Executor) client).execute(() -> openUiEditor(client));
+        } else if ("code".equals(module.id)) {
+          ((Executor) client).execute(() -> openModulePanel(client, "code"));
+        } else if (module.toggleable) {
+          ((Executor) client).execute(() -> toggleModule(moduleIndex));
+        } else {
+          module.keyDown = down;
+        }
+      }
+      module.keyDown = down;
+    }
+  }
+
+  private static void openUiEditor(class_310 client) {
+    XLauncherMenuScreen screen = new XLauncherMenuScreen();
+    screen.openUiEditorShortcut();
+    setMenuScreenSafely(client, screen);
+  }
+
+  private static void openModulePanel(class_310 client, String moduleId) {
+    XLauncherMenuScreen screen = new XLauncherMenuScreen();
+    screen.openModuleShortcut(moduleId);
+    setMenuScreenSafely(client, screen);
+  }
+
+  private static void triggerMobTrackKey(Object client, int index) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    if (index < 0 || index >= modules.length) {
+      return;
+    }
+    if (modules[index].enabled) {
+      MobCameraTracker.clear();
+      MenuModules.Module module = MenuModules.setEnabled(index, false);
+      if (module != null) {
+        applyModule(module);
+      }
+      return;
+    }
+    if (MobCameraTracker.lockLookedAt(client)) {
+      MenuModules.Module module = MenuModules.setEnabled(index, true);
+      if (module != null) {
+        applyModule(module);
+      }
+      return;
+    }
+    toggleModule(index);
+  }
+
+  private static void triggerSmartScreenshot(Object client) {
+    if (client == null || smartScreenshotRunning || !isGameplayFocused(client)) {
+      return;
+    }
+    smartScreenshotRunning = true;
+    Object options = getAnyField(client, "field_1690", "options");
+    boolean previousHideGui = readBooleanField(options, false, "field_1842", "hideGui");
+    setBooleanFields(options, true, "field_1842", "hideGui");
+    Thread worker = new Thread(() -> {
+      sleepQuietly(SMART_SCREENSHOT_CAPTURE_DELAY_MS);
+      runOnClient(client, () -> {
+        try {
+          boolean saved = captureScreenshot(client);
+          if (saved) {
+            HudOverlay.showSmartScreenshotToast();
+          }
+          ScreenshotGallery.refresh(client);
+        } finally {
+          setBooleanFields(options, previousHideGui, "field_1842", "hideGui");
+          smartScreenshotRunning = false;
+        }
+      });
+    }, "X Client Smart Screenshot");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  private static void runOnClient(Object client, Runnable task) {
+    if (client instanceof Executor executor) {
+      executor.execute(task);
+      return;
+    }
+    task.run();
+  }
+
+  private static boolean captureScreenshot(Object client) {
+    Object renderTarget = mainRenderTarget(client);
+    if (renderTarget == null) {
+      log("Smart Screenshot failed: render target not found.");
+      return false;
+    }
+    File gameDirectory = gameDirectory(client);
+    Consumer<Object> messageConsumer = message -> log("Smart Screenshot saved.");
+    for (String className : new String[] {
+        "net.minecraft.class_318",
+        "net.minecraft.client.Screenshot",
+        "net.minecraft.client.util.ScreenshotRecorder"
+    }) {
+      if (invokeScreenshotClass(className, gameDirectory, renderTarget, messageConsumer)) {
+        return true;
+      }
+    }
+    log("Smart Screenshot failed: screenshot API not found.");
+    return false;
+  }
+
+  private static boolean invokeScreenshotClass(String className, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    try {
+      Class<?> screenshotClass = Class.forName(className);
+      for (Method method : screenshotClass.getMethods()) {
+        if (invokeScreenshotMethod(method, gameDirectory, renderTarget, messageConsumer)) {
+          return true;
+        }
+      }
+      for (Method method : screenshotClass.getDeclaredMethods()) {
+        method.setAccessible(true);
+        if (invokeScreenshotMethod(method, gameDirectory, renderTarget, messageConsumer)) {
+          return true;
+        }
+      }
+    } catch (Throwable ignored) {
+      // Try the next screenshot class name.
+    }
+    return false;
+  }
+
+  private static boolean invokeScreenshotMethod(Method method, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())) {
+      return false;
+    }
+    Object[] args = screenshotArguments(method, gameDirectory, renderTarget, messageConsumer);
+    if (args == null) {
+      return false;
+    }
+    try {
+      method.invoke(null, args);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static Object[] screenshotArguments(Method method, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    Class<?>[] types = method.getParameterTypes();
+    if (types.length < 3 || types.length > 5) {
+      return null;
+    }
+    Object[] args = new Object[types.length];
+    boolean usedFile = false;
+    boolean usedRenderTarget = false;
+    boolean usedConsumer = false;
+    for (int index = 0; index < types.length; index += 1) {
+      Class<?> type = types[index];
+      if (File.class.isAssignableFrom(type)) {
+        args[index] = gameDirectory;
+        usedFile = true;
+      } else if (Path.class.isAssignableFrom(type)) {
+        args[index] = gameDirectory.toPath();
+        usedFile = true;
+      } else if (String.class.equals(type)) {
+        args[index] = null;
+      } else if (Consumer.class.isAssignableFrom(type)) {
+        args[index] = messageConsumer;
+        usedConsumer = true;
+      } else if (renderTarget != null && type.isInstance(renderTarget)) {
+        args[index] = renderTarget;
+        usedRenderTarget = true;
+      } else if (!type.isPrimitive() && !usedRenderTarget) {
+        args[index] = renderTarget;
+        usedRenderTarget = true;
+      } else {
+        return null;
+      }
+    }
+    return usedFile && usedRenderTarget && usedConsumer ? args : null;
+  }
+
+  private static File gameDirectory(Object client) {
+    Object value = getAnyField(client, "field_1697", "field_1703", "gameDirectory", "runDirectory");
+    if (value instanceof File file) {
+      return file;
+    }
+    if (value instanceof Path path) {
+      return path.toFile();
+    }
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft").toFile();
+  }
+
+  private static Object mainRenderTarget(Object client) {
+    Object renderTarget = invokeAnyNullable(client, "method_1522", "getMainRenderTarget", "getFramebuffer");
+    if (renderTarget != null) {
+      return renderTarget;
+    }
+    Class<?> type = client == null ? null : client.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        String typeName = field.getType().getName().toLowerCase(java.util.Locale.ROOT);
+        if (!typeName.contains("class_276") && !typeName.contains("rendertarget") && !typeName.contains("framebuffer")) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(client);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next render target field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static boolean readBooleanField(Object target, boolean fallback, String... names) {
+    Object value = getAnyField(target, names);
+    return value instanceof Boolean bool ? bool.booleanValue() : fallback;
+  }
+
+  private static boolean hasWorld(class_310 client) {
+    return getAnyField(client, "field_1724", "field_1687", "player", "level", "world") != null;
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+    return null;
+  }
+
+  private static void updateClicks(class_310 client) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int leftButton = glfw.getField("GLFW_MOUSE_BUTTON_LEFT").getInt(null);
+      int rightButton = glfw.getField("GLFW_MOUSE_BUTTON_RIGHT").getInt(null);
+      int leftState = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, leftButton)).intValue();
+      int rightState = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, rightButton)).intValue();
+      boolean leftDown = leftState == press;
+      boolean rightDown = rightState == press;
+      long now = System.currentTimeMillis();
+      if (leftDown && !leftMouseDown) {
+        LEFT_CLICK_TIMES[leftClickSlot] = now;
+        leftClickSlot = (leftClickSlot + 1) % LEFT_CLICK_TIMES.length;
+      }
+      if (rightDown && !rightMouseDown) {
+        RIGHT_CLICK_TIMES[rightClickSlot] = now;
+        rightClickSlot = (rightClickSlot + 1) % RIGHT_CLICK_TIMES.length;
+      }
+      leftMouseDown = leftDown;
+      rightMouseDown = rightDown;
+    } catch (Throwable ignored) {
+      leftMouseDown = false;
+      rightMouseDown = false;
+    }
+  }
+
+  private static long windowHandle(Object client) throws ReflectiveOperationException {
+    Object window = invokeAny(client, "method_22683", "getWindow");
+    Object handle = invokeAny(window, "method_4490", "handle");
+    return ((Number) handle).longValue();
+  }
+
+  private static Object invokeAny(Object target, String... names) throws ReflectiveOperationException {
+    ReflectiveOperationException failure = null;
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name).invoke(target);
+      } catch (ReflectiveOperationException exception) {
+        failure = exception;
+      }
+    }
+    throw failure == null ? new NoSuchMethodException() : failure;
+  }
+
+  private static void ensureKeyRegistered(class_310 client) {
+    if (client.field_1690 == null || menuKey == null) {
+      return;
+    }
+
+    syncModuleKeyMappings(client);
+    syncZoomKeyMapping(client);
+    if (!keyRegistered) {
+      tryFabricKeyBindingHelper();
+      boolean optionsRegistered = tryAddKeyToOptions(client);
+      keyRegistered = optionsRegistered || helperRegistered;
+    }
+    for (int index = 0; index < moduleKeys.length; index += 1) {
+      MenuModules.Module module = MenuModules.modules()[index];
+      if (!module.keyBindable || moduleKeys[index] == null || moduleKeyRegistered[index]) {
+        continue;
+      }
+      moduleKeyRegistered[index] = tryAddOrReplaceKeyToOptions(client, moduleKeys[index], moduleKeyId(module));
+      if ("zoom".equals(module.id)) {
+        zoomKeyRegistered = moduleKeyRegistered[index];
+      }
+    }
+    syncMenuKeysFromControls(client);
+  }
+
+  private static boolean tryAddKeyToOptions(class_310 client) {
+    try {
+      Field field = keyMappingsField(client.field_1690);
+      if (field == null) {
+        throw new NoSuchFieldException("key mappings");
+      }
+      class_304[] mappings = (class_304[]) field.get(client.field_1690);
+      if (mappings == null) {
+        mappings = new class_304[0];
+      }
+      for (class_304 mapping : mappings) {
+        if (isMenuKey(mapping)) {
+          menuKey = mapping;
+          class_304.method_1426();
+          log("Key mapping is present in Minecraft options.");
+          return true;
+        }
+      }
+
+      class_304[] next = Arrays.copyOf(mappings, mappings.length + 1);
+      next[next.length - 1] = menuKey;
+      field.set(client.field_1690, next);
+      class_304.method_1426();
+      log("Added key mapping to Minecraft options fallback.");
+      return true;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      // The key still works in-session; the controls list only needs this path as a fallback.
+      if (!fallbackFailureLogged) {
+        fallbackFailureLogged = true;
+        log("Could not add key mapping to Minecraft options fallback.");
+      }
+      return false;
+    }
+  }
+
+  private static boolean tryAddOrReplaceKeyToOptions(class_310 client, class_304 keyMapping, String keyId) {
+    try {
+      Field field = keyMappingsField(client.field_1690);
+      if (field == null) {
+        throw new NoSuchFieldException("key mappings");
+      }
+      class_304[] mappings = (class_304[]) field.get(client.field_1690);
+      if (mappings == null) {
+        mappings = new class_304[0];
+      }
+      for (int index = 0; index < mappings.length; index += 1) {
+        if (isNamedKey(mappings[index], keyId)) {
+          if (mappings[index] != keyMapping) {
+            class_304[] next = Arrays.copyOf(mappings, mappings.length);
+            next[index] = keyMapping;
+            field.set(client.field_1690, next);
+          }
+          class_304.method_1426();
+          log("Updated key mapping " + keyId + " in Minecraft options.");
+          return true;
+        }
+      }
+
+      class_304[] next = Arrays.copyOf(mappings, mappings.length + 1);
+      next[next.length - 1] = keyMapping;
+      field.set(client.field_1690, next);
+      class_304.method_1426();
+      log("Added key mapping " + keyId + " to Minecraft options fallback.");
+      return true;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      if (!fallbackFailureLogged) {
+        fallbackFailureLogged = true;
+        log("Could not add key mapping to Minecraft options fallback.");
+      }
+      return false;
+    }
+  }
+
+  private static Field keyMappingsField(Object options) {
+    String[] knownNames = { "field_1839", "keyMappings", "allKeys" };
+    for (String name : knownNames) {
+      try {
+        Field field = options.getClass().getDeclaredField(name);
+        if (class_304[].class.isAssignableFrom(field.getType())) {
+          field.setAccessible(true);
+          return field;
+        }
+      } catch (ReflectiveOperationException | RuntimeException ignored) {
+      }
+    }
+
+    Class<?> type = options.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (class_304[].class.isAssignableFrom(field.getType())) {
+          field.setAccessible(true);
+          return field;
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static boolean isMenuKey(class_304 mapping) {
+    return isNamedKey(mapping, MENU_KEY_ID);
+  }
+
+  private static void releaseConflictingMenuKeyMappings(class_310 client) {
+    if (client == null || client.field_1690 == null || menuKey == null) {
+      return;
+    }
+    int menuCode = keyCodeFromMapping(menuKey);
+    if (menuCode <= 0) {
+      menuCode = RIGHT_SHIFT;
+    }
+    try {
+      Field field = keyMappingsField(client.field_1690);
+      class_304[] mappings = field == null ? null : (class_304[]) field.get(client.field_1690);
+      if (mappings == null) {
+        return;
+      }
+      for (class_304 mapping : mappings) {
+        if (mapping == null || mapping == menuKey || isMenuKey(mapping) || keyCodeFromMapping(mapping) != menuCode) {
+          continue;
+        }
+        setMappingDown(mapping, false);
+        while (mapping.method_1436()) {
+          // Drain queued clicks so another menu cannot consume this X Client key press.
+        }
+      }
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      // The raw keyboard callback is already cancelled; this only clears queued conflicts.
+    }
+  }
+
+  private static boolean isNamedKey(class_304 mapping, String keyId) {
+    try {
+      return mapping != null && keyId.equals(mapping.method_1431());
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private static void syncMenuKeysFromControls(class_310 client) {
+    if (client == null || moduleKeys == null) {
+      return;
+    }
+    MenuModules.Module[] modules = MenuModules.modules();
+    int limit = Math.min(modules.length, moduleKeys.length);
+    for (int index = 0; index < limit; index += 1) {
+      MenuModules.Module module = modules[index];
+      class_304 mapping = moduleKeys[index];
+      if (!module.keyBindable || mapping == null || !isNamedKey(mapping, moduleKeyId(module))) {
+        continue;
+      }
+      String saved = keyMappingSaveString(mapping).toLowerCase(java.util.Locale.ROOT);
+      int mappedCode = keyCodeFromMapping(mapping);
+      int menuCode = mappedCode > 0 ? mappedCode : -1;
+      if (saved.contains("unknown") || saved.endsWith(".none") || saved.contains("unbound")) {
+        menuCode = -1;
+      }
+      if (module.keyCode == menuCode) {
+        moduleKeyCodeSnapshots[index] = menuCode;
+        continue;
+      }
+      MenuModules.setKeyCombo(index, menuCode, 0);
+      moduleKeyCodeSnapshots[index] = menuCode;
+      if ("zoom".equals(module.id)) {
+        zoomKey = mapping;
+        zoomKeyCodeSnapshot = menuCode;
+        zoomKeyRegistered = index < moduleKeyRegistered.length && moduleKeyRegistered[index];
+      }
+    }
+  }
+
+  private static int keyCodeFromMapping(Object mapping) {
+    Object key = getAnyField(mapping, "field_1655", "key", "boundKey");
+    int value = readIntFromObject(key, Integer.MIN_VALUE, "method_1444", "getValue");
+    if (value == Integer.MIN_VALUE) {
+      value = readIntFromObject(mapping, Integer.MIN_VALUE, "method_1429", "getKey", "getDefaultKey");
+    }
+    return value == Integer.MIN_VALUE ? -1 : value;
+  }
+
+  private static boolean tryFabricKeyBindingHelper() {
+    if (helperRegistered || helperAttempted || menuKey == null) {
+      return helperRegistered;
+    }
+    helperAttempted = true;
+    syncModuleKeyMappings(class_310.method_1551());
+    String[][] helpers = {
+        { "net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper", "registerKeyMapping" },
+        { "net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper", "registerKeyBinding" }
+    };
+    for (String[] candidate : helpers) {
+      try {
+        Class<?> helper = Class.forName(candidate[0]);
+        for (Method method : helper.getMethods()) {
+          if (!candidate[1].equals(method.getName()) || method.getParameterCount() != 1) {
+            continue;
+          }
+          if (!method.getParameterTypes()[0].isInstance(menuKey)) {
+            continue;
+          }
+          boolean registeredAny = false;
+          Object registered = method.invoke(null, menuKey);
+          if (registered instanceof class_304) {
+            menuKey = (class_304) registered;
+          }
+          registeredAny = true;
+          for (int index = 0; index < moduleKeys.length; index += 1) {
+            if (moduleKeys[index] == null) {
+              continue;
+            }
+            Object moduleRegistered = method.invoke(null, moduleKeys[index]);
+            if (moduleRegistered instanceof class_304) {
+              moduleKeys[index] = (class_304) moduleRegistered;
+              if ("zoom".equals(MenuModules.modules()[index].id)) {
+                zoomKey = moduleKeys[index];
+              }
+            }
+            moduleKeyRegistered[index] = false;
+            registeredAny = true;
+          }
+          helperRegistered = registeredAny;
+          log("Registered key mapping through " + candidate[0] + "." + candidate[1] + ".");
+          return true;
+        }
+      } catch (ReflectiveOperationException | RuntimeException ignored) {
+        // Try the next Fabric API naming variant.
+      }
+    }
+    log("Fabric key mapping helper not available; using fallback registration.");
+    return false;
+  }
+
+  private static boolean isZoomActive() {
+    MenuModules.Module module = zoomModule();
+    if (module == null || !MenuModules.isUnlocked(module.id) || !isClientGameplayFocused()) {
+      return false;
+    }
+    int zoomIndex = moduleIndex("zoom");
+    if (module.keyCode > 0 || (zoomIndex >= 0 && isKeyMappingAssigned(zoomIndex))) {
+      return zoomKeyHeld || isZoomKeyCurrentlyDown(module);
+    }
+    return module.enabled;
+  }
+
+  private static boolean isKeyMappingAssigned(int index) {
+    if (index < 0 || index >= moduleKeys.length || moduleKeys[index] == null) {
+      return false;
+    }
+    String saved = keyMappingSaveString(moduleKeys[index]);
+    if (saved.isEmpty()) {
+      return MenuModules.modules()[index].keyCode > 0;
+    }
+    String normalized = saved.toLowerCase(java.util.Locale.ROOT);
+    return !normalized.contains("unknown") && !normalized.endsWith(".none") && !normalized.contains("unbound");
+  }
+
+  private static String keyMappingSaveString(Object keyMapping) {
+    if (keyMapping == null) {
+      return "";
+    }
+    for (String methodName : new String[] { "method_1428", "saveString" }) {
+      try {
+        Object value = keyMapping.getClass().getMethod(methodName).invoke(keyMapping);
+        return String.valueOf(value == null ? "" : value);
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    return "";
+  }
+
+  private static MenuModules.Module zoomModule() {
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if ("zoom".equals(module.id)) {
+        return module;
+      }
+    }
+    return null;
+  }
+
+  private static boolean isClientGameplayFocused() {
+    try {
+      return isGameplayFocused(class_310.method_1551());
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static boolean isZoomKeyCurrentlyDown(MenuModules.Module module) {
+    try {
+      class_310 client = class_310.method_1551();
+      return client != null && isZoomKeyDown(client, module);
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static void ensureScrollCallback(class_310 client) {
+    try {
+      long handle = windowHandle(client);
+      if (scrollCallbackProxy != null && scrollCallbackHandle == handle) {
+        return;
+      }
+      Class<?> callbackType = Class.forName("org.lwjgl.glfw.GLFWScrollCallbackI");
+      InvocationHandler handler = (proxy, method, args) -> {
+        if ("invoke".equals(method.getName()) && args != null && args.length >= 3) {
+          double yOffset = ((Number) args[2]).doubleValue();
+          if (isGameplayFocused(client) && isZoomActive()) {
+            adjustZoom(yOffset);
+            return null;
+          }
+          forwardScroll(args);
+        }
+        return null;
+      };
+      Object proxy = Proxy.newProxyInstance(callbackType.getClassLoader(), new Class<?>[] { callbackType }, handler);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      Object previous = glfw.getMethod("glfwSetScrollCallback", long.class, callbackType).invoke(null, handle, proxy);
+      previousScrollCallback = previous;
+      scrollCallbackProxy = proxy;
+      scrollCallbackHandle = handle;
+    } catch (Throwable ignored) {
+      // Zoom still works; only mouse-wheel strength control is unavailable.
+    }
+  }
+
+  private static void forwardScroll(Object[] args) {
+    Object callback = previousScrollCallback;
+    if (callback == null) {
+      return;
+    }
+    for (Method method : callback.getClass().getMethods()) {
+      if (!"invoke".equals(method.getName()) || method.getParameterCount() != args.length) {
+        continue;
+      }
+      try {
+        method.invoke(callback, args);
+        return;
+      } catch (Throwable ignored) {
+        // Try another invoke signature.
+      }
+    }
+  }
+
+  public static boolean handleZoomScroll(double yOffset) {
+    return false;
+  }
+
+  private static void adjustZoom(double yOffset) {
+    if (yOffset == 0.0D) {
+      return;
+    }
+    int direction = yOffset > 0.0D ? 1 : -1;
+    int steps = Math.max(1, Math.min(MAX_ZOOM_SCROLL_STEPS, (int) Math.ceil(Math.abs(yOffset))));
+    int next = MenuModules.zoomStrengthPercent() + (direction * ZOOM_SCROLL_STEP_PERCENT * steps);
+    MenuModules.setZoomStrengthPercent(next);
+    zoomFactor = MenuModules.zoomStrength();
+    try {
+      updateZoom(class_310.method_1551());
+    } catch (Throwable ignored) {
+      // The watcher will apply it on the next tick.
+    }
+  }
+
+  private static void updateMovementTweaks(class_310 client) {
+    if (client == null || client.field_1690 == null) {
+      return;
+    }
+    updateNoBob(client.field_1690);
+    updateSprint(client);
+    updateSpeedEffect(client);
+    updateResistanceEffect(client);
+    updateInvisibilityEffect(client);
+    updateGhostBlocks(client);
+    updateInstantBreak(client);
+    MobCameraTracker.update(client, moduleEnabled("mobtrack") && isGameplayFocused(client));
+    AutoHitController.update(client, moduleEnabled("autohit") && isGameplayFocused(client));
+  }
+
+  private static void updateInstantBreak(class_310 client) {
+    if (!moduleEnabled("breakspeed") || moduleEnabled("ghostblocks") || !isGameplayFocused(client) || !isMouseButtonDown(client, 0)) {
+      return;
+    }
+    Object hitResult = getAnyField(client, "field_1765", "hitResult");
+    Object pos = blockHitPos(hitResult);
+    if (pos == null) {
+      return;
+    }
+    if (destroyIntegratedServerBlock(client, pos)) {
+      swingMainHand(playerObject(client));
+    }
+  }
+
+  private static void updateGhostBlocks(class_310 client) {
+    if (!moduleEnabled("ghostblocks") || !isGameplayFocused(client) || !isMouseButtonDown(client, 0)) {
+      return;
+    }
+    Object hitResult = getAnyField(client, "field_1765", "hitResult");
+    Object pos = blockHitPos(hitResult);
+    Object gameMode = getAnyField(client, "field_1761", "gameMode", "interactionManager");
+    if (pos != null && invokeBlockDestroy(gameMode, pos)) {
+      swingMainHand(playerObject(client));
+    }
+  }
+
+  private static boolean destroyIntegratedServerBlock(Object client, Object pos) {
+    Object server = integratedServer(client);
+    if (server == null || pos == null) {
+      return false;
+    }
+    Runnable task = () -> destroyIntegratedServerBlockNow(server, client, pos);
+    if (server instanceof Executor executor) {
+      executor.execute(task);
+    } else {
+      task.run();
+    }
+    return true;
+  }
+
+  private static void destroyIntegratedServerBlockNow(Object server, Object client, Object pos) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer == null) {
+      return;
+    }
+    Object serverGameMode = getAnyField(serverPlayer, "field_13987", "gameMode", "gameModeForPlayer");
+    if (invokeBlockDestroy(serverGameMode, pos)) {
+      return;
+    }
+    Object level = invokeAnyNullable(serverPlayer, "method_51469", "method_37908", "method_5681", "serverLevel", "level", "getCommandSenderWorld");
+    if (level == null) {
+      level = getAnyField(serverPlayer, "field_6002", "field_37908", "level", "serverLevel");
+    }
+    invokeLevelDestroyBlock(level, pos, serverPlayer);
+  }
+
+  private static boolean invokeLevelDestroyBlock(Object level, Object pos, Object player) {
+    if (level == null || pos == null) {
+      return false;
+    }
+    for (String name : new String[] { "method_8650", "method_22352", "destroyBlock", "removeBlock" }) {
+      for (Method method : level.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        if (types.length < 2 || types.length > 4 || !types[0].isInstance(pos) || types[1] != Boolean.TYPE) {
+          continue;
+        }
+        try {
+          Object result;
+          if (types.length == 2) {
+            result = method.invoke(level, pos, Boolean.TRUE);
+          } else if (types.length == 3) {
+            Object third = types[2] == Integer.TYPE ? Integer.valueOf(512) : player;
+            if (third != null && !types[2].isPrimitive() && !types[2].isInstance(third)) {
+              continue;
+            }
+            result = method.invoke(level, pos, Boolean.TRUE, third);
+          } else {
+            if (player != null && !types[2].isInstance(player)) {
+              continue;
+            }
+            result = method.invoke(level, pos, Boolean.TRUE, player, Integer.valueOf(512));
+          }
+          return !(result instanceof Boolean bool) || bool.booleanValue();
+        } catch (Throwable ignored) {
+          // Try another destroy/remove signature.
+        }
+      }
+    }
+    return false;
+  }
+
+  private static void primeInstantBreakState(Object gameMode, Object pos) {
+    if (gameMode == null) {
+      return;
+    }
+    setIntFields(gameMode, 0, "field_3716", "field_41932", "destroyDelay", "blockBreakingCooldown");
+    setFloatFields(gameMode, 1.0F, "field_3714", "field_3715", "destroyProgress", "currentBreakingProgress", "blockBreakingProgress");
+    setBooleanFields(gameMode, true, "field_3717", "isDestroying", "destroyingBlock", "breakingBlock");
+    if (pos != null) {
+      setObjectFields(gameMode, pos, "field_3713", "destroyBlockPos", "currentBreakingPos", "currentBreakingBlockPos");
+    }
+  }
+
+  private static boolean isMouseButtonDown(Object client, int button) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int state = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, button)).intValue();
+      return state == press;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static Object blockHitPos(Object hitResult) {
+    if (hitResult == null) {
+      return null;
+    }
+    String value = String.valueOf(hitResult);
+    String typeName = hitResult.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+    if (!typeName.contains("block") && !value.toLowerCase(java.util.Locale.ROOT).contains("block")) {
+      return null;
+    }
+    return invokeAnyNullable(hitResult, "method_17777", "getBlockPos", "getPos");
+  }
+
+  private static Object blockHitDirection(Object hitResult) {
+    if (hitResult == null) {
+      return null;
+    }
+    return invokeAnyNullable(hitResult, "method_17780", "getDirection", "getSide");
+  }
+
+  private static boolean invokeBlockDestroy(Object gameMode, Object pos) {
+    return invokeBlockAction(gameMode, pos, null, "method_2899", "destroyBlock", "breakBlock");
+  }
+
+  private static boolean invokeBlockAction(Object target, Object pos, Object direction, String... names) {
+    if (target == null || pos == null) {
+      return false;
+    }
+    for (String name : names) {
+      for (Method method : target.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        try {
+          if (types.length == 1 && types[0].isInstance(pos)) {
+            Object result = method.invoke(target, pos);
+            return !(result instanceof Boolean bool) || bool.booleanValue();
+          }
+          if (direction != null && types.length == 2 && types[0].isInstance(pos) && types[1].isInstance(direction)) {
+            Object result = method.invoke(target, pos, direction);
+            return !(result instanceof Boolean bool) || bool.booleanValue();
+          }
+        } catch (Throwable ignored) {
+          // Try the next overload or mapping name.
+        }
+      }
+    }
+    return false;
+  }
+
+  private static void swingMainHand(Object player) {
+    if (player == null) {
+      return;
+    }
+    for (String name : new String[] { "method_6104", "swing", "swingHand" }) {
+      for (Method method : player.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        try {
+          if (method.getParameterCount() == 0) {
+            method.invoke(player);
+            return;
+          }
+        } catch (Throwable ignored) {
+          // Visual hand swing is optional.
+        }
+      }
+    }
+  }
+
+  private static void updateSprint(class_310 client) {
+    if (!moduleEnabled("sprint") || !isGameplayFocused(client) || !isKeyDown(client, 87) || isAnyKeyDown(client, 340, 344)) {
+      return;
+    }
+    Object player = playerObject(client);
+    if (player == null) {
+      return;
+    }
+    try {
+      for (String name : new String[] { "method_5728", "setSprinting" }) {
+        try {
+          Method method = player.getClass().getMethod(name, boolean.class);
+          method.invoke(player, Boolean.TRUE);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next mapping name.
+        }
+      }
+    } catch (Throwable ignored) {
+      // Sprint is best-effort and should never break the client loop.
+    }
+  }
+
+  private static void updateSpeedEffect(class_310 client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("speed")) {
+      applySpeedEffect(client);
+      return;
+    }
+    if (speedApplied) {
+      clearSpeedEffect(client);
+    }
+  }
+
+  private static void applySpeedEffect(class_310 client) {
+    try {
+      Object player = getAnyField(client, "field_1724", "player");
+      Object speed = speedEffect();
+      if (player == null || speed == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("speed");
+      Object instance = createSpeedInstance(speed, amplifier);
+      if (instance != null) {
+        forceEffectValues(instance, SPEED_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      if (!speedApplied || lastSpeedCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "speed", amplifier);
+        addIntegratedServerEffect(client, instance);
+        lastSpeedCommandAmplifier = amplifier;
+      }
+      Object current = invokeEffectMethod(player, speed, "method_6112", "getEffect");
+      if ((effectDuration(current) < 0 || effectDuration(current) > SPEED_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && effectAmplifier(current) >= amplifier) {
+        forceEffectValues(current, SPEED_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      speedApplied = true;
+    } catch (Throwable ignored) {
+      // Speed is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearSpeedEffect(class_310 client) {
+    sendEffectClearCommand(client, "speed");
+    clearIntegratedServerEffect(client, speedEffect());
+    lastSpeedCommandAmplifier = -1;
+    try {
+      Object player = client == null ? null : getAnyField(client, "field_1724", "player");
+      Object speed = speedEffect();
+      if (player != null && speed != null) {
+        Object current = invokeEffectMethod(player, speed, "method_6112", "getEffect");
+        if (current != null && (effectAmplifier(current) >= MenuModules.effectLevel("speed")
+            || (!effectBoolean(current, "method_5581", "isVisible", "method_5591") && !effectBoolean(current, "method_5592", "showIcon")))) {
+          invokeEffectMethod(player, speed, "method_6016", "removeEffect");
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external speed effects untouched when cleanup fails.
+    }
+    speedApplied = false;
+  }
+
+  private static void updateResistanceEffect(class_310 client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("resistance")) {
+      applyResistanceEffect(client);
+      return;
+    }
+    if (resistanceApplied) {
+      clearResistanceEffect(client);
+    }
+  }
+
+  private static void applyResistanceEffect(class_310 client) {
+    try {
+      Object player = getAnyField(client, "field_1724", "player");
+      Object resistance = resistanceEffect();
+      if (player == null || resistance == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("resistance");
+      Object instance = createResistanceInstance(resistance, amplifier);
+      if (instance != null) {
+        forceEffectValues(instance, RESISTANCE_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      if (!resistanceApplied || lastResistanceCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "resistance", amplifier);
+        addIntegratedServerEffect(client, instance);
+        lastResistanceCommandAmplifier = amplifier;
+      }
+      Object current = invokeEffectMethod(player, resistance, "method_6112", "getEffect");
+      if ((effectDuration(current) < 0 || effectDuration(current) > RESISTANCE_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && effectAmplifier(current) >= amplifier) {
+        forceEffectValues(current, RESISTANCE_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      resistanceApplied = true;
+    } catch (Throwable ignored) {
+      // Resistance is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearResistanceEffect(class_310 client) {
+    sendEffectClearCommand(client, "resistance");
+    clearIntegratedServerEffect(client, resistanceEffect());
+    lastResistanceCommandAmplifier = -1;
+    try {
+      Object player = client == null ? null : getAnyField(client, "field_1724", "player");
+      Object resistance = resistanceEffect();
+      if (player != null && resistance != null) {
+        Object current = invokeEffectMethod(player, resistance, "method_6112", "getEffect");
+        if (current != null && (effectAmplifier(current) >= MenuModules.effectLevel("resistance")
+            || (!effectBoolean(current, "method_5581", "isVisible", "method_5591") && !effectBoolean(current, "method_5592", "showIcon")))) {
+          invokeEffectMethod(player, resistance, "method_6016", "removeEffect");
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external resistance effects untouched when cleanup fails.
+    }
+    resistanceApplied = false;
+  }
+
+  private static void updateInvisibilityEffect(class_310 client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("invisibility")) {
+      applyInvisibilityEffect(client);
+      return;
+    }
+    if (invisibilityApplied) {
+      clearInvisibilityEffect(client);
+    }
+  }
+
+  private static void applyInvisibilityEffect(class_310 client) {
+    try {
+      Object player = getAnyField(client, "field_1724", "player");
+      Object invisibility = invisibilityEffect();
+      if (player == null || invisibility == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("invisibility");
+      Object instance = createInvisibilityInstance(invisibility, amplifier);
+      if (instance != null) {
+        forceEffectValues(instance, INVISIBILITY_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      if (!invisibilityApplied || lastInvisibilityCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "invisibility", amplifier);
+        addIntegratedServerEffect(client, instance);
+        lastInvisibilityCommandAmplifier = amplifier;
+      }
+      Object current = invokeEffectMethod(player, invisibility, "method_6112", "getEffect");
+      if ((effectDuration(current) < 0 || effectDuration(current) > INVISIBILITY_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && effectAmplifier(current) >= amplifier) {
+        forceEffectValues(current, INVISIBILITY_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      invisibilityApplied = true;
+    } catch (Throwable ignored) {
+      // Invisibility is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearInvisibilityEffect(class_310 client) {
+    sendEffectClearCommand(client, "invisibility");
+    clearIntegratedServerEffect(client, invisibilityEffect());
+    lastInvisibilityCommandAmplifier = -1;
+    try {
+      Object player = client == null ? null : getAnyField(client, "field_1724", "player");
+      Object invisibility = invisibilityEffect();
+      if (player != null && invisibility != null) {
+        Object current = invokeEffectMethod(player, invisibility, "method_6112", "getEffect");
+        if (current != null && (effectAmplifier(current) >= MenuModules.effectLevel("invisibility")
+            || (!effectBoolean(current, "method_5581", "isVisible", "method_5591") && !effectBoolean(current, "method_5592", "showIcon")))) {
+          invokeEffectMethod(player, invisibility, "method_6016", "removeEffect");
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external invisibility effects untouched when cleanup fails.
+    }
+    invisibilityApplied = false;
+  }
+
+  private static void updateNoBob(class_315 options) {
+    if (moduleEnabled("nobob")) {
+      if (previousBobView == null) {
+        previousBobView = getOptionBoolean(options, "bobView", "method_42443", "field_1817");
+      }
+      forceOptionBoolean(options, false, "bobView", "method_42443", "field_1817");
+      return;
+    }
+    if (previousBobView != null) {
+      forceOptionBoolean(options, previousBobView.booleanValue(), "bobView", "method_42443", "field_1817");
+      previousBobView = null;
+    }
+  }
+
+  private static void adjustFreecamSpeed(double yOffset) {
+    if (yOffset > 0.0D) {
+      freecamSpeed = Math.min(8.0D, freecamSpeed + (0.18D * Math.abs(yOffset)));
+    } else if (yOffset < 0.0D) {
+      freecamSpeed = Math.max(0.2D, freecamSpeed - (0.18D * Math.abs(yOffset)));
+    }
+  }
+
+  private static void updateZoom(class_310 client) {
+    if (client == null || client.field_1690 == null) {
+      return;
+    }
+    if (zoomApplied) {
+      if (previousSmoothCamera != null) {
+        setSmoothCamera(client.field_1690, previousSmoothCamera.booleanValue());
+      }
+      restoreZoomSensitivity(client.field_1690);
+      previousFov = null;
+      previousSmoothCamera = null;
+      zoomJustActivated = false;
+      currentZoomFactor = 1.0D;
+      zoomApplied = false;
+    } else {
+      restoreZoomSensitivity(client.field_1690);
+    }
+    syncInfiniteZoomKeyMapping(client);
+  }
+
+  public static double applyZoomFov(double originalFov) {
+    lastBaseFov = originalFov;
+    return originalFov;
+  }
+
+  private static void updateZoomSensitivity(class_315 options) {
+    if (options == null) {
+      return;
+    }
+    Number current = getOptionNumber(options, "method_42495", "sensitivity", "mouseSensitivity", "field_1843");
+    if (current == null) {
+      return;
+    }
+    if (previousMouseSensitivity == null) {
+      previousMouseSensitivity = Double.valueOf(current.doubleValue());
+    }
+    double base = previousMouseSensitivity.doubleValue();
+    double zoom = Math.max(1.0D, currentZoomFactor);
+    double target = Math.max(0.005D, Math.min(1.0D, base / zoom));
+    if (Math.abs(current.doubleValue() - target) > 0.0005D) {
+      forceOptionNumber(options, target, "method_42495", "sensitivity", "mouseSensitivity", "field_1843");
+    }
+  }
+
+  private static void restoreZoomSensitivity(class_315 options) {
+    if (options == null || previousMouseSensitivity == null) {
+      return;
+    }
+    forceOptionNumber(options, previousMouseSensitivity.doubleValue(), "method_42495", "sensitivity", "mouseSensitivity", "field_1843");
+    previousMouseSensitivity = null;
+  }
+
+  public static void applyDetachedCamera(Object camera) {
+    class_310 client = class_310.method_1551();
+    if (camera == null || client == null || !moduleEnabled("freecam") || !hasWorld(client)) {
+      freecamApplied = false;
+      freecamMouseReady = false;
+      lastFreecamMoveMs = 0L;
+      return;
+    }
+
+    if (!freecamApplied) {
+      initFreecam(camera, client);
+    }
+    updateFreecam(client);
+    setCameraRotation(camera, freecamYaw, freecamPitch);
+    setCameraPosition(camera, freecamX, freecamY, freecamZ);
+    setBooleanFields(camera, true, "detached", "field_1874");
+  }
+
+  public static boolean shouldForceFullbright() {
+    return moduleEnabled("bright");
+  }
+
+  public static float applyBlockBreakSpeed(float original) {
+    if (!moduleEnabled("breakspeed") || moduleEnabled("ghostblocks") || original <= 0.0F
+        || integratedServer(class_310.method_1551()) == null) {
+      return original;
+    }
+    return 1000000000.0F;
+  }
+
+  public static boolean shouldPauseInOwnWorld() {
+    return shouldPauseInOwnWorld(class_310.method_1551());
+  }
+
+  private static boolean shouldPauseInOwnWorld(Object client) {
+    if (client == null || getAnyField(client, "field_1724", "player") == null) {
+      return false;
+    }
+    if (SocialManager.keepHostedWorldOnline() && SocialManager.hasHostedWorld()) {
+      return false;
+    }
+    Boolean singleplayer = invokeAnyBoolean(client, "method_1589", "method_31321", "isSingleplayer", "hasSingleplayerServer", "isLocalServer");
+    if (Boolean.TRUE.equals(singleplayer)) {
+      return true;
+    }
+    return getAnyField(client, "field_1747", "singleplayerServer", "integratedServer") != null;
+  }
+
+  private static Boolean invokeAnyBoolean(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Object value = target.getClass().getMethod(name).invoke(target);
+        if (value instanceof Boolean bool) {
+          return bool;
+        }
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          Object value = method.invoke(target);
+          if (value instanceof Boolean bool) {
+            return bool;
+          }
+        } catch (Throwable alsoIgnored) {
+          // Try the next known mapping name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void initFreecam(Object camera, class_310 client) {
+    double[] position = readPosition(camera);
+    if (position == null) {
+      position = readPosition(playerObject(client));
+    }
+    if (position == null) {
+      position = new double[] { 0.0D, 80.0D, 0.0D };
+    }
+    freecamX = position[0];
+    freecamY = position[1];
+    freecamZ = position[2];
+    freecamYaw = readFloat(camera, 0.0F, "yRot", "yaw", "method_19330");
+    freecamPitch = readFloat(camera, 25.0F, "xRot", "method_19329");
+    freecamPitch = clampFloat(freecamPitch, -89.0F, 89.0F);
+    freecamApplied = true;
+    freecamMouseReady = false;
+    lastFreecamMoveMs = System.currentTimeMillis();
+  }
+
+  private static void updateFreecam(class_310 client) {
+    long now = System.currentTimeMillis();
+    double seconds = lastFreecamMoveMs <= 0L ? 0.0D : Math.min(0.08D, (now - lastFreecamMoveMs) / 1000.0D);
+    lastFreecamMoveMs = now;
+    if (!isGameplayFocused(client)) {
+      freecamMouseReady = false;
+      return;
+    }
+
+    updateFreecamLook(client);
+    syncFreecamPlayerLook(client);
+    freezePlayerMovement(client);
+
+    double forward = (isKeyDown(client, 87) ? 1.0D : 0.0D) - (isKeyDown(client, 83) ? 1.0D : 0.0D);
+    double strafe = (isKeyDown(client, 65) ? 1.0D : 0.0D) - (isKeyDown(client, 68) ? 1.0D : 0.0D);
+    double vertical = (isKeyDown(client, 32) ? 1.0D : 0.0D) - (isKeyDown(client, 340) ? 1.0D : 0.0D);
+    double length = Math.sqrt((forward * forward) + (strafe * strafe) + (vertical * vertical));
+    if (length <= 0.0D || seconds <= 0.0D) {
+      return;
+    }
+
+    forward /= length;
+    strafe /= length;
+    vertical /= length;
+    double yawRad = Math.toRadians(freecamYaw);
+    double forwardX = -Math.sin(yawRad);
+    double forwardZ = Math.cos(yawRad);
+    double rightX = Math.cos(yawRad);
+    double rightZ = Math.sin(yawRad);
+    double speed = freecamSpeed;
+    if (isKeyDown(client, 341) || isKeyDown(client, 345)) {
+      speed *= 2.6D;
+    }
+    if (isKeyDown(client, 342) || isKeyDown(client, 346)) {
+      speed *= 0.35D;
+    }
+    double distance = speed * seconds * 8.0D;
+    freecamX += ((forwardX * forward) + (rightX * strafe)) * distance;
+    freecamY += vertical * distance;
+    freecamZ += ((forwardZ * forward) + (rightZ * strafe)) * distance;
+  }
+
+  private static void updateFreecamLook(class_310 client) {
+    try {
+      long handle = windowHandle(client);
+      double[] x = new double[1];
+      double[] y = new double[1];
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      glfw.getMethod("glfwGetCursorPos", long.class, double[].class, double[].class).invoke(null, handle, x, y);
+      if (freecamMouseReady) {
+        double dx = x[0] - lastFreecamMouseX;
+        double dy = y[0] - lastFreecamMouseY;
+        double sensitivity = 0.12D;
+        freecamYaw = wrapDegrees((float) (freecamYaw + (dx * sensitivity)));
+        freecamPitch = clampFloat((float) (freecamPitch + (dy * sensitivity)), -89.0F, 89.0F);
+      }
+      lastFreecamMouseX = x[0];
+      lastFreecamMouseY = y[0];
+      freecamMouseReady = true;
+    } catch (Throwable ignored) {
+      freecamMouseReady = false;
+    }
+  }
+
+  private static void syncFreecamPlayerLook(Object client) {
+    Object player = playerObject(client);
+    if (player == null) return;
+    invokeFloat(player, freecamYaw, "method_36456", "setYRot", "setYaw");
+    invokeFloat(player, freecamPitch, "method_36457", "setXRot", "setPitch");
+    invokeFloat(player, freecamYaw, "method_5847", "setYHeadRot", "setHeadYaw");
+    invokeFloat(player, freecamYaw, "method_5784", "setYBodyRot", "setBodyYaw");
+    setFloatFields(player, freecamYaw, "field_6031", "field_5982", "yRot", "yaw", "yRotO", "lastYaw");
+    setFloatFields(player, freecamPitch, "field_5965", "field_6030", "xRot", "pitch", "xRotO", "lastPitch");
+    setFloatFields(player, freecamYaw, "field_6241", "field_6259", "yHeadRot", "headYaw", "yHeadRotO", "lastHeadYaw");
+    setFloatFields(player, freecamYaw, "field_6283", "yBodyRot", "bodyYaw", "yBodyRotO", "lastBodyYaw");
+  }
+
+  private static boolean isGameplayFocused(Object client) {
+    return client != null && getAnyField(client, "screen", "field_1755") == null;
+  }
+
+  private static Object playerObject(Object client) {
+    return getAnyField(client, "player", "field_1724");
+  }
+
+  private static double[] readPosition(Object target) {
+    if (target == null) {
+      return null;
+    }
+    try {
+      Object pos = invokeAny(target, "position", "getPosition", "method_19538", "method_19326");
+      double x = readDouble(pos, Double.NaN, "x", "method_10216", "getX", "x");
+      double y = readDouble(pos, Double.NaN, "y", "method_10214", "getY", "y");
+      double z = readDouble(pos, Double.NaN, "z", "method_10215", "getZ", "z");
+      if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+        return new double[] { x, y, z };
+      }
+    } catch (Throwable ignored) {
+      // Try entity coordinate methods below.
+    }
+    double x = readDouble(target, Double.NaN, "getX", "method_23317", "x");
+    double y = readDouble(target, Double.NaN, "getEyeY", "method_23320", "getY", "method_23318", "y");
+    double z = readDouble(target, Double.NaN, "getZ", "method_23321", "z");
+    if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+      return new double[] { x, y, z };
+    }
+    return null;
+  }
+
+  private static double readDouble(Object target, double fallback, String... names) {
+    if (target == null) {
+      return fallback;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        if (method.getParameterCount() == 0 && Number.class.isAssignableFrom(wrapType(method.getReturnType()))) {
+          return ((Number) method.invoke(target)).doubleValue();
+        }
+      } catch (Throwable ignored) {
+        // Try a field with the same name.
+      }
+      try {
+        Field field = target.getClass().getField(name);
+        Object value = field.get(target);
+        if (value instanceof Number number) {
+          return number.doubleValue();
+        }
+      } catch (Throwable ignored) {
+        // Try the next candidate.
+      }
+    }
+    return fallback;
+  }
+
+  private static float readFloat(Object target, float fallback, String... names) {
+    return (float) readDouble(target, fallback, names);
+  }
+
+  private static void setCameraPosition(Object camera, double x, double y, double z) {
+    for (String methodName : new String[] { "setPosition", "method_19327" }) {
+      try {
+        Method method = camera.getClass().getDeclaredMethod(methodName, Double.TYPE, Double.TYPE, Double.TYPE);
+        method.setAccessible(true);
+        method.invoke(camera, x, y, z);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    setDoubleFields(camera, x, "x", "cameraX");
+    setDoubleFields(camera, y, "y", "cameraY");
+    setDoubleFields(camera, z, "z", "cameraZ");
+  }
+
+  private static void setCameraRotation(Object camera, float yaw, float pitch) {
+    for (String methodName : new String[] { "setRotation", "method_19325" }) {
+      try {
+        Method method = camera.getClass().getDeclaredMethod(methodName, Float.TYPE, Float.TYPE);
+        method.setAccessible(true);
+        method.invoke(camera, yaw, pitch);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+  }
+
+  private static void freezePlayerMovement(class_310 client) {
+    Object player = playerObject(client);
+    if (player == null) {
+      return;
+    }
+    setFloatFields(player, 0.0F, "xxa", "yya", "zza", "field_6250", "field_6261", "field_6212");
+    setBooleanFields(player, false, "jumping", "field_3913");
+    invokeBoolean(player, false, "setJumping", "method_6043");
+    Object input = getAnyField(player, "input", "field_3913");
+    if (input == null) {
+      return;
+    }
+    setStaticValueByName(input, "EMPTY", "keyPresses", "field_3903");
+    setStaticValueByName(input, "ZERO", "moveVector", "field_3904");
+  }
+
+  private static void setStaticValueByName(Object target, String staticName, String... targetFieldNames) {
+    Object value = null;
+    Class<?> type = target.getClass();
+    for (Field field : type.getDeclaredFields()) {
+      try {
+        Field staticField = field.getType().getField(staticName);
+        value = staticField.get(null);
+        break;
+      } catch (Throwable ignored) {
+        // Try the next field type.
+      }
+    }
+    if (value != null) {
+      setObjectFields(target, value, targetFieldNames);
+    }
+  }
+
+  private static void invokeBoolean(Object target, boolean value, String... methodNames) {
+    for (String methodName : methodNames) {
+      try {
+        Method method = target.getClass().getMethod(methodName, Boolean.TYPE);
+        method.invoke(target, value);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next method.
+      }
+    }
+  }
+
+  private static void invokeFloat(Object target, float value, String... methodNames) {
+    for (String methodName : methodNames) {
+      try {
+        Method method = target.getClass().getMethod(methodName, Float.TYPE);
+        method.invoke(target, value);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next method.
+      }
+    }
+  }
+
+  private static void setObjectFields(Object target, Object value, String... names) {
+    setFields(target, field -> field.getType().isInstance(value), field -> field.set(target, value), names);
+  }
+
+  private static void setIntFields(Object target, int value, String... names) {
+    setFields(target, field -> field.getType() == Integer.TYPE || field.getType() == Integer.class, field -> {
+      if (field.getType() == Integer.TYPE) {
+        field.setInt(target, value);
+      } else {
+        field.set(target, Integer.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setDoubleFields(Object target, double value, String... names) {
+    setFields(target, field -> field.getType() == Double.TYPE || field.getType() == Double.class, field -> {
+      if (field.getType() == Double.TYPE) {
+        field.setDouble(target, value);
+      } else {
+        field.set(target, Double.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setFloatFields(Object target, float value, String... names) {
+    setFields(target, field -> field.getType() == Float.TYPE || field.getType() == Float.class, field -> {
+      if (field.getType() == Float.TYPE) {
+        field.setFloat(target, value);
+      } else {
+        field.set(target, Float.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setBooleanFields(Object target, boolean value, String... names) {
+    setFields(target, field -> field.getType() == Boolean.TYPE || field.getType() == Boolean.class, field -> {
+      if (field.getType() == Boolean.TYPE) {
+        field.setBoolean(target, value);
+      } else {
+        field.set(target, Boolean.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setFields(Object target, FieldFilter filter, FieldSetter setter, String... names) {
+    if (target == null) {
+      return;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) && filter.matches(field)) {
+            field.setAccessible(true);
+            setter.set(field);
+            return;
+          }
+        } catch (Throwable ignored) {
+          // Try superclass or next name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+  }
+
+  private interface FieldFilter {
+    boolean matches(Field field);
+  }
+
+  private interface FieldSetter {
+    void set(Field field) throws IllegalAccessException;
+  }
+
+  private static Class<?> wrapType(Class<?> type) {
+    if (!type.isPrimitive()) {
+      return type;
+    }
+    if (type == Double.TYPE) {
+      return Double.class;
+    }
+    if (type == Float.TYPE) {
+      return Float.class;
+    }
+    if (type == Integer.TYPE) {
+      return Integer.class;
+    }
+    if (type == Long.TYPE) {
+      return Long.class;
+    }
+    return type;
+  }
+
+  private static float clampFloat(float value, float min, float max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static float wrapDegrees(float value) {
+    float result = value % 360.0F;
+    if (result >= 180.0F) {
+      result -= 360.0F;
+    }
+    if (result < -180.0F) {
+      result += 360.0F;
+    }
+    return result;
+  }
+
+  private static double smoothZoomFactor(double current, double target) {
+    double delta = target - current;
+    if (Math.abs(delta) < 0.01D) {
+      return target;
+    }
+    return current + (delta * MenuModules.zoomSmoothness());
+  }
+
+  private static boolean moduleEnabled(String id) {
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if (module.id.equals(id)) {
+        return MenuModules.isUnlocked(module.id) && module.enabled;
+      }
+    }
+    return false;
+  }
+
+  private static void log(String message) {
+    System.out.println("[X Client] " + message);
+  }
+
+  private static void applyModule(MenuModules.Module module) {
+    class_310 client = class_310.method_1551();
+    if (client == null || client.field_1690 == null) {
+      return;
+    }
+
+    if ("bright".equals(module.id)) {
+      updateFullbright(client);
+    } else if ("weather".equals(module.id) || "time".equals(module.id)) {
+      updateClientWorldOverrides(client);
+    } else if ("speed".equals(module.id)) {
+      updateSpeedEffect(client);
+    } else if ("resistance".equals(module.id)) {
+      updateResistanceEffect(client);
+    } else if ("invisibility".equals(module.id)) {
+      updateInvisibilityEffect(client);
+    } else if ("zoom".equals(module.id)) {
+      updateZoom(client);
+    } else if ("flight".equals(module.id)) {
+      AdminFlightModule.moduleChanged(client, module.enabled);
+    }
+  }
+
+  private static void updateFullbright(class_310 client) {
+    if (client == null || client.field_1690 == null) {
+      return;
+    }
+
+    if (moduleEnabled("bright")) {
+      if (!fullbrightApplied) {
+        previousGamma = getOptionNumber(client.field_1690, "method_42473", "gamma", "getGamma", "field_1840", "method_42495");
+        previousDarknessScale = getOptionNumber(client.field_1690, "darknessEffectScale", "getDarknessEffectScale", "method_42472", "field_55190");
+      }
+      forceOptionNumber(client.field_1690, FULLBRIGHT_GAMMA, "method_42473", "gamma", "getGamma", "field_1840", "method_42495");
+      forceOptionNumber(client.field_1690, 0.0D, "darknessEffectScale", "getDarknessEffectScale", "method_42472", "field_55190");
+      boostLightTexture(client);
+      fullbrightApplied = true;
+      return;
+    }
+
+    if (fullbrightApplied) {
+      clearNightVisionEffect(client);
+    }
+    if (fullbrightApplied && previousGamma != null) {
+      forceOptionNumber(client.field_1690, previousGamma.doubleValue(), "method_42473", "gamma", "getGamma", "field_1840", "method_42495");
+      if (previousDarknessScale != null) {
+        forceOptionNumber(client.field_1690, previousDarknessScale.doubleValue(), "darknessEffectScale", "getDarknessEffectScale", "method_42472", "field_55190");
+      }
+    }
+    fullbrightApplied = false;
+    previousGamma = null;
+    previousDarknessScale = null;
+  }
+
+  /** Applies visual-only world settings every client tick; no packet is sent. */
+  private static void updateClientWorldOverrides(class_310 client) {
+    if (client == null) return;
+    Object level = getAnyField(client, "field_1687", "level", "world");
+    if (level == null) return;
+    if (moduleEnabled("time")) {
+      long ticks = switch (MenuModules.timeMode()) {
+        case 0 -> 23000L;
+        case 2 -> 12000L;
+        case 3 -> 18000L;
+        default -> 6000L;
+      };
+      invokeWorldNumber(level, Long.valueOf(ticks), "setTimeFromServer", "setTimeOfDay", "method_8448", "method_8430");
+    }
+    if (moduleEnabled("weather")) {
+      int mode = MenuModules.weatherMode();
+      float rain = mode == 0 ? 0.0F : 1.0F;
+      float thunder = mode == 2 ? 1.0F : 0.0F;
+      invokeWorldNumber(level, Float.valueOf(rain), "setRainLevel", "setRainGradient", "method_24784");
+      invokeWorldNumber(level, Float.valueOf(thunder), "setThunderLevel", "setThunderGradient", "method_24785");
+    }
+  }
+
+  private static boolean invokeWorldNumber(Object target, Number value, String... names) {
+    if (target == null || value == null) return false;
+    Class<?> type = target.getClass();
+    while (type != null) {
+      for (Method method : type.getDeclaredMethods()) {
+        if (method.getParameterCount() != 1 || !matchesName(method.getName(), names)) continue;
+        Object argument = numericArgument(value, method.getParameterTypes()[0]);
+        if (argument == null) continue;
+        try {
+          method.setAccessible(true);
+          method.invoke(target, argument);
+          return true;
+        } catch (Throwable ignored) {
+          // Continue with the alternate runtime mapping.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return false;
+  }
+
+  private static boolean matchesName(String candidate, String... names) {
+    for (String name : names) if (name.equals(candidate)) return true;
+    return false;
+  }
+
+  private static Object numericArgument(Number value, Class<?> type) {
+    if (type == Long.TYPE || type == Long.class) return Long.valueOf(value.longValue());
+    if (type == Integer.TYPE || type == Integer.class) return Integer.valueOf(value.intValue());
+    if (type == Float.TYPE || type == Float.class) return Float.valueOf(value.floatValue());
+    if (type == Double.TYPE || type == Double.class) return Double.valueOf(value.doubleValue());
+    return null;
+  }
+
+  private static void suppressScreenBlur(class_310 client) {
+    if (client == null || client.field_1690 == null) {
+      return;
+    }
+    forceOptionInteger(client.field_1690, 0, "menuBackgroundBlurriness", "backgroundBlurRadius");
+  }
+
+  private static void applyNightVisionEffect(class_310 client) {
+    try {
+      Object player = getAnyField(client, "field_1724", "player");
+      Object nightVision = nightVisionEffect();
+      if (player == null || nightVision == null) {
+        return;
+      }
+      Object current = invokeEffectMethod(player, nightVision, "method_6112", "getEffect");
+      if ((effectDuration(current) < 0 || effectDuration(current) > NIGHT_VISION_REFRESH_THRESHOLD_TICKS)
+          && effectAmplifier(current) >= NIGHT_VISION_EFFECT_AMPLIFIER) {
+        return;
+      }
+      Object instance = createNightVisionInstance(nightVision);
+      if (instance != null) {
+        skipEffectBlending(instance);
+        invokeEffectMethod(player, instance, "method_6092", "addEffect");
+        fullbrightAddedNightVision = true;
+      }
+    } catch (Throwable ignored) {
+      // Shader fullbright still falls back to gamma and lightmap changes.
+    }
+  }
+
+  private static void clearNightVisionEffect(class_310 client) {
+    try {
+      Object player = client == null ? null : getAnyField(client, "field_1724", "player");
+      Object nightVision = nightVisionEffect();
+      if (player != null && nightVision != null) {
+        Object current = invokeEffectMethod(player, nightVision, "method_6112", "getEffect");
+        if (current != null && (fullbrightAddedNightVision
+            || (!effectBoolean(current, "method_5591", "isVisible") && !effectBoolean(current, "method_5592", "showIcon")))) {
+          invokeEffectMethod(player, nightVision, "method_6016", "removeEffect");
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave externally supplied night vision untouched when cleanup fails.
+    }
+    fullbrightAddedNightVision = false;
+  }
+
+  private static Object nightVisionEffect() {
+    for (String className : new String[] { "net.minecraft.class_1294", "net.minecraft.world.effect.MobEffects" }) {
+      try {
+        Class<?> effects = Class.forName(className);
+        for (String fieldName : new String[] { "field_5925", "NIGHT_VISION" }) {
+          try {
+            Field field = effects.getField(fieldName);
+            return field.get(null);
+          } catch (Throwable ignored) {
+            // Try the next field name.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next effects class.
+      }
+    }
+    return null;
+  }
+
+  private static Object speedEffect() {
+    for (String className : new String[] { "net.minecraft.class_1294", "net.minecraft.world.effect.MobEffects" }) {
+      try {
+        Class<?> effects = Class.forName(className);
+        for (String fieldName : new String[] { "field_5904", "SPEED" }) {
+          try {
+            Field field = effects.getField(fieldName);
+            return field.get(null);
+          } catch (Throwable ignored) {
+            // Try the next field name.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next effects class.
+      }
+    }
+    return null;
+  }
+
+  private static Object resistanceEffect() {
+    for (String className : new String[] { "net.minecraft.class_1294", "net.minecraft.world.effect.MobEffects" }) {
+      try {
+        Class<?> effects = Class.forName(className);
+        for (String fieldName : new String[] { "field_5907", "RESISTANCE", "DAMAGE_RESISTANCE" }) {
+          try {
+            Field field = effects.getField(fieldName);
+            return field.get(null);
+          } catch (Throwable ignored) {
+            // Try the next field name.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next effects class.
+      }
+    }
+    return null;
+  }
+
+  private static Object invisibilityEffect() {
+    for (String className : new String[] { "net.minecraft.class_1294", "net.minecraft.world.effect.MobEffects" }) {
+      try {
+        Class<?> effects = Class.forName(className);
+        for (String fieldName : new String[] { "field_5905", "INVISIBILITY" }) {
+          try {
+            Field field = effects.getField(fieldName);
+            return field.get(null);
+          } catch (Throwable ignored) {
+            // Try the next field name.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next effects class.
+      }
+    }
+    return null;
+  }
+
+  private static Object createNightVisionInstance(Object nightVision) {
+    for (String className : new String[] { "net.minecraft.class_1293", "net.minecraft.world.effect.MobEffectInstance" }) {
+      try {
+        Class<?> instanceClass = Class.forName(className);
+        for (Constructor<?> constructor : instanceClass.getConstructors()) {
+          Class<?>[] types = constructor.getParameterTypes();
+          if (types.length == 6 && types[1] == Integer.TYPE && types[2] == Integer.TYPE
+              && types[3] == Boolean.TYPE && types[4] == Boolean.TYPE && types[5] == Boolean.TYPE) {
+            return constructor.newInstance(nightVision, Integer.valueOf(NIGHT_VISION_DURATION_TICKS), Integer.valueOf(NIGHT_VISION_EFFECT_AMPLIFIER), Boolean.FALSE, Boolean.FALSE, Boolean.FALSE);
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next instance class.
+      }
+    }
+    return null;
+  }
+
+  private static Object createSpeedInstance(Object speed, int amplifier) {
+    for (String className : new String[] { "net.minecraft.class_1293", "net.minecraft.world.effect.MobEffectInstance" }) {
+      try {
+        Class<?> instanceClass = Class.forName(className);
+        for (Constructor<?> constructor : instanceClass.getConstructors()) {
+          Class<?>[] types = constructor.getParameterTypes();
+          if (types.length == 6 && types[1] == Integer.TYPE && types[2] == Integer.TYPE
+              && types[3] == Boolean.TYPE && types[4] == Boolean.TYPE && types[5] == Boolean.TYPE) {
+            return constructor.newInstance(speed, Integer.valueOf(SPEED_EFFECT_DURATION_TICKS), Integer.valueOf(amplifier), Boolean.FALSE, Boolean.TRUE, Boolean.TRUE);
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next instance class.
+      }
+    }
+    return null;
+  }
+
+  private static Object createResistanceInstance(Object resistance, int amplifier) {
+    for (String className : new String[] { "net.minecraft.class_1293", "net.minecraft.world.effect.MobEffectInstance" }) {
+      try {
+        Class<?> instanceClass = Class.forName(className);
+        for (Constructor<?> constructor : instanceClass.getConstructors()) {
+          Class<?>[] types = constructor.getParameterTypes();
+          if (types.length == 6 && types[1] == Integer.TYPE && types[2] == Integer.TYPE
+              && types[3] == Boolean.TYPE && types[4] == Boolean.TYPE && types[5] == Boolean.TYPE) {
+            return constructor.newInstance(resistance, Integer.valueOf(RESISTANCE_EFFECT_DURATION_TICKS), Integer.valueOf(amplifier), Boolean.FALSE, Boolean.TRUE, Boolean.TRUE);
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next instance class.
+      }
+    }
+    return null;
+  }
+
+  private static Object createInvisibilityInstance(Object invisibility, int amplifier) {
+    for (String className : new String[] { "net.minecraft.class_1293", "net.minecraft.world.effect.MobEffectInstance" }) {
+      try {
+        Class<?> instanceClass = Class.forName(className);
+        for (Constructor<?> constructor : instanceClass.getConstructors()) {
+          Class<?>[] types = constructor.getParameterTypes();
+          if (types.length == 6 && types[1] == Integer.TYPE && types[2] == Integer.TYPE
+              && types[3] == Boolean.TYPE && types[4] == Boolean.TYPE && types[5] == Boolean.TYPE) {
+            return constructor.newInstance(invisibility, Integer.valueOf(INVISIBILITY_EFFECT_DURATION_TICKS), Integer.valueOf(amplifier), Boolean.FALSE, Boolean.TRUE, Boolean.TRUE);
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next instance class.
+      }
+    }
+    return null;
+  }
+
+  private static void forceEffectValues(Object effect, int duration, int amplifier, boolean visible, boolean showIcon) {
+    if (effect == null) {
+      return;
+    }
+    setIntFields(effect, duration, "field_5895", "duration", "h", "d");
+    setIntFields(effect, amplifier, "field_5893", "amplifier", "i", "e");
+    setBooleanFields(effect, false, "field_5892", "ambient", "j", "f");
+    setBooleanFields(effect, visible, "field_5890", "visible", "showParticles", "k", "g");
+    setBooleanFields(effect, showIcon, "field_5889", "showIcon", "l", "h");
+    skipEffectBlending(effect);
+  }
+
+  private static void sendEffectGiveCommand(Object client, String effectId, int amplifier) {
+    sendMinecraftCommand(client, "effect give @s minecraft:" + effectId + " infinite " + amplifier);
+  }
+
+  private static void sendEffectClearCommand(Object client, String effectId) {
+    sendMinecraftCommand(client, "effect clear @s minecraft:" + effectId);
+  }
+
+  private static boolean sendMinecraftCommand(Object client, String command) {
+    if (client instanceof Executor executor) {
+      executor.execute(() -> sendMinecraftCommandNow(client, command));
+      return true;
+    }
+    return sendMinecraftCommandNow(client, command);
+  }
+
+  private static boolean sendMinecraftCommandNow(Object client, String command) {
+    Object player = playerObject(client);
+    Object connection = getAnyField(player, "field_3944", "connection", "networkHandler");
+    return invokeStringMethod(connection, command, "method_45730", "method_45731", "sendCommand", "sendChatCommand")
+        || invokeStringMethod(connection, "/" + command, "method_45729", "sendChat", "sendChatMessage", "method_3142")
+        || invokeStringMethod(player, "/" + command, "method_7353", "chat", "sendChat", "sendChatMessage", "method_3142");
+  }
+
+  private static void addIntegratedServerEffect(Object client, Object effectInstance) {
+    Object server = integratedServer(client);
+    if (server == null || effectInstance == null) {
+      return;
+    }
+    if (server instanceof Executor executor) {
+      executor.execute(() -> addIntegratedServerEffectNow(server, client, effectInstance));
+      return;
+    }
+    addIntegratedServerEffectNow(server, client, effectInstance);
+  }
+
+  private static void addIntegratedServerEffectNow(Object server, Object client, Object effectInstance) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer != null) {
+      invokeEffectMethod(serverPlayer, effectInstance, "method_6092", "addEffect", "addStatusEffect");
+    }
+  }
+
+  private static void clearIntegratedServerEffect(Object client, Object effect) {
+    Object server = integratedServer(client);
+    if (server == null || effect == null) {
+      return;
+    }
+    if (server instanceof Executor executor) {
+      executor.execute(() -> clearIntegratedServerEffectNow(server, client, effect));
+      return;
+    }
+    clearIntegratedServerEffectNow(server, client, effect);
+  }
+
+  private static void clearIntegratedServerEffectNow(Object server, Object client, Object effect) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer != null) {
+      invokeEffectMethod(serverPlayer, effect, "method_6016", "removeEffect", "removeStatusEffect");
+    }
+  }
+
+  private static Object integratedServer(Object client) {
+    return getAnyField(client, "field_1766", "field_1747", "singleplayerServer", "integratedServer");
+  }
+
+  private static Object integratedServerPlayer(Object server, Object client) {
+    Object playerList = invokeAnyNullable(server, "method_3760", "method_13949", "getPlayerList", "getPlayerManager");
+    if (playerList == null) {
+      return null;
+    }
+    String localName = playerName(playerObject(client));
+    if (!localName.isEmpty()) {
+      Object byName = invokeStringReturn(playerList, localName, "method_14566", "getPlayerByName");
+      if (byName != null) {
+        return byName;
+      }
+    }
+    Object players = invokeAnyNullable(playerList, "method_14571", "method_18456", "getPlayers", "getPlayerList");
+    if (players instanceof Iterable<?> iterable) {
+      Object first = null;
+      for (Object candidate : iterable) {
+        if (first == null) {
+          first = candidate;
+        }
+        if (!localName.isEmpty() && localName.equalsIgnoreCase(playerName(candidate))) {
+          return candidate;
+        }
+      }
+      return first;
+    }
+    return null;
+  }
+
+  private static Object invokeStringReturn(Object target, String value, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name, String.class).invoke(target, value);
+      } catch (Throwable ignored) {
+        // Try the next known method name.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeAnyNullable(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        if (method.getParameterCount() == 0) {
+          return method.invoke(target);
+        }
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          if (method.getParameterCount() == 0) {
+            return method.invoke(target);
+          }
+        } catch (Throwable alsoIgnored) {
+          // Try the next known method name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static String playerName(Object player) {
+    Object profile = invokeAnyNullable(player, "method_7334", "method_12593", "getGameProfile", "getProfile");
+    String profileName = textValue(invokeAnyNullable(profile, "getName"));
+    if (!profileName.isEmpty()) {
+      return profileName;
+    }
+    return textValue(invokeAnyNullable(player, "method_5477", "getName"));
+  }
+
+  private static String textValue(Object value) {
+    if (value instanceof String string) {
+      return string;
+    }
+    Object text = invokeAnyNullable(value, "method_10851", "getString", "getLiteralString");
+    return text instanceof String string ? string : "";
+  }
+
+  private static boolean invokeStringMethod(Object target, String value, String... names) {
+    if (target == null) {
+      return false;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name, String.class);
+        method.invoke(target, value);
+        return true;
+      } catch (Throwable ignored) {
+        // Try the next known method name.
+      }
+    }
+    return false;
+  }
+
+  private static void skipEffectBlending(Object effectInstance) {
+    if (effectInstance == null) {
+      return;
+    }
+    for (String name : new String[] { "skipBlending", "method_5580", "method_5596" }) {
+      try {
+        Method method = effectInstance.getClass().getMethod(name);
+        if (method.getParameterCount() == 0) {
+          method.invoke(effectInstance);
+          return;
+        }
+      } catch (Throwable ignored) {
+        // Try the next blend method name.
+      }
+    }
+  }
+
+  private static Object invokeEffectMethod(Object target, Object argument, String... names) {
+    if (target == null || argument == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (Method method : target.getClass().getMethods()) {
+        if (!name.equals(method.getName()) || method.getParameterCount() != 1) {
+          continue;
+        }
+        Class<?> parameterType = method.getParameterTypes()[0];
+        if (!parameterType.isAssignableFrom(argument.getClass())) {
+          continue;
+        }
+        try {
+          return method.invoke(target, argument);
+        } catch (Throwable ignored) {
+          // Try the next compatible method.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static int effectDuration(Object effectInstance) {
+    if (effectInstance == null) {
+      return -1;
+    }
+    for (String name : new String[] { "method_5584", "getDuration" }) {
+      try {
+        Object value = effectInstance.getClass().getMethod(name).invoke(effectInstance);
+        return value instanceof Number ? ((Number) value).intValue() : -1;
+      } catch (Throwable ignored) {
+        // Try the next duration method.
+      }
+    }
+    return -1;
+  }
+
+  private static int effectAmplifier(Object effectInstance) {
+    if (effectInstance == null) {
+      return -1;
+    }
+    for (String name : new String[] { "method_5578", "getAmplifier" }) {
+      try {
+        Object value = effectInstance.getClass().getMethod(name).invoke(effectInstance);
+        return value instanceof Number ? ((Number) value).intValue() : -1;
+      } catch (Throwable ignored) {
+        // Try the next amplifier method.
+      }
+    }
+    return -1;
+  }
+
+  private static boolean effectBoolean(Object effectInstance, String... names) {
+    if (effectInstance == null) {
+      return false;
+    }
+    for (String name : names) {
+      try {
+        Object value = effectInstance.getClass().getMethod(name).invoke(effectInstance);
+        if (value instanceof Boolean) {
+          return ((Boolean) value).booleanValue();
+        }
+      } catch (Throwable ignored) {
+        // Try the next boolean method.
+      }
+    }
+    return false;
+  }
+
+  private static void boostLightTexture(class_310 client) {
+    long now = System.currentTimeMillis();
+    if (now - lastFullbrightLightmapMs < 150L) {
+      return;
+    }
+    lastFullbrightLightmapMs = now;
+    try {
+      Object renderer = findObjectByClassName(client, "class_757", "GameRenderer");
+      Object lightTexture = findObjectByClassName(renderer, "class_765", "Lightmap", "LightTexture");
+      Object image = findObjectByClassName(lightTexture, "class_1011", "NativeImage");
+      if (image != null) {
+        fillNativeImageWhite(image);
+      }
+      Object dynamicTexture = findObjectByClassName(lightTexture, "class_1043", "DynamicTexture");
+      uploadTexture(dynamicTexture);
+    } catch (Throwable ignored) {
+      // Some shader pipelines do not expose the vanilla lightmap.
+    }
+  }
+
+  private static Object findObjectByClassName(Object target, String... classNameParts) {
+    if (target == null) {
+      return null;
+    }
+    Class<?> type = target.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value == null) {
+            continue;
+          }
+          String className = value.getClass().getName();
+          for (String part : classNameParts) {
+            if (className.contains(part)) {
+              return value;
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static void fillNativeImageWhite(Object image) {
+    for (String methodName : new String[] { "method_4305", "setPixelRGBA" }) {
+      for (Method method : image.getClass().getMethods()) {
+        if (!methodName.equals(method.getName()) || method.getParameterCount() != 3) {
+          continue;
+        }
+        Class<?>[] parameterTypes = method.getParameterTypes();
+        if (parameterTypes[0] != Integer.TYPE || parameterTypes[1] != Integer.TYPE || parameterTypes[2] != Integer.TYPE) {
+          continue;
+        }
+        try {
+          for (int x = 0; x < 16; x += 1) {
+            for (int y = 0; y < 16; y += 1) {
+              method.invoke(image, Integer.valueOf(x), Integer.valueOf(y), Integer.valueOf(0xFFFFFFFF));
+            }
+          }
+          return;
+        } catch (Throwable ignored) {
+          // Try the next pixel setter.
+        }
+      }
+    }
+  }
+
+  private static void uploadTexture(Object texture) {
+    if (texture == null) {
+      return;
+    }
+    for (String methodName : new String[] { "method_4625", "upload" }) {
+      try {
+        Method method = texture.getClass().getMethod(methodName);
+        method.invoke(texture);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next upload name.
+      }
+    }
+  }
+
+  private static Number getOptionNumber(class_315 options, String... names) {
+    Object option = optionByName(options, names);
+    if (option == null) {
+      return null;
+    }
+    for (String methodName : new String[] { "get", "getValue", "method_41753", "method_41754" }) {
+      try {
+        Object value = option.getClass().getMethod(methodName).invoke(option);
+        if (value instanceof Number) {
+          return (Number) value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next getter.
+      }
+    }
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(option);
+          if (value instanceof Number) {
+            return (Number) value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static Boolean getOptionBoolean(class_315 options, String... names) {
+    Object option = optionByName(options, names);
+    if (option == null) {
+      return null;
+    }
+    return getOptionBooleanValue(option);
+  }
+
+  private static void forceOptionNumber(class_315 options, double value, String... names) {
+    Object option = optionByName(options, names);
+    if (option == null) {
+      return;
+    }
+    for (String methodName : new String[] { "set", "setValue", "method_41748", "method_41744" }) {
+      for (Class<?> parameterType : new Class<?>[] { Object.class, Double.class, double.class }) {
+        try {
+          option.getClass().getMethod(methodName, parameterType).invoke(option, Double.valueOf(value));
+        } catch (Throwable ignored) {
+          // Try the next setter shape.
+        }
+      }
+    }
+    forceOptionValue(option, Double.valueOf(value));
+  }
+
+  private static void forceOptionInteger(class_315 options, int value, String... names) {
+    Object option = optionByName(options, names);
+    if (option == null) {
+      return;
+    }
+    Integer boxed = Integer.valueOf(value);
+    for (String methodName : new String[] { "set", "setValue", "method_41748", "method_41744" }) {
+      for (Class<?> parameterType : new Class<?>[] { Object.class, Integer.class, int.class }) {
+        try {
+          option.getClass().getMethod(methodName, parameterType).invoke(option, boxed);
+        } catch (Throwable ignored) {
+          // Try the next setter shape.
+        }
+      }
+    }
+    forceOptionValue(option, boxed);
+  }
+
+  private static void forceOptionBoolean(class_315 options, boolean value, String... names) {
+    Object option = optionByName(options, names);
+    if (option == null) {
+      return;
+    }
+    Boolean boxed = Boolean.valueOf(value);
+    for (String methodName : new String[] { "set", "setValue", "method_41748", "method_41744" }) {
+      for (Class<?> parameterType : new Class<?>[] { Object.class, Boolean.class, boolean.class }) {
+        try {
+          option.getClass().getMethod(methodName, parameterType).invoke(option, boxed);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next setter shape.
+        }
+      }
+    }
+    forceOptionBooleanValue(option, value);
+  }
+
+  private static Object optionByName(Object options, String... names) {
+    for (String name : names) {
+      try {
+        Method method = options.getClass().getMethod(name);
+        if (method.getParameterCount() == 0) {
+          Object value = method.invoke(options);
+          if (value != null) {
+            return value;
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try fields next.
+      }
+      Class<?> type = options.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          Object value = field.get(options);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+        type = type.getSuperclass();
+      }
+    }
+    return null;
+  }
+
+  private static void forceOptionValue(Object option, Number value) {
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        Class<?> fieldType = field.getType();
+        if (fieldType != Double.class && fieldType != Double.TYPE && fieldType != Integer.class
+            && fieldType != Integer.TYPE && fieldType != Number.class && fieldType != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object current = field.get(option);
+          if (current == null || current instanceof Number) {
+            if (fieldType == Double.TYPE) {
+              field.setDouble(option, value.doubleValue());
+            } else if (fieldType == Integer.TYPE) {
+              field.setInt(option, value.intValue());
+            } else if (fieldType == Integer.class) {
+              field.set(option, Integer.valueOf(value.intValue()));
+            } else if (fieldType == Double.class) {
+              field.set(option, Double.valueOf(value.doubleValue()));
+            } else {
+              field.set(option, value);
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+  }
+
+  private static Boolean getOptionBooleanValue(Object option) {
+    for (String methodName : new String[] { "get", "getValue", "method_41753", "method_41754" }) {
+      try {
+        Object value = option.getClass().getMethod(methodName).invoke(option);
+        if (value instanceof Boolean bool) {
+          return bool;
+        }
+      } catch (Throwable ignored) {
+        // Try the next getter.
+      }
+    }
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        if (field.getType() != Boolean.class && field.getType() != Boolean.TYPE && field.getType() != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(option);
+          if (value instanceof Boolean bool) {
+            return bool;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static void forceOptionBooleanValue(Object option, boolean value) {
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        Class<?> fieldType = field.getType();
+        if (fieldType != Boolean.class && fieldType != Boolean.TYPE && fieldType != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object current = field.get(option);
+          if (current == null || current instanceof Boolean) {
+            if (fieldType == Boolean.TYPE) {
+              field.setBoolean(option, value);
+            } else {
+              field.set(option, Boolean.valueOf(value));
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+  }
+
+  private static double currentBaseFov(class_315 options) {
+    Number value = getOptionNumber(options, "method_41808", "fov", "field_1826");
+    if (value == null) {
+      return 70.0D;
+    }
+    return Math.max(30.0D, Math.min(110.0D, value.doubleValue()));
+  }
+
+  private static Boolean getSmoothCamera(class_315 options) {
+    for (String fieldName : new String[] { "smoothCamera", "field_1914", "field_1842" }) {
+      try {
+        Field field = options.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return Boolean.valueOf(field.getBoolean(options));
+      } catch (Throwable ignored) {
+        // Try the next boolean field.
+      }
+    }
+    return null;
+  }
+
+  private static void setSmoothCamera(class_315 options, boolean value) {
+    for (String fieldName : new String[] { "smoothCamera", "field_1914", "field_1842" }) {
+      try {
+        Field field = options.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.setBoolean(options, value);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next boolean field.
+      }
+    }
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/XClientTutorialScreen.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.class_11909;
+import net.minecraft.class_310;
+import net.minecraft.class_327;
+import net.minecraft.class_332;
+import net.minecraft.class_437;
+
+public final class XClientTutorialScreen extends class_437 {
+  private static final String[] TITLES = {
+      "X Client Tutorial",
+      "Rechts-Shift",
+      "X-Client-Menü",
+      "Fullbright",
+      "HUD & UI Editor",
+      "Crosshair & Social",
+      "Tutorial wiederholen"
+  };
+  private static final String[] TEXTS = {
+      "Folge dem Pfeil. Normale Klicks sind gesperrt.",
+      "Rechts-Shift öffnet dieses Menü.",
+      "Kachel anklicken. Danach Toggle, Keybind oder Optionen nutzen.",
+      "BRIGHT macht alles hell: Nacht, Höhlen und dunkle Räume.",
+      "HUD-Module anzeigen. Mit UI verschiebst du alles.",
+      "AIM stellt dein Crosshair ein. FRIENDS zeigt Spieler.",
+      "HELP spielt das Tutorial nochmal ab."
+  };
+  private static final int MENU_TILE_HEIGHT = 44;
+  private static final int MENU_GAP = 4;
+  private static final int MENU_SIDE_PADDING = 10;
+  private static final int MENU_HEADER_HEIGHT = 42;
+  private static final int MENU_FOOTER_HEIGHT = 8;
+  private static final int MENU_MAX_WIDTH = 270;
+  private static final int MENU_MAX_HEIGHT = 200;
+  private static final int MENU_MIN_MARGIN = 10;
+  private static final int CARD_SKIP_W = 32;
+  private static final int CARD_BACK_W = 34;
+  private static final int CARD_NEXT_W = 34;
+  private static final int CARD_BUTTON_H = 12;
+  private int step;
+
+  XClientTutorialScreen(boolean replay) {
+    super(TextBridge.literal("X Client Tutorial"));
+    if (replay) {
+      XClientTutorialState.reset();
+    }
+  }
+
+  @Override
+  public boolean method_25421() {
+    return XLauncherMenuClient.shouldPauseInOwnWorld();
+  }
+
+  @Override
+  public void method_25394(class_332 graphics, int mouseX, int mouseY, float tickDelta) {
+    class_327 font = class_310.method_1551().field_1772;
+    int[] focus = focusBounds();
+    int[] card = cardBounds(focus);
+
+    drawWorldBackdrop(graphics, font);
+    drawShowcase(graphics, font, focus);
+    drawSpotlight(graphics, focus);
+    drawArrow(graphics, focus, card);
+    drawCard(graphics, font, card);
+  }
+
+  @Override
+  public boolean method_25404(int keyCode, int scanCode, int modifiers) {
+    if (keyCode == 256) {
+      finish();
+      return true;
+    }
+    if (keyCode == 257 || keyCode == 32 || keyCode == 262) {
+      next();
+      return true;
+    }
+    if (keyCode == 263 && step > 0) {
+      step -= 1;
+      return true;
+    }
+    return true;
+  }
+
+  @Override
+  public boolean method_25402(class_11909 event, boolean doubleClick) {
+    if (event.method_74245() != 0) {
+      return true;
+    }
+    int[] card = cardBounds(focusBounds());
+    double mouseX = event.comp_4798();
+    double mouseY = event.comp_4799();
+    if (isInside(mouseX, mouseY, card[0] + 8, card[1] + card[3] - 17, CARD_SKIP_W, CARD_BUTTON_H)) {
+      finish();
+      return true;
+    }
+    if (isInside(mouseX, mouseY, card[0] + card[2] - 78, card[1] + card[3] - 17, CARD_BACK_W, CARD_BUTTON_H)) {
+      if (step > 0) {
+        step -= 1;
+      }
+      return true;
+    }
+    if (isInside(mouseX, mouseY, card[0] + card[2] - 42, card[1] + card[3] - 17, CARD_NEXT_W, CARD_BUTTON_H)) {
+      next();
+      return true;
+    }
+    return true;
+  }
+
+  private void next() {
+    if (step >= TITLES.length - 1) {
+      finish();
+      return;
+    }
+    step += 1;
+  }
+
+  private void finish() {
+    XClientTutorialState.markCompleted();
+    class_310.method_1551().method_1507(null);
+  }
+
+  private void drawWorldBackdrop(class_332 graphics, class_327 font) {
+    graphics.method_25294(0, 0, field_22789, field_22790, LauncherTheme.argb(170, 0x03070B));
+    for (int y = 0; y < field_22790; y += 18) {
+      int shade = (y / 18) % 2 == 0 ? 0x0A141D : 0x081019;
+      graphics.method_25294(0, y, field_22789, Math.min(field_22790, y + 18), LauncherTheme.argb(52, shade));
+    }
+    graphics.method_25294(0, field_22790 - 22, field_22789, field_22790, LauncherTheme.argb(95, 0x000000));
+    centeredText(graphics, font, "+", field_22789 / 2, Math.max(18, field_22790 / 2 - 4), LauncherTheme.argb(170, 0xFFFFFF));
+  }
+
+  private void drawShowcase(class_332 graphics, class_327 font, int[] focus) {
+    drawMenuPreview(graphics, font);
+    drawHudPreview(graphics, font);
+    if (step == 1) {
+      drawKeycap(graphics, font, focus[0], focus[1], focus[2], focus[3], "R-SHIFT", true);
+    }
+  }
+
+  private void drawMenuPreview(class_332 graphics, class_327 font) {
+    int[] layout = menuLayout();
+    int boxX = layout[4];
+    int boxY = layout[5];
+    int boxW = layout[6];
+    int boxH = layout[7];
+    int columns = layout[8];
+    int tileW = layout[9];
+    int accent = LauncherTheme.accent();
+    graphics.method_25294(boxX + 2, boxY + 2, boxX + boxW + 2, boxY + boxH + 2, LauncherTheme.argb(54, 0x000000));
+    graphics.method_25294(boxX, boxY, boxX + boxW, boxY + boxH, LauncherTheme.argb(150, 0x070D12));
+    border(graphics, boxX, boxY, boxW, boxH, LauncherTheme.argb(118, 0xDCE8F2));
+    drawMenuSearch(graphics, font, layout);
+    drawMenuHeader(graphics, font, layout);
+
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      int row = index / columns;
+      int column = index % columns;
+      int x = layout[0] + (column * (tileW + MENU_GAP));
+      int y = layout[1] + (row * (MENU_TILE_HEIGHT + MENU_GAP));
+      if (y + MENU_TILE_HEIGHT > boxY + boxH - MENU_FOOTER_HEIGHT) {
+        break;
+      }
+      drawMenuTile(graphics, font, modules[index], x, y, tileW, MENU_TILE_HEIGHT, isHighlighted(modules[index].id), accent);
+    }
+  }
+
+  private void drawMenuSearch(class_332 graphics, class_327 font, int[] layout) {
+    int x = layout[4] + 10;
+    int y = layout[5] + 10;
+    int w = Math.min(78, Math.max(42, layout[6] - (MENU_SIDE_PADDING * 2) - 32));
+    graphics.method_25294(x + 1, y + 1, x + w + 1, y + 25, LauncherTheme.argb(44, 0x000000));
+    graphics.method_25294(x, y, x + w, y + 24, LauncherTheme.argb(128, 0x0B1218));
+    border(graphics, x, y, w, 24, LauncherTheme.argb(148, 0xFFFFFF));
+    graphics.method_25300(font, "Search", x + 7, y + 8, LauncherTheme.mutedTextColor());
+  }
+
+  private void drawMenuHeader(class_332 graphics, class_327 font, int[] layout) {
+    centeredText(graphics, font, "X Client", layout[4] + (layout[6] / 2), layout[5] + 18, LauncherTheme.textColor());
+    int x = layout[4] + layout[6] - 34;
+    int y = layout[5] + 10;
+    graphics.method_25294(x + 1, y + 1, x + 25, y + 25, LauncherTheme.argb(42, 0x000000));
+    graphics.method_25294(x, y, x + 24, y + 24, step == 4 ? LauncherTheme.accentArgb(84) : LauncherTheme.argb(104, 0x0B1218));
+    border(graphics, x, y, 24, 24, step == 4 ? LauncherTheme.accentArgb(215) : LauncherTheme.argb(148, 0xFFFFFF));
+    centeredText(graphics, font, "UI", x + 12, y + 8, step == 4 ? LauncherTheme.textColor() : LauncherTheme.mutedTextColor());
+  }
+
+  private void drawMenuTile(class_332 graphics, class_327 font, MenuModules.Module module, int x, int y, int w, int h, boolean highlighted, int accent) {
+    boolean active = highlighted || (module.toggleable && module.enabled);
+    int background = active ? LauncherTheme.accentArgb(highlighted ? 98 : 66) : LauncherTheme.argb(92, 0x101820);
+    graphics.method_25294(x + 1, y + 1, x + w + 1, y + h + 1, LauncherTheme.argb(54, 0x000000));
+    graphics.method_25294(x, y, x + w, y + h, background);
+    if (active) {
+      graphics.method_25294(x, y + h - 4, x + w, y + h, 0xFF000000 | accent);
+    }
+    border(graphics, x, y, w, h, highlighted ? LauncherTheme.accentArgb(245) : LauncherTheme.argb(172, 0xFFFFFF));
+    drawMenuIcon(graphics, font, module, x, y, w, h, accent);
+  }
+
+  private void drawMenuIcon(class_332 graphics, class_327 font, MenuModules.Module module, int x, int y, int w, int h, int accent) {
+    if (module != null) {
+      String label = module.subtitle == null || module.subtitle.trim().isEmpty() ? module.title : module.subtitle;
+      centeredText(graphics, font, fit(label, w - 8), x + (w / 2), y + (h / 2) - 4, 0xFFFFFFFF);
+      return;
+    }
+    int cx = x + (w / 2);
+    int cy = y + (h / 2);
+    int color = 0xFFFFFFFF;
+    if ("zoom".equals(module.id)) {
+      border(graphics, cx - 9, cy - 9, 17, 17, color);
+      graphics.method_25294(cx - 5, cy - 1, cx + 4, cy + 1, color);
+      graphics.method_25294(cx - 1, cy - 5, cx + 1, cy + 4, color);
+      graphics.method_25294(cx + 6, cy + 7, cx + 10, cy + 11, color);
+      graphics.method_25294(cx + 9, cy + 10, cx + 13, cy + 14, color);
+      return;
+    }
+    if ("bright".equals(module.id)) {
+      graphics.method_25294(cx - 4, cy - 4, cx + 4, cy + 4, color);
+      graphics.method_25294(cx - 1, cy - 13, cx + 1, cy - 7, color);
+      graphics.method_25294(cx - 1, cy + 7, cx + 1, cy + 13, color);
+      graphics.method_25294(cx - 13, cy - 1, cx - 7, cy + 1, color);
+      graphics.method_25294(cx + 7, cy - 1, cx + 13, cy + 1, color);
+      return;
+    }
+    if ("sprint".equals(module.id)) {
+      graphics.method_25294(cx - 12, cy + 8, cx + 10, cy + 10, color);
+      graphics.method_25294(cx + 6, cy + 5, cx + 12, cy + 10, color);
+      graphics.method_25294(cx - 5, cy - 10, cx - 1, cy + 4, color);
+      graphics.method_25294(cx - 1, cy + 1, cx + 7, cy + 4, color);
+      graphics.method_25294(cx + 5, cy + 4, cx + 9, cy + 11, color);
+      return;
+    }
+    if ("nobob".equals(module.id)) {
+      border(graphics, cx - 12, cy - 7, 24, 14, color);
+      graphics.method_25294(cx - 8, cy - 1, cx + 8, cy + 1, color);
+      graphics.method_25294(cx - 2, cy - 4, cx + 2, cy + 4, color);
+      return;
+    }
+    if ("crosshair".equals(module.id)) {
+      border(graphics, cx - 12, cy - 12, 7, 7, color);
+      border(graphics, cx + 5, cy - 12, 7, 7, color);
+      border(graphics, cx - 12, cy + 5, 7, 7, color);
+      border(graphics, cx + 5, cy + 5, 7, 7, color);
+      graphics.method_25294(cx - 3, cy - 1, cx + 3, cy + 1, color);
+      graphics.method_25294(cx - 1, cy - 3, cx + 1, cy + 3, color);
+      return;
+    }
+    if ("fps".equals(module.id)) {
+      border(graphics, cx - 12, cy - 9, 24, 18, color);
+      graphics.method_25294(cx - 8, cy + 3, cx - 5, cy + 7, color);
+      graphics.method_25294(cx - 2, cy, cx + 1, cy + 7, color);
+      graphics.method_25294(cx + 4, cy - 5, cx + 7, cy + 7, color);
+      return;
+    }
+    if ("coords".equals(module.id)) {
+      graphics.method_25294(cx - 1, cy - 13, cx + 1, cy + 12, color);
+      graphics.method_25294(cx - 13, cy - 1, cx + 13, cy + 1, color);
+      border(graphics, cx - 7, cy - 7, 14, 14, color);
+      return;
+    }
+    if ("keys".equals(module.id)) {
+      int key = 8;
+      drawTinyKey(graphics, cx - 4, cy - 12, key, key);
+      drawTinyKey(graphics, cx - 13, cy - 3, key, key);
+      drawTinyKey(graphics, cx - 4, cy - 3, key, key);
+      drawTinyKey(graphics, cx + 5, cy - 3, key, key);
+      return;
+    }
+    if ("cps".equals(module.id)) {
+      border(graphics, cx - 7, cy - 12, 14, 22, color);
+      graphics.method_25294(cx - 1, cy - 9, cx + 1, cy - 3, color);
+      graphics.method_25294(cx - 5, cy + 12, cx + 5, cy + 14, color);
+      return;
+    }
+    if ("clock".equals(module.id)) {
+      border(graphics, cx - 11, cy - 11, 22, 22, color);
+      graphics.method_25294(cx - 1, cy - 8, cx + 1, cy + 1, color);
+      graphics.method_25294(cx, cy, cx + 7, cy + 2, color);
+      return;
+    }
+    if ("ui".equals(module.id)) {
+      border(graphics, cx - 12, cy - 9, 24, 18, color);
+      graphics.method_25294(cx - 9, cy - 1, cx + 9, cy + 1, color);
+      graphics.method_25294(cx - 1, cy - 7, cx + 1, cy + 7, color);
+      return;
+    }
+    centeredText(graphics, font, fit(module.title, w - 8), cx, cy - 4, color);
+  }
+
+  private void drawTinyKey(class_332 graphics, int x, int y, int w, int h) {
+    graphics.method_25294(x, y, x + w, y + h, LauncherTheme.argb(120, 0x121C25));
+    border(graphics, x, y, w, h, LauncherTheme.argb(150, 0xDCE8F2));
+  }
+
+  private boolean isHighlighted(String id) {
+    return (step == 3 && "bright".equals(id)) || (step == 4 && "ui".equals(id))
+        || (step == 5 && ("crosshair".equals(id) || "friends".equals(id)))
+        || (step == 6 && "tutorial".equals(id));
+  }
+
+  private void drawHudPreview(class_332 graphics, class_327 font) {
+    drawPill(graphics, font, 9, 9, 68, 16, "FPS 144");
+    drawPill(graphics, font, 9, 29, 86, 16, "12 64 -8");
+    drawKeycap(graphics, font, Math.max(10, field_22789 - 88), Math.max(10, field_22790 - 58), 66, 18, "W A S D", step == 4);
+  }
+
+  private void drawFullbrightPreview(class_332 graphics, class_327 font, int[] focus) {
+    graphics.method_25294(focus[0], focus[1], focus[0] + focus[2], focus[1] + focus[3], LauncherTheme.argb(230, 0xFFF2A8));
+    graphics.method_25294(focus[0] + 8, focus[1] + 9, focus[0] + focus[2] - 8, focus[1] + focus[3] - 9, LauncherTheme.argb(90, 0xFFFFFF));
+    centeredText(graphics, font, "FULLBRIGHT", focus[0] + focus[2] / 2, focus[1] + focus[3] / 2 - 4, 0xFF141414);
+  }
+
+  private void drawPill(class_332 graphics, class_327 font, int x, int y, int w, int h, String label) {
+    graphics.method_25294(x, y, x + w, y + h, LauncherTheme.argb(112, 0x000000));
+    border(graphics, x, y, w, h, LauncherTheme.accentArgb(130));
+    graphics.method_25300(font, fit(label, w - 8), x + 5, y + 6, LauncherTheme.textColor());
+  }
+
+  private void drawKeycap(class_332 graphics, class_327 font, int x, int y, int w, int h, String label, boolean active) {
+    graphics.method_25294(x, y, x + w, y + h, active ? LauncherTheme.accentArgb(120) : LauncherTheme.argb(95, 0xFFFFFF));
+    border(graphics, x, y, w, h, active ? LauncherTheme.accentArgb(235) : LauncherTheme.argb(130, 0xFFFFFF));
+    centeredText(graphics, font, fit(label, w - 8), x + w / 2, y + (h / 2) - 3, LauncherTheme.textColor());
+  }
+
+  private void drawSpotlight(class_332 graphics, int[] focus) {
+    int pad = 5;
+    int left = Math.max(0, focus[0] - pad);
+    int top = Math.max(0, focus[1] - pad);
+    int right = Math.min(field_22789, focus[0] + focus[2] + pad);
+    int bottom = Math.min(field_22790, focus[1] + focus[3] + pad);
+    int shade = LauncherTheme.argb(148, 0x000000);
+    graphics.method_25294(0, 0, field_22789, top, shade);
+    graphics.method_25294(0, bottom, field_22789, field_22790, shade);
+    graphics.method_25294(0, top, left, bottom, shade);
+    graphics.method_25294(right, top, field_22789, bottom, shade);
+    graphics.method_25294(left, top, right, top + 2, LauncherTheme.accentArgb(235));
+    graphics.method_25294(left, bottom - 2, right, bottom, LauncherTheme.accentArgb(235));
+    graphics.method_25294(left, top, left + 2, bottom, LauncherTheme.accentArgb(235));
+    graphics.method_25294(right - 2, top, right, bottom, LauncherTheme.accentArgb(235));
+  }
+
+  private void drawArrow(class_332 graphics, int[] focus, int[] card) {
+    int cardCenterX = card[0] + (card[2] / 2);
+    int cardCenterY = card[1] + (card[3] / 2);
+    int focusCenterX = focus[0] + (focus[2] / 2);
+    int focusCenterY = focus[1] + (focus[3] / 2);
+    int dx = focusCenterX - cardCenterX;
+    int dy = focusCenterY - cardCenterY;
+    int startX;
+    int startY;
+    int endX;
+    int endY;
+    int directionX = 0;
+    int directionY = 0;
+    int margin = 10;
+    if (Math.abs(dx) * Math.max(1, focus[3]) >= Math.abs(dy) * Math.max(1, focus[2])) {
+      directionX = dx >= 0 ? 1 : -1;
+      startX = directionX > 0 ? card[0] + card[2] + 2 : card[0] - 2;
+      endX = directionX > 0 ? focus[0] - margin : focus[0] + focus[2] + margin;
+      endY = clamp(cardCenterY, focus[1] + 5, focus[1] + focus[3] - 5);
+      startY = clamp(endY, card[1] + 8, card[1] + card[3] - 8);
+    } else {
+      directionY = dy >= 0 ? 1 : -1;
+      startY = directionY > 0 ? card[1] + card[3] + 2 : card[1] - 2;
+      endY = directionY > 0 ? focus[1] - margin : focus[1] + focus[3] + margin;
+      endX = clamp(cardCenterX, focus[0] + 5, focus[0] + focus[2] - 5);
+      startX = clamp(endX, card[0] + 8, card[0] + card[2] - 8);
+    }
+    int color = LauncherTheme.accentArgb(240);
+    int shadow = LauncherTheme.argb(95, 0x000000);
+    for (int i = 0; i <= 14; i += 1) {
+      int x = startX + ((endX - startX) * i / 14);
+      int y = startY + ((endY - startY) * i / 14);
+      graphics.method_25294(x - 2, y - 2, x + 3, y + 3, shadow);
+      graphics.method_25294(x - 1, y - 1, x + 2, y + 2, color);
+    }
+    drawArrowHead(graphics, endX, endY, directionX, directionY, color);
+  }
+
+  private void drawArrowHead(class_332 graphics, int x, int y, int directionX, int directionY, int color) {
+    if (directionX != 0) {
+      int tipX = x + (directionX * 6);
+      graphics.method_25294(Math.min(x, tipX), y - 1, Math.max(x, tipX), y + 2, color);
+      for (int i = 0; i < 5; i += 1) {
+        int bx = x + (directionX * (4 - i));
+        graphics.method_25294(Math.min(bx, bx + directionX * 2), y - 5 + i, Math.max(bx, bx + directionX * 2), y - 4 + i, color);
+        graphics.method_25294(Math.min(bx, bx + directionX * 2), y + 5 - i, Math.max(bx, bx + directionX * 2), y + 6 - i, color);
+      }
+      return;
+    }
+    int tipY = y + (directionY * 6);
+    graphics.method_25294(x - 1, Math.min(y, tipY), x + 2, Math.max(y, tipY), color);
+    for (int i = 0; i < 5; i += 1) {
+      int by = y + (directionY * (4 - i));
+      graphics.method_25294(x - 5 + i, Math.min(by, by + directionY * 2), x - 4 + i, Math.max(by, by + directionY * 2), color);
+      graphics.method_25294(x + 5 - i, Math.min(by, by + directionY * 2), x + 6 - i, Math.max(by, by + directionY * 2), color);
+    }
+  }
+
+  private void drawCard(class_332 graphics, class_327 font, int[] card) {
+    int x = card[0];
+    int y = card[1];
+    int w = card[2];
+    int h = card[3];
+    graphics.method_25294(x + 2, y + 2, x + w + 2, y + h + 2, LauncherTheme.argb(82, 0x000000));
+    graphics.method_25294(x, y, x + w, y + h, LauncherTheme.argb(232, 0x071018));
+    border(graphics, x, y, w, h, LauncherTheme.accentArgb(218));
+    graphics.method_25294(x, y, x + 3, y + h, LauncherTheme.accentArgb(205));
+    graphics.method_25300(font, (step + 1) + "/" + TITLES.length, x + 8, y + 6, LauncherTheme.mutedTextColor());
+    graphics.method_25294(x + 8, y + 16, x + w - 8, y + 18, LauncherTheme.argb(70, 0xFFFFFF));
+    graphics.method_25294(x + 8, y + 16, x + 8 + ((w - 16) * (step + 1) / TITLES.length), y + 18, LauncherTheme.accentArgb(225));
+    graphics.method_25300(font, TITLES[step], x + 8, y + 24, LauncherTheme.textColor());
+    graphics.method_25294(x + 8, y + 36, x + 11, y + 39, LauncherTheme.accentArgb(230));
+    drawWrapped(graphics, font, TEXTS[step], x + 16, y + 34, w - 24, 2);
+    drawButton(graphics, font, x + 8, y + h - 17, CARD_SKIP_W, CARD_BUTTON_H, "Skip", false);
+    drawButton(graphics, font, x + w - 78, y + h - 17, CARD_BACK_W, CARD_BUTTON_H, "Back", step > 0);
+    drawButton(graphics, font, x + w - 42, y + h - 17, CARD_NEXT_W, CARD_BUTTON_H, step >= TITLES.length - 1 ? "Done" : "Next", true);
+  }
+
+  private int[] focusBounds() {
+    int[] layout = menuLayout();
+    if (step == 0) {
+      return new int[] { layout[4] + 8, layout[5] + 8, layout[6] - 16, 30 };
+    }
+    if (step == 1) {
+      return new int[] { Math.max(10, field_22789 - 108), Math.max(10, field_22790 - 50), 86, 24 };
+    }
+    if (step == 2) {
+      return new int[] { layout[4], layout[5], layout[6], layout[7] };
+    }
+    if (step == 3) {
+      return moduleBounds("bright");
+    }
+    if (step == 4) {
+      return moduleBounds("ui");
+    }
+    if (step == 5) {
+      return combineBounds(moduleBounds("crosshair"), moduleBounds("friends"));
+    }
+    return moduleBounds("tutorial");
+  }
+
+  private int[] moduleBounds(String id) {
+    int[] layout = menuLayout();
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      if (!id.equals(modules[index].id)) {
+        continue;
+      }
+      int column = index % layout[8];
+      int row = index / layout[8];
+      return new int[] {
+          layout[0] + (column * (layout[9] + MENU_GAP)),
+          layout[1] + (row * (MENU_TILE_HEIGHT + MENU_GAP)),
+          layout[9],
+          MENU_TILE_HEIGHT
+      };
+    }
+    return new int[] { layout[4], layout[5], layout[6], layout[7] };
+  }
+
+  private int[] combineBounds(int[] first, int[] second) {
+    int left = Math.min(first[0], second[0]);
+    int top = Math.min(first[1], second[1]);
+    int right = Math.max(first[0] + first[2], second[0] + second[2]);
+    int bottom = Math.max(first[1] + first[3], second[1] + second[3]);
+    return new int[] { left, top, right - left, bottom - top };
+  }
+
+  private int[] menuLayout() {
+    int boxW = Math.min(MENU_MAX_WIDTH, Math.max(120, field_22789 - (MENU_MIN_MARGIN * 2)));
+    int boxH = Math.min(MENU_MAX_HEIGHT, Math.max(120, field_22790 - (MENU_MIN_MARGIN * 2)));
+    int boxX = Math.max(MENU_MIN_MARGIN, (field_22789 - boxW) / 2);
+    int boxY = Math.max(MENU_MIN_MARGIN, (field_22790 - boxH) / 2);
+    int columns = menuColumns(boxW);
+    int tileW = menuTileWidth(columns, boxW);
+    int totalW = (columns * tileW) + ((columns - 1) * MENU_GAP);
+    int startX = boxX + MENU_SIDE_PADDING;
+    int startY = boxY + MENU_HEADER_HEIGHT;
+    return new int[] { startX, startY, totalW, 0, boxX, boxY, boxW, boxH, columns, tileW };
+  }
+
+  private int menuColumns(int boxW) {
+    int maxColumnsForWidth = Math.max(1, (boxW - (MENU_SIDE_PADDING * 2) + MENU_GAP - 6) / (28 + MENU_GAP));
+    return Math.max(1, Math.min(5, maxColumnsForWidth));
+  }
+
+  private int menuTileWidth(int columns, int boxW) {
+    int availableGridWidth = Math.max(28, boxW - (MENU_SIDE_PADDING * 2) - 6);
+    int computed = Math.max(24, (availableGridWidth - ((columns - 1) * MENU_GAP)) / columns);
+    return Math.min(44, computed);
+  }
+
+  private int[] cardBounds(int[] focus) {
+    int cardW = Math.min(224, Math.max(178, field_22789 - 18));
+    int cardH = 86;
+    int gap = 12;
+    int x;
+    int y = clamp(focus[1] + focus[3] / 2 - cardH / 2, 8, Math.max(8, field_22790 - cardH - 8));
+    if (focus[0] + focus[2] + gap + cardW <= field_22789 - 8) {
+      x = focus[0] + focus[2] + gap;
+    } else if (focus[0] - gap - cardW >= 8) {
+      x = focus[0] - gap - cardW;
+    } else {
+      x = clamp((field_22789 - cardW) / 2, 8, Math.max(8, field_22789 - cardW - 8));
+      y = focus[1] + focus[3] + gap;
+      if (y + cardH > field_22790 - 8) {
+        y = focus[1] - cardH - gap;
+      }
+      y = clamp(y, 8, Math.max(8, field_22790 - cardH - 8));
+    }
+    return new int[] { x, y, cardW, cardH };
+  }
+
+  private void drawWrapped(class_332 graphics, class_327 font, String text, int x, int y, int maxWidth, int maxLines) {
+    String[] words = text.split(" ");
+    String line = "";
+    int lineCount = 0;
+    for (String word : words) {
+      String next = line.isEmpty() ? word : line + " " + word;
+      if (next.length() > Math.max(18, maxWidth / 6) && !line.isEmpty()) {
+        graphics.method_25300(font, fit(line, maxWidth), x, y + (lineCount * 10), LauncherTheme.mutedTextColor());
+        line = word;
+        lineCount += 1;
+        if (lineCount >= maxLines) {
+          return;
+        }
+      } else {
+        line = next;
+      }
+    }
+    if (!line.isEmpty() && lineCount < maxLines) {
+      graphics.method_25300(font, fit(line, maxWidth), x, y + (lineCount * 10), LauncherTheme.mutedTextColor());
+    }
+  }
+
+  private void drawButton(class_332 graphics, class_327 font, int x, int y, int w, int h, String label, boolean active) {
+    graphics.method_25294(x, y, x + w, y + h, active ? LauncherTheme.accentArgb(100) : LauncherTheme.argb(66, 0xFFFFFF));
+    border(graphics, x, y, w, h, active ? LauncherTheme.accentArgb(220) : LauncherTheme.argb(130, 0xFFFFFF));
+    centeredText(graphics, font, fit(label, w - 4), x + (w / 2), y + 5, active ? LauncherTheme.textColor() : LauncherTheme.mutedTextColor());
+  }
+
+  private void centeredText(class_332 graphics, class_327 font, String text, int centerX, int y, int color) {
+    graphics.method_25300(font, text, centerX - (font.method_1727(text) / 2), y, color);
+  }
+
+  private String fit(String value, int width) {
+    String label = String.valueOf(value == null ? "" : value);
+    int maxChars = Math.max(1, width / 6);
+    return label.length() <= maxChars ? label : label.substring(0, Math.max(1, maxChars - 1)) + "~";
+  }
+
+  private boolean isInside(double mouseX, double mouseY, int x, int y, int w, int h) {
+    return mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+  }
+
+  private int clamp(int value, int min, int max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private void border(class_332 graphics, int x, int y, int w, int h, int color) {
+    graphics.method_25294(x, y, x + w, y + 1, color);
+    graphics.method_25294(x, y + h - 1, x + w, y + h, color);
+    graphics.method_25294(x, y, x + 1, y + h, color);
+    graphics.method_25294(x + w - 1, y, x + w, y + h, color);
+  }
+}
+`,
+  'dev/xlauncher/client/TextBridge.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.Collections;
+import java.util.Optional;
+import net.minecraft.class_2561;
+
+final class TextBridge {
+  private TextBridge() {
+  }
+
+  static class_2561 literal(String text) {
+    Class<?> componentClass = class_2561.class;
+    for (String methodName : new String[] { "method_30163", "literal", "a", "b", "c" }) {
+      try {
+        Method method = componentClass.getMethod(methodName, String.class);
+        Object value = method.invoke(null, text);
+        if (componentClass.isInstance(value)) {
+          return (class_2561) value;
+        }
+      } catch (Throwable ignored) {
+        // Different Minecraft mappings expose the same factory under different names.
+      }
+    }
+    return fallbackComponent(text, componentClass);
+  }
+
+  private static class_2561 fallbackComponent(String text, Class<?> componentClass) {
+    if (!componentClass.isInterface()) {
+      return null;
+    }
+    InvocationHandler handler = (Object proxy, Method method, Object[] args) -> {
+      String name = method.getName();
+      if ("toString".equals(name) || "getString".equals(name) || "getLiteralString".equals(name) || "method_10851".equals(name)) {
+        return text;
+      }
+      if ("hashCode".equals(name)) {
+        return text.hashCode();
+      }
+      if ("equals".equals(name)) {
+        return args != null && args.length == 1 && proxy == args[0];
+      }
+      Class<?> returnType = method.getReturnType();
+      if (returnType == Void.TYPE) {
+        return null;
+      }
+      if (returnType == Boolean.TYPE) {
+        return false;
+      }
+      if (returnType == Byte.TYPE) {
+        return (byte) 0;
+      }
+      if (returnType == Short.TYPE) {
+        return (short) 0;
+      }
+      if (returnType == Integer.TYPE) {
+        return 0;
+      }
+      if (returnType == Long.TYPE) {
+        return 0L;
+      }
+      if (returnType == Float.TYPE) {
+        return 0.0F;
+      }
+      if (returnType == Double.TYPE) {
+        return 0.0D;
+      }
+      if (returnType == Character.TYPE) {
+        return '\0';
+      }
+      if (String.class.equals(returnType)) {
+        return text;
+      }
+      if (Optional.class.equals(returnType)) {
+        return Optional.empty();
+      }
+      if (java.util.List.class.equals(returnType)) {
+        return Collections.emptyList();
+      }
+      if (returnType.isInstance(proxy)) {
+        return proxy;
+      }
+      return null;
+    };
+    return (class_2561) Proxy.newProxyInstance(componentClass.getClassLoader(), new Class<?>[] { componentClass }, handler);
+  }
+}
+`,
+  'dev/xlauncher/client/XLauncherMenuScreen.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.class_310;
+import net.minecraft.class_327;
+import net.minecraft.class_332;
+import net.minecraft.class_437;
+import net.minecraft.class_11909;
+
+public final class XLauncherMenuScreen extends class_437 {
+  private static final int TILE_HEIGHT = 28;
+  private static final int TILE_LABEL_HEIGHT = 0;
+  private static final int GAP = 4;
+  private static final int WINDOW_MARGIN = 50;
+  private static final int MIN_WINDOW_MARGIN = 10;
+  private static final int MIN_PANEL_SIZE = 160;
+  private static final int PANEL_SIDE_PADDING = 8;
+  private static final int PANEL_HEADER_HEIGHT = 44;
+  private static final int PANEL_FOOTER_HEIGHT = 10;
+  private static final int DETAIL_EDITOR_TOP = 74;
+  private static final int HEADER_ICON_SIZE = 18;
+  private static final int HEADER_FILTER_WIDTH = 38;
+  private static final int HEADER_BUTTON_GAP = 3;
+  private static final int SEARCH_WIDTH = 82;
+  private static final int SEARCH_HEIGHT = 18;
+  private static final int SIDE_TAB_WIDTH = 54;
+  private static final int SIDE_TAB_GAP = 6;
+  private static final int SIDE_TAB_HEIGHT = 18;
+  private static final int SIDE_TAB_BUTTON_GAP = 6;
+  private static final int PANEL_MAX_WIDTH = 292;
+  private static final int PANEL_MAX_HEIGHT = 186;
+  private static final int MOD_SHIFT = 1;
+  private static final int MOD_CONTROL = 2;
+  private static final int MOD_ALT = 4;
+  private static final int MOD_SUPER = 8;
+  private String searchQuery = "";
+  private String activeTab = "all";
+  private boolean uiEditorMode;
+  private boolean galleryMode;
+  private String draggingOverlay;
+  private String selectedOverlay;
+  private boolean resizingOverlay;
+  private int dragOffsetX;
+  private int dragOffsetY;
+  private int dragStartX;
+  private int dragStartY;
+  private int selectedIndex = -1;
+  private boolean capturingKey;
+  private boolean searchFocused;
+  private String codeInput = "";
+  private String codeStatus = "Code eingeben.";
+  private boolean codeFocused;
+  private boolean draggingEffectLevel;
+  private boolean draggingZoomStrength;
+  private boolean draggingZoomSmoothness;
+  private boolean draggingCrosshairSize;
+  private boolean draggingHitboxThickness;
+  private char lastSearchFallbackChar;
+  private long lastSearchFallbackMs;
+  private java.util.UUID pendingRemoveFriendUuid;
+  private String pendingRemoveFriendName = "";
+  private int scrollOffset;
+  private int galleryScrollOffset;
+  private ScreenshotGallery.Entry enlargedGalleryEntry;
+  private final long openedMs = System.currentTimeMillis();
+  private boolean renderCrashLogged;
+  private boolean closing;
+
+  XLauncherMenuScreen() {
+    super(TextBridge.literal("X Client"));
+  }
+
+  void openUiEditorShortcut() {
+    uiEditorMode = true;
+    galleryMode = false;
+    selectedIndex = -1;
+    capturingKey = false;
+    searchFocused = false;
+    codeFocused = false;
+    draggingOverlay = null;
+    resizingOverlay = false;
+    pendingRemoveFriendUuid = null;
+  }
+
+  void openModuleShortcut(String moduleId) {
+    uiEditorMode = false;
+    galleryMode = false;
+    searchQuery = "";
+    activeTab = "all";
+    selectedIndex = moduleIndex(moduleId);
+    capturingKey = false;
+    searchFocused = false;
+    codeFocused = "fakefps".equals(moduleId);
+    pendingRemoveFriendUuid = null;
+    scrollOffset = 0;
+    if (codeFocused) {
+      codeInput = String.valueOf(MenuModules.fakeFps());
+      codeStatus = "Wert wird zu den echten FPS addiert.";
+    }
+  }
+
+  @Override
+  public boolean method_25421() {
+    return XLauncherMenuClient.shouldPauseInOwnWorld();
+  }
+
+  @Override
+  public void method_25394(class_332 graphics, int mouseX, int mouseY, float tickDelta) {
+    try {
+      draw(graphics, mouseX, mouseY);
+    } catch (Throwable error) {
+      drawCrashSafeFallback(graphics, class_310.method_1551().field_1772, error);
+    }
+  }
+
+  @Override
+  public boolean method_25404(int keyCode, int scanCode, int modifiers) {
+    if (keyCode == 256) {
+      if (capturingKey) {
+        if (selectedIndex >= 0 && selectedIndex < MenuModules.modules().length
+            && MenuModules.modules()[selectedIndex].keyCode > 0) {
+          XLauncherMenuClient.setModuleKey(selectedIndex, -1, 0);
+        }
+        capturingKey = false;
+        return true;
+      }
+      return handleEscapeNavigation();
+    }
+    if (galleryMode) {
+      if (keyCode == 263) {
+        scrollGallery(-1);
+        return true;
+      }
+      if (keyCode == 262) {
+        scrollGallery(1);
+        return true;
+      }
+      return true;
+    }
+    if (capturingKey && selectedIndex >= 0 && MenuModules.modules()[selectedIndex].keyBindable) {
+      if (isClearKey(keyCode)) {
+        XLauncherMenuClient.setModuleKey(selectedIndex, -1, 0);
+        capturingKey = false;
+        return true;
+      }
+      if (isModifierKey(keyCode)) {
+        return true;
+      }
+      XLauncherMenuClient.setModuleKey(selectedIndex, keyCode, modifiers);
+      capturingKey = false;
+      return true;
+    }
+    if (isCodeModuleSelected() && handleCodeKey(keyCode)) {
+      return true;
+    }
+    if (searchFocused && handleSearchKey(keyCode)) {
+      return true;
+    }
+    return searchFocused && appendSearchKey(keyCode);
+  }
+
+  private boolean handleEscapeNavigation() {
+    if (pendingRemoveFriendUuid != null) {
+      pendingRemoveFriendUuid = null;
+      pendingRemoveFriendName = "";
+      return true;
+    }
+    if (enlargedGalleryEntry != null) {
+      enlargedGalleryEntry = null;
+      return true;
+    }
+    if (capturingKey) {
+      capturingKey = false;
+      return true;
+    }
+    if (searchFocused) {
+      searchFocused = false;
+      return true;
+    }
+    if (codeFocused) {
+      codeFocused = false;
+      return true;
+    }
+    if (uiEditorMode && selectedOverlay != null) {
+      selectedOverlay = null;
+      draggingOverlay = null;
+      resizingOverlay = false;
+      return true;
+    }
+    if (uiEditorMode) {
+      uiEditorMode = false;
+      draggingOverlay = null;
+      resizingOverlay = false;
+      return true;
+    }
+    if (galleryMode) {
+      galleryMode = false;
+      galleryScrollOffset = 0;
+      return true;
+    }
+    if (selectedIndex >= 0) {
+      selectedIndex = -1;
+      capturingKey = false;
+      codeFocused = false;
+      pendingRemoveFriendUuid = null;
+      pendingRemoveFriendName = "";
+      return true;
+    }
+    closeMenu();
+    return true;
+  }
+
+  private void closeMenu() {
+    if (closing) {
+      return;
+    }
+    class_310 client = class_310.method_1551();
+    if (client == null) {
+      return;
+    }
+    closing = true;
+    client.execute(() -> {
+      if (!XLauncherMenuClient.closeMenuScreen(this)) {
+        closing = false;
+      }
+    });
+  }
+
+  @Override
+  public boolean method_25400(char chr, int modifiers) {
+    if (isCodeModuleSelected() && !Character.isISOControl(chr)) {
+      return appendCodeText(String.valueOf(chr));
+    }
+    if (searchFocused && !Character.isISOControl(chr)) {
+      return appendSearchText(String.valueOf(chr));
+    }
+    return false;
+  }
+
+  @Override
+  public boolean method_25402(class_11909 event, boolean doubleClick) {
+    if (event.method_74245() == 0) {
+      if (galleryMode) {
+        boolean handled = handleGalleryClick(event.comp_4798(), event.comp_4799());
+        if (handled) {
+          XLauncherMenuClient.playMenuClickSound();
+        }
+        return handled;
+      }
+      if (uiEditorMode) {
+        boolean handled = handleUiEditorClick(event.comp_4798(), event.comp_4799());
+        if (handled) {
+          XLauncherMenuClient.playMenuClickSound();
+        }
+        return handled;
+      }
+      int[] layout = layout();
+      if (handleHeaderClick(event.comp_4798(), event.comp_4799(), layout)) {
+        XLauncherMenuClient.playMenuClickSound();
+        return true;
+      }
+      if (isInside(event.comp_4798(), event.comp_4799(), searchX(layout), searchY(layout), searchWidth(layout), SEARCH_HEIGHT)) {
+        XLauncherMenuClient.playMenuClickSound();
+        selectedIndex = -1;
+        capturingKey = false;
+        uiEditorMode = false;
+        searchFocused = true;
+        codeFocused = false;
+        pendingRemoveFriendUuid = null;
+        return true;
+      }
+      if (selectedIndex >= 0) {
+        boolean handled = handleDetailClick(event.comp_4798(), event.comp_4799(), layout);
+        if (handled) {
+          XLauncherMenuClient.playMenuClickSound();
+        }
+        return handled;
+      }
+      int index = hitModule(event.comp_4798(), event.comp_4799());
+      if (index >= 0) {
+        XLauncherMenuClient.playMenuClickSound();
+        String moduleId = MenuModules.modules()[index].id;
+        if ("ui".equals(moduleId)) {
+          uiEditorMode = true;
+          galleryMode = false;
+          selectedIndex = -1;
+          capturingKey = false;
+          draggingOverlay = null;
+          resizingOverlay = false;
+          pendingRemoveFriendUuid = null;
+          return true;
+        }
+        selectedIndex = index;
+        searchFocused = false;
+        codeFocused = "fakefps".equals(moduleId);
+        capturingKey = false;
+        pendingRemoveFriendUuid = null;
+        if ("fakefps".equals(moduleId)) {
+          codeInput = String.valueOf(MenuModules.fakeFps());
+          codeStatus = "Wert wird zu den echten FPS addiert.";
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public boolean method_25403(class_11909 event, double dragX, double dragY) {
+    if (uiEditorMode && draggingOverlay != null) {
+      updateUiDrag(event.comp_4798(), event.comp_4799());
+      return true;
+    }
+    if (draggingEffectLevel && selectedIndex >= 0) {
+      int[] layout = layout();
+      updateEffectLevelFromMouse(event.comp_4798(), layout[4], layout[5], layout[6]);
+      return true;
+    }
+    if ((draggingZoomStrength || draggingZoomSmoothness) && selectedIndex >= 0) {
+      int[] layout = layout();
+      updateZoomSettingsFromMouse(event.comp_4798(), layout[4], layout[5], layout[6]);
+      return true;
+    }
+    if (draggingCrosshairSize && selectedIndex >= 0) {
+      int[] layout = layout();
+      updateCrosshairSizeFromMouse(event.comp_4798(), layout[4], layout[5], layout[6]);
+      return true;
+    }
+    if (draggingHitboxThickness && selectedIndex >= 0) {
+      int[] layout = layout();
+      updateHitboxThicknessFromMouse(event.comp_4798(), layout[4], layout[5], layout[6]);
+      return true;
+    }
+    return false;
+  }
+
+  public boolean method_25406(class_11909 event) {
+    if (draggingEffectLevel) {
+      draggingEffectLevel = false;
+      return true;
+    }
+    if (draggingZoomStrength || draggingZoomSmoothness) {
+      draggingZoomStrength = false;
+      draggingZoomSmoothness = false;
+      return true;
+    }
+    if (draggingCrosshairSize) {
+      draggingCrosshairSize = false;
+      return true;
+    }
+    if (draggingHitboxThickness) {
+      draggingHitboxThickness = false;
+      return true;
+    }
+    if (uiEditorMode) {
+      finishUiDrag();
+      draggingOverlay = null;
+      resizingOverlay = false;
+      OverlaySettings.flush();
+      return true;
+    }
+    return false;
+  }
+
+  @Override
+  public boolean method_25401(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    if (galleryMode) {
+      scrollGallery(verticalAmount < 0.0D ? 1 : -1);
+      return true;
+    }
+    if (!uiEditorMode && selectedIndex < 0 && isInside(mouseX, mouseY, layout()[4], layout()[5], layout()[6], layout()[7])) {
+      scrollBy(verticalAmount < 0.0D ? 1 : -1, layout());
+      return true;
+    }
+    return false;
+  }
+
+  private void draw(class_332 graphics, int mouseX, int mouseY) {
+    class_327 font = class_310.method_1551().field_1772;
+    if (uiEditorMode) {
+      drawUiEditor(graphics, font, mouseX, mouseY);
+      return;
+    }
+    if (galleryMode) {
+      drawScreenshotGallery(graphics, font, mouseX, mouseY);
+      return;
+    }
+    int accent = LauncherTheme.accent();
+    int[] layout = layout();
+    int startX = layout[0];
+    int startY = layout[1];
+    int totalWidth = layout[2];
+    int gridHeight = layout[3];
+    int boxX = layout[4];
+    int boxY = layout[5];
+    int boxW = layout[6];
+    int boxH = layout[7];
+    int columns = layout[8];
+    int tileWidth = layout[9];
+    int visibleCount = visibleCount();
+    int maxVisibleTiles = maxVisibleTiles(layout);
+    clampScroll(layout);
+    float open = openProgress();
+    int panelShift = Math.round((1.0F - open) * 9.0F);
+    if (panelShift > 0) {
+      startY += panelShift;
+      boxY += panelShift;
+      layout[1] = startY;
+      layout[5] = boxY;
+    }
+
+    boolean lightMode = LauncherTheme.isLightMode();
+    graphics.method_25294(0, 0, field_22789, field_22790, lightMode ? 0x18FFFFFF : 0x24DDEBFA);
+    graphics.method_25294(0, 0, field_22789, 18, 0x00000000);
+    graphics.method_25294(0, field_22790 - 18, field_22789, field_22790, 0x00000000);
+    roundedFill(graphics, boxX + 5, boxY + 6, boxW, boxH, lightMode ? 0x36000000 : 0x52000000);
+    roundedFill(graphics, boxX, boxY, boxW, boxH, lightMode ? 0xB8F3F7FA : 0xAA0C141D);
+    roundedFill(graphics, boxX + 1, boxY + 1, boxW - 2, boxH - 2, lightMode ? 0xA8FDFEFF : 0x8E111C27);
+    roundedFill(graphics, boxX + 1, boxY + 1, boxW - 2, PANEL_HEADER_HEIGHT - 1, lightMode ? 0xBCF4F9FD : 0x9A101923);
+    graphics.method_25294(boxX + 12, boxY + PANEL_HEADER_HEIGHT - 3, boxX + boxW - 12, boxY + PANEL_HEADER_HEIGHT - 2, 0x00000000);
+    graphics.method_25294(boxX + 12, boxY + PANEL_HEADER_HEIGHT - 1, boxX + boxW - 12, boxY + PANEL_HEADER_HEIGHT + 1, 0x00000000);
+    graphics.method_25294(boxX + 9, boxY + 9, boxX + 12, boxY + boxH - 9, 0x00000000);
+    border(graphics, boxX, boxY, boxW, boxH, lightMode ? 0xDD5B6D7B : LauncherTheme.accentArgb(210));
+    drawSearchBar(graphics, font, layout);
+    drawHeaderActions(graphics, font, layout);
+
+    if (selectedIndex >= 0) {
+      drawDetail(graphics, font, layout);
+      return;
+    }
+
+    MenuModules.Module[] modules = MenuModules.modules();
+    int visibleIndex = 0;
+    int matchedIndex = 0;
+    int firstVisibleIndex = scrollOffset * columns;
+    for (int index = 0; index < modules.length; index += 1) {
+      if (!matchesModule(modules[index])) {
+        continue;
+      }
+      if (matchedIndex < firstVisibleIndex) {
+        matchedIndex += 1;
+        continue;
+      }
+      if (visibleIndex >= maxVisibleTiles) {
+        break;
+      }
+      int column = visibleIndex % columns;
+      int row = visibleIndex / columns;
+      int x = startX + (column * (tileWidth + GAP));
+      int y = startY + (row * tileRowStep());
+      drawTile(graphics, font, modules[index], x, y, tileWidth, TILE_HEIGHT, isInside(mouseX, mouseY, x, y, tileWidth, TILE_LABEL_HEIGHT + TILE_HEIGHT), accent);
+      visibleIndex += 1;
+      matchedIndex += 1;
+    }
+    if (visibleCount == 0) {
+      centeredText(graphics, font, "NO MODULES", field_22789 / 2, startY + 13, LauncherTheme.mutedTextColor());
+    }
+    drawScrollbar(graphics, layout, visibleCount, maxVisibleTiles);
+
+  }
+
+  private void drawBlurBackdrop(class_332 graphics) {
+  }
+
+  private void drawCrashSafeFallback(class_332 graphics, class_327 font, Throwable error) {
+    if (!renderCrashLogged) {
+      renderCrashLogged = true;
+      System.out.println("[X Client] Menu render recovered: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+    }
+    graphics.method_25294(0, 0, field_22789, field_22790, 0xF0000000);
+    int boxW = Math.min(260, Math.max(160, field_22789 - 30));
+    int boxH = 74;
+    int boxX = (field_22789 - boxW) / 2;
+    int boxY = (field_22790 - boxH) / 2;
+    roundedFill(graphics, boxX + 2, boxY + 2, boxW, boxH, 0x88000000);
+    roundedFill(graphics, boxX, boxY, boxW, boxH, 0xFF000000);
+    border(graphics, boxX, boxY, boxW, boxH, LauncherTheme.accentArgb(210));
+    centeredText(graphics, font, "X Client", field_22789 / 2, boxY + 14, LauncherTheme.textColor());
+    centeredText(graphics, font, "Menü wurde sicher geöffnet.", field_22789 / 2, boxY + 32, LauncherTheme.mutedTextColor());
+    centeredText(graphics, font, "ESC schließt diesen Bildschirm.", field_22789 / 2, boxY + 46, LauncherTheme.mutedTextColor());
+  }
+
+  private float openProgress() {
+    float raw = Math.min(1.0F, (System.currentTimeMillis() - openedMs) / 170.0F);
+    return raw * raw * (3.0F - (2.0F * raw));
+  }
+
+  private float animationPhase() {
+    return (System.currentTimeMillis() % 1800L) / 1800.0F;
+  }
+
+  private int pulseAlpha(int amount) {
+    double wave = (Math.sin(System.currentTimeMillis() / 220.0D) + 1.0D) * 0.5D;
+    return (int) Math.round(wave * amount);
+  }
+
+  private void drawFriendRequestPopup(class_332 graphics, class_327 font) {
+    SocialManager.FriendRequest request = SocialManager.newestIncomingRequest();
+    if (request == null) {
+      return;
+    }
+    int[] bounds = friendRequestPopupBounds();
+    int x = bounds[0];
+    int y = bounds[1];
+    int w = bounds[2];
+    int h = bounds[3];
+    graphics.method_25294(x + 1, y + 1, x + w + 1, y + h + 1, LauncherTheme.argb(105, 0x000000));
+    graphics.method_25294(x, y, x + w, y + h, LauncherTheme.argb(178, 0x081018));
+    border(graphics, x, y, w, h, LauncherTheme.accentArgb(220));
+    drawRequestSkinHead(graphics, font, request, x + 8, y + 8, 13);
+    graphics.method_25300(font, fitLabel(request.name + " wants to be friends", w - 42), x + 27, y + 7, LauncherTheme.textColor());
+    graphics.method_25300(font, fitLabel("Accept or decline", w - 82), x + 27, y + 18, LauncherTheme.mutedTextColor());
+    drawButton(graphics, font, x + w - 54, y + h - 16, 26, 13, "OK", true);
+    drawButton(graphics, font, x + w - 24, y + h - 16, 18, 13, "X", true);
+  }
+
+  private boolean handleFriendRequestPopupClick(double mouseX, double mouseY) {
+    SocialManager.FriendRequest request = SocialManager.newestIncomingRequest();
+    if (request == null) {
+      return false;
+    }
+    int[] bounds = friendRequestPopupBounds();
+    int x = bounds[0];
+    int y = bounds[1];
+    int w = bounds[2];
+    int h = bounds[3];
+    if (isInside(mouseX, mouseY, x + w - 54, y + h - 16, 26, 13)) {
+      SocialManager.acceptFriendRequest(request.uuid);
+      return true;
+    }
+    if (isInside(mouseX, mouseY, x + w - 24, y + h - 16, 18, 13)) {
+      SocialManager.declineFriendRequest(request.uuid);
+      return true;
+    }
+    return isInside(mouseX, mouseY, x, y, w, h);
+  }
+
+  private int[] friendRequestPopupBounds() {
+    int w = Math.min(190, Math.max(146, field_22789 - 16));
+    int h = 42;
+    int x = Math.max(6, field_22789 - w - 8);
+    int y = Math.max(6, field_22790 - h - 8);
+    return new int[] { x, y, w, h };
+  }
+
+  private void drawUiEditor(class_332 graphics, class_327 font, int mouseX, int mouseY) {
+    updateUiDrag(mouseX, mouseY);
+    drawBlurBackdrop(graphics);
+    graphics.method_25294(2, 2, field_22789 - 2, field_22790 - 2, LauncherTheme.argb(55, 0xFFFFFF));
+    graphics.method_25294(0, 0, field_22789, field_22790, LauncherTheme.argb(80, 0x05080D));
+    drawButton(graphics, font, (field_22789 - 42) / 2, Math.max(8, field_22790 - 24), 42, 16, "Home", true);
+    centeredText(graphics, font, "UI EDITOR", field_22789 / 2, 14, LauncherTheme.textColor());
+    centeredText(graphics, font, "Drag overlays.", field_22789 / 2, 26, LauncherTheme.mutedTextColor());
+    drawOverlayPreview(graphics, font, "fps", "FPS 144", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "coords", overlayText("coords"), mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "nethercoords", overlayText("nethercoords"), mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "keys", "", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "cps", "", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "clock", "TIME 12:00", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "armor", "ARMOR 100% 429", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "combo", "COMBO 4 | BEST 8", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "sounddisplay", "Footsteps", mouseX, mouseY);
+  }
+
+  private void drawScreenshotGallery(class_332 graphics, class_327 font, int mouseX, int mouseY) {
+    drawBlurBackdrop(graphics);
+    java.util.List<ScreenshotGallery.Entry> entries = ScreenshotGallery.entries(class_310.method_1551());
+    clampGalleryScroll(entries.size(), field_22789, field_22790);
+    int[] home = galleryHomeBounds();
+    int[] save = gallerySaveBounds();
+
+    if (entries.isEmpty()) {
+      graphics.method_25294(0, 0, field_22789, field_22790, LauncherTheme.argb(112, 0x000000));
+      centeredText(graphics, font, ScreenshotGallery.isLoading() ? "Lade Screenshots..." : "Noch keine Screenshots.", field_22789 / 2, field_22790 / 2 - 6, LauncherTheme.textColor());
+      drawGalleryControlButton(graphics, font, home, "Home", true);
+      return;
+    }
+
+    ScreenshotGallery.Entry entry = entries.get(galleryScrollOffset);
+    if (entries.size() > 1) {
+      ScreenshotGallery.textureId(entries.get(Math.floorMod(galleryScrollOffset - 1, entries.size())), class_310.method_1551());
+      ScreenshotGallery.textureId(entries.get(Math.floorMod(galleryScrollOffset + 1, entries.size())), class_310.method_1551());
+    }
+    boolean drawn = drawGalleryTexture(graphics, entry, 0, 0, field_22789, field_22790);
+    if (!drawn) {
+      graphics.method_25294(0, 0, field_22789, field_22790, LauncherTheme.argb(128, 0x000000));
+      centeredText(graphics, font, "Lade Screenshot...", field_22789 / 2, field_22790 / 2 - 6, LauncherTheme.textColor());
+    }
+    graphics.method_25294(0, 0, field_22789, 36, LauncherTheme.argb(132, 0x000000));
+    graphics.method_25294(0, field_22790 - 28, field_22789, field_22790, LauncherTheme.argb(104, 0x000000));
+    drawGalleryControlButton(graphics, font, home, "Home", true);
+    drawGalleryControlButton(graphics, font, save, "Save", true);
+    boolean hasMultiple = entries.size() > 1;
+    int[] left = galleryLeftArrowBounds();
+    int[] right = galleryRightArrowBounds();
+    drawGalleryArrow(graphics, font, left, "<", hasMultiple, isInside(mouseX, mouseY, left[0], left[1], left[2], left[3]));
+    drawGalleryArrow(graphics, font, right, ">", hasMultiple, isInside(mouseX, mouseY, right[0], right[1], right[2], right[3]));
+  }
+
+  private void drawGalleryArrow(class_332 graphics, class_327 font, int[] bounds, String label, boolean active, boolean hovered) {
+    int fill = active ? (hovered ? LauncherTheme.accentArgb(176) : LauncherTheme.argb(118, 0x000000)) : LauncherTheme.argb(62, 0x000000);
+    int stroke = active ? (hovered ? LauncherTheme.accentArgb(235) : LauncherTheme.argb(160, 0xFFFFFF)) : LauncherTheme.argb(78, 0xFFFFFF);
+    roundedFill(graphics, bounds[0] + 2, bounds[1] + 2, bounds[2], bounds[3], LauncherTheme.argb(88, 0x000000));
+    roundedFill(graphics, bounds[0], bounds[1], bounds[2], bounds[3], fill);
+    border(graphics, bounds[0], bounds[1], bounds[2], bounds[3], stroke);
+    centeredText(graphics, font, label, bounds[0] + (bounds[2] / 2), bounds[1] + (bounds[3] / 2) - 4, active ? LauncherTheme.textColor() : LauncherTheme.mutedTextColor());
+  }
+
+  private void drawGalleryCard(class_332 graphics, class_327 font, ScreenshotGallery.Entry entry, int x, int y, int w, int h, boolean hovered) {
+    roundedFill(graphics, x + 1, y + 1, w, h, LauncherTheme.argb(70, 0x000000));
+    roundedFill(graphics, x, y, w, h, hovered ? LauncherTheme.argb(214, 0x202A33) : LauncherTheme.argb(184, 0x1A1A1A));
+    graphics.method_25294(x + 2, y, x + w - 2, y + 1, hovered ? LauncherTheme.accentArgb(220) : LauncherTheme.argb(95, 0x2A2A2A));
+    border(graphics, x, y, w, h, hovered ? LauncherTheme.accentArgb(225) : LauncherTheme.argb(145, 0x2A2A2A));
+    int thumbX = x + 5;
+    int thumbY = y + 5;
+    int thumbW = Math.max(32, w - 10);
+    int thumbH = Math.max(16, h - 10);
+    drawGalleryThumbnail(graphics, entry, thumbX, thumbY, thumbW, thumbH);
+  }
+
+  private void drawGalleryThumbnail(class_332 graphics, ScreenshotGallery.Entry entry, int x, int y, int w, int h) {
+    roundedFill(graphics, x, y, w, h, LauncherTheme.argb(120, 0x081018));
+    drawGalleryTexture(graphics, entry, x, y, w, h);
+    border(graphics, x, y, w, h, LauncherTheme.accentArgb(145));
+  }
+
+  private void drawGalleryViewer(class_332 graphics, class_327 font, ScreenshotGallery.Entry entry) {
+    drawBlurBackdrop(graphics);
+    int boxX = Math.max(6, Math.min(14, field_22789 / 18));
+    int boxY = Math.max(6, Math.min(14, field_22790 / 18));
+    int boxW = Math.max(180, field_22789 - (boxX * 2));
+    int boxH = Math.max(150, field_22790 - (boxY * 2));
+    roundedFill(graphics, boxX + 4, boxY + 5, boxW, boxH, LauncherTheme.argb(118, 0x000000));
+    roundedFill(graphics, boxX, boxY, boxW, boxH, LauncherTheme.argb(238, 0x050505));
+    roundedFill(graphics, boxX + 1, boxY + 1, boxW - 2, boxH - 2, LauncherTheme.argb(178, 0x101010));
+    graphics.method_25294(boxX + 2, boxY, boxX + boxW - 2, boxY + 2, LauncherTheme.accentArgb(232));
+    border(graphics, boxX, boxY, boxW, boxH, LauncherTheme.accentArgb(170));
+    drawButton(graphics, font, boxX + PANEL_SIDE_PADDING, boxY + 8, 54, 20, "Back", true);
+    int sourceW = entry.width > 0 ? entry.width : 16;
+    int sourceH = entry.height > 0 ? entry.height : 9;
+    int maxW = Math.max(80, boxW - 24);
+    int maxH = Math.max(60, boxH - 50);
+    double scale = Math.min(maxW / (double) sourceW, maxH / (double) sourceH);
+    int imageW = Math.max(1, (int) Math.round(sourceW * scale));
+    int imageH = Math.max(1, (int) Math.round(sourceH * scale));
+    int imageX = boxX + ((boxW - imageW) / 2);
+    int imageY = boxY + 34 + ((maxH - imageH) / 2);
+    graphics.method_25294(imageX - 2, imageY - 2, imageX + imageW + 2, imageY + imageH + 2, LauncherTheme.argb(150, 0x000000));
+    drawGalleryTexture(graphics, entry, imageX, imageY, imageW, imageH);
+    border(graphics, imageX - 2, imageY - 2, imageW + 4, imageH + 4, LauncherTheme.accentArgb(160));
+  }
+
+  private boolean drawGalleryTexture(Object graphics, ScreenshotGallery.Entry entry, int x, int y, int w, int h) {
+    Object texture = ScreenshotGallery.textureId(entry, class_310.method_1551());
+    if (texture == null) {
+      return false;
+    }
+    int sourceW = Math.max(1, entry.width);
+    int sourceH = Math.max(1, entry.height);
+    double sourceAspect = sourceW / (double) sourceH;
+    double frameAspect = Math.max(1, w) / (double) Math.max(1, h);
+    int srcX = 0;
+    int srcY = 0;
+    int srcW = sourceW;
+    int srcH = sourceH;
+    if (sourceAspect > frameAspect) {
+      srcW = Math.min(sourceW, Math.max(1, (int) Math.round(sourceH * frameAspect)));
+      srcX = Math.max(0, (sourceW - srcW) / 2);
+    } else if (sourceAspect < frameAspect) {
+      srcH = Math.min(sourceH, Math.max(1, (int) Math.round(sourceW / frameAspect)));
+      srcY = Math.max(0, (sourceH - srcH) / 2);
+    }
+    float u0 = srcX / (float) sourceW;
+    float u1 = (srcX + srcW) / (float) sourceW;
+    float v0 = srcY / (float) sourceH;
+    float v1 = (srcY + srcH) / (float) sourceH;
+    for (java.lang.reflect.Method method : graphics.getClass().getMethods()) {
+      Class<?>[] types = method.getParameterTypes();
+      if (types.length == 9 && types[0].isInstance(texture)
+          && types[1] == Integer.TYPE && types[2] == Integer.TYPE && types[3] == Integer.TYPE && types[4] == Integer.TYPE
+          && types[5] == Float.TYPE && types[6] == Float.TYPE && types[7] == Float.TYPE && types[8] == Float.TYPE) {
+        try {
+          method.invoke(graphics, texture, x, y, w, h, u0, u1, v0, v1);
+          return true;
+        } catch (Throwable ignored) {
+          // Try another compatible blit method.
+        }
+      }
+    }
+    Object pipeline = renderPipeline();
+    if (pipeline == null) {
+      return false;
+    }
+    for (java.lang.reflect.Method method : graphics.getClass().getMethods()) {
+      Class<?>[] types = method.getParameterTypes();
+      if (types.length < 10 || !types[0].isInstance(pipeline) || !types[1].isInstance(texture)) {
+        continue;
+      }
+      try {

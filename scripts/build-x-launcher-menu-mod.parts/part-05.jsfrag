@@ -954,6 +954,7 @@ public final class XLauncherMenuScreen extends Screen {
     drawOverlayPreview(graphics, font, "uptimer", "00:00:00", mouseX, mouseY);
     drawOverlayPreview(graphics, font, "armor", "ARMOR 100% 429", mouseX, mouseY);
     drawOverlayPreview(graphics, font, "sounddisplay", "Footsteps", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "effects", "Speed II 1:30", mouseX, mouseY);
   }
 
   private void drawScreenshotGallery(GuiGraphicsExtractor graphics, Font font, int mouseX, int mouseY) {
@@ -1431,6 +1432,12 @@ public final class XLauncherMenuScreen extends Screen {
     if ("timer".equals(module.id)) {
       drawTimerEditor(graphics, font, panelX, panelY, panelW);
     }
+    if ("weather".equals(module.id)) {
+      drawWeatherEditor(graphics, font, panelX, panelY, panelW);
+    }
+    if ("time".equals(module.id)) {
+      drawTimeEditor(graphics, font, panelX, panelY, panelW);
+    }
     if ("uptimer".equals(module.id)) {
       drawUpTimerEditor(graphics, font, panelX, panelY, panelW);
     }
@@ -1469,12 +1476,14 @@ public final class XLauncherMenuScreen extends Screen {
         roundedFill(graphics, controls[8], buttonY, controls[9], 16, 0xFF000000 | OverlaySettings.restColor(module.id));
         border(graphics, controls[8], buttonY, controls[9], 16, LauncherTheme.argb(210, 0xFFFFFF));
       }
+      drawButton(graphics, font, controls[12], buttonY, controls[13], 16, "CX", false);
+      drawButton(graphics, font, controls[14], buttonY, controls[15], 16, "CY", false);
     }
   }
 
   private boolean hasSettingsEditor(MenuModules.Module module) {
     return module != null && ("crosshair".equals(module.id) || "timer".equals(module.id) || "uptimer".equals(module.id) || "xray".equals(module.id) || "flight".equals(module.id) || "armor".equals(module.id)
-        || "blockoutline".equals(module.id) || "keysounds".equals(module.id) || hasEffectLevelSlider(module));
+        || "weather".equals(module.id) || "time".equals(module.id) || "blockoutline".equals(module.id) || "keysounds".equals(module.id) || hasEffectLevelSlider(module));
   }
 
   private void drawArmorEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
@@ -1538,12 +1547,13 @@ public final class XLauncherMenuScreen extends Screen {
   private int[] detailControlBounds(int panelX, int panelW, boolean keyBindable, boolean toggleable, boolean resizable, String overlayId) {
     int available = Math.max(64, panelW - 28);
     int colorCount = resizable ? (OverlaySettings.hasText(overlayId) ? 2 : 1) : 0;
-    int count = (keyBindable ? 1 : 0) + (toggleable ? 1 : 0) + (resizable ? 2 + colorCount : 0);
+    int count = (keyBindable ? 1 : 0) + (toggleable ? 1 : 0) + (resizable ? 4 + colorCount : 0);
     int gap = count > 1 ? 4 : 0;
     int scaleW = resizable ? 18 : 0;
     int toggleW = toggleable ? 38 : 0;
     int colorW = resizable ? 16 : 0;
-    int reserved = toggleW + (scaleW * 2) + (colorW * colorCount) + (Math.max(0, count - 1) * gap);
+    int centerW = resizable ? 24 : 0;
+    int reserved = toggleW + (scaleW * 2) + (colorW * colorCount) + (centerW * 2) + (Math.max(0, count - 1) * gap);
     int keyW = keyBindable ? Math.max(30, Math.min(76, available - reserved)) : 0;
     int total = keyW + reserved;
     int startX = panelX + Math.max(8, (panelW - total) / 2);
@@ -1559,7 +1569,11 @@ public final class XLauncherMenuScreen extends Screen {
     int colorX = cursor;
     if (resizable) cursor += colorW + gap;
     int restColorX = cursor;
-    return new int[] { keyX, keyW, toggleX, toggleW, minusX, scaleW, plusX, scaleW, colorX, colorW, restColorX, colorW };
+    if (resizable) cursor += colorW + gap;
+    int centerX = cursor;
+    if (resizable) cursor += centerW + gap;
+    int centerY = cursor;
+    return new int[] { keyX, keyW, toggleX, toggleW, minusX, scaleW, plusX, scaleW, colorX, colorW, restColorX, colorW, centerX, centerW, centerY, centerW };
   }
 
   private void drawScaleButton(GuiGraphicsExtractor graphics, Font font, int x, int y, int w, String label, boolean enabled) {
@@ -1760,6 +1774,31 @@ public final class XLauncherMenuScreen extends Screen {
     return Math.min(panelW - 36, 320);
   }
 
+  private void drawWeatherEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
+    int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
+    int gap = 4, buttonW = Math.max(20, (w - 16 - (gap * 2)) / 3);
+    int total = (buttonW * 3) + (gap * 2), startX = x + (w - total) / 2;
+    int selected = MenuModules.weatherMode();
+    drawEditorCard(graphics, x, y, w, 44, true);
+    graphics.centeredText(font, "CLIENT WEATHER: " + MenuModules.weatherModeLabel(), x + (w / 2), y + 6, LauncherTheme.textColor());
+    drawButton(graphics, font, startX, y + 22, buttonW, 16, "Clear", selected == 0);
+    drawButton(graphics, font, startX + buttonW + gap, y + 22, buttonW, 16, "Rain", selected == 1);
+    drawButton(graphics, font, startX + ((buttonW + gap) * 2), y + 22, buttonW, 16, "Thunder", selected == 2);
+  }
+
+  private void drawTimeEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
+    int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
+    int gap = 4, buttonW = Math.max(17, (w - 20 - (gap * 3)) / 4);
+    int total = (buttonW * 4) + (gap * 3), startX = x + (w - total) / 2;
+    int selected = MenuModules.timeMode();
+    drawEditorCard(graphics, x, y, w, 44, true);
+    graphics.centeredText(font, "CLIENT TIME: " + MenuModules.timeModeLabel(), x + (w / 2), y + 6, LauncherTheme.textColor());
+    drawButton(graphics, font, startX, y + 22, buttonW, 16, "Sunrise", selected == 0);
+    drawButton(graphics, font, startX + buttonW + gap, y + 22, buttonW, 16, "Noon", selected == 1);
+    drawButton(graphics, font, startX + ((buttonW + gap) * 2), y + 22, buttonW, 16, "Sunset", selected == 2);
+    drawButton(graphics, font, startX + ((buttonW + gap) * 3), y + 22, buttonW, 16, "Night", selected == 3);
+  }
+
   private void drawTimerEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
     int x = timerEditorX(panelX);
     int y = timerEditorY(panelY);
@@ -1787,22 +1826,24 @@ public final class XLauncherMenuScreen extends Screen {
     drawButton(graphics, font, controls[3], rowY, buttonW, 16, "+1", false);
     drawButton(graphics, font, controls[4], rowY, buttonW, 16, "+5", false);
     int bottomY = y + 50;
-    drawButton(graphics, font, x + 8, bottomY, 76, 16, GameTimer.autoStartDaily() ? "Auto ON" : "Auto OFF", GameTimer.autoStartDaily());
-    int remainingW = Math.max(1, w - 98);
+    int autoW = 64;
+    int resetW = 48;
+    int remainingX = x + 8 + autoW + 4 + resetW + 5;
+    drawButton(graphics, font, x + 8, bottomY, autoW, 16, GameTimer.autoStartDaily() ? "Auto ON" : "Auto OFF", GameTimer.autoStartDaily());
+    drawButton(graphics, font, x + 8 + autoW + 4, bottomY, resetW, 16, "Reset", false);
+    int remainingW = Math.max(1, x + w - 8 - remainingX);
     if (remainingW >= 24) {
-      roundedFill(graphics, x + 90, bottomY, remainingW, 16, LauncherTheme.argb(72, 0x000000));
-      graphics.text(font, fitLabel("Rest " + GameTimer.remainingText(), Math.max(1, remainingW - 10)), x + 97, bottomY + 5, LauncherTheme.mutedTextColor());
+      roundedFill(graphics, remainingX, bottomY, remainingW, 16, LauncherTheme.argb(72, 0x000000));
+      graphics.centeredText(font, fitLabel("Rest " + GameTimer.remainingText(), Math.max(1, remainingW - 8)), remainingX + (remainingW / 2), bottomY + 5, LauncherTheme.mutedTextColor());
     }
   }
 
   private void drawUpTimerEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
     int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
-    int gap = 6, buttonW = Math.min(92, Math.max(36, (w - gap - 20) / 2));
-    int total = (buttonW * 2) + gap, startX = x + (w - total) / 2;
     drawEditorCard(graphics, x, y, w, 42, true);
-    graphics.centeredText(font, "TIMER LAYOUT", x + (w / 2), y + 6, LauncherTheme.textColor());
-    drawButton(graphics, font, startX, y + 20, buttonW, 16, "Horizontal", !TimerDisplaySettings.vertical());
-    drawButton(graphics, font, startX + buttonW + gap, y + 20, buttonW, 16, "Vertical", TimerDisplaySettings.vertical());
+    graphics.centeredText(font, "TIMER DISPLAY", x + (w / 2), y + 6, LauncherTheme.textColor());
+    graphics.centeredText(font, "00:00:00", x + (w / 2), y + 19, LauncherTheme.textColor());
+    graphics.centeredText(font, "Always horizontal", x + (w / 2), y + 30, LauncherTheme.mutedTextColor());
   }
 
   private int timerEditorX(int panelX) {
@@ -2587,6 +2628,12 @@ public final class XLauncherMenuScreen extends Screen {
     if ("timer".equals(module.id) && handleTimerEditorClick(mouseX, mouseY, panelX, panelY, panelW)) {
       return true;
     }
+    if ("weather".equals(module.id) && handleWeatherEditorClick(mouseX, mouseY, panelX, panelY, panelW)) {
+      return true;
+    }
+    if ("time".equals(module.id) && handleTimeEditorClick(mouseX, mouseY, panelX, panelY, panelW)) {
+      return true;
+    }
     if ("uptimer".equals(module.id) && handleUpTimerEditorClick(mouseX, mouseY, panelX, panelY, panelW)) {
       return true;
     }
@@ -2638,7 +2685,22 @@ public final class XLauncherMenuScreen extends Screen {
       openColorPicker("overlay." + module.id + ".rest", module.title + " Elements", OverlaySettings.restColor(module.id));
       return true;
     }
+    if (resizableUi && isInside(mouseX, mouseY, controls[12], buttonY, controls[13], 16)) {
+      centerOverlayOnScreen(module.id, true);
+      return true;
+    }
+    if (resizableUi && isInside(mouseX, mouseY, controls[14], buttonY, controls[15], 16)) {
+      centerOverlayOnScreen(module.id, false);
+      return true;
+    }
     return true;
+  }
+
+  private void centerOverlayOnScreen(String id, boolean horizontal) {
+    int[] bounds = overlayBounds(id, overlayText(id));
+    int nextX = horizontal ? Math.max(0, (width - bounds[2]) / 2) : OverlaySettings.x(id);
+    int nextY = horizontal ? OverlaySettings.y(id) : Math.max(0, (height - bounds[3]) / 2);
+    OverlaySettings.setPosition(id, nextX, nextY);
   }
 
   private boolean handleKeyboardSoundEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
@@ -2833,19 +2895,48 @@ public final class XLauncherMenuScreen extends Screen {
       GameTimer.adjustMinutes(5);
       return true;
     }
-    if (isInside(mouseX, mouseY, x + 8, y + 50, 76, 16)) {
+    int autoW = 64;
+    int resetW = 48;
+    if (isInside(mouseX, mouseY, x + 8, y + 50, autoW, 16)) {
       GameTimer.setAutoStartDaily(!GameTimer.autoStartDaily());
+      return true;
+    }
+    if (isInside(mouseX, mouseY, x + 8 + autoW + 4, y + 50, resetW, 16)) {
+      GameTimer.reset();
       return true;
     }
     return true;
   }
 
-  private boolean handleUpTimerEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
+  private boolean handleWeatherEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
     int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
-    int gap = 6, buttonW = Math.min(92, Math.max(36, (w - gap - 20) / 2));
-    int total = (buttonW * 2) + gap, startX = x + (w - total) / 2;
-    if (isInside(mouseX, mouseY, startX, y + 20, buttonW, 16)) { TimerDisplaySettings.setVertical(false); return true; }
-    if (isInside(mouseX, mouseY, startX + buttonW + gap, y + 20, buttonW, 16)) { TimerDisplaySettings.setVertical(true); return true; }
+    int gap = 4, buttonW = Math.max(20, (w - 16 - (gap * 2)) / 3);
+    int total = (buttonW * 3) + (gap * 2), startX = x + (w - total) / 2;
+    for (int index = 0; index < 3; index += 1) {
+      if (isInside(mouseX, mouseY, startX + (index * (buttonW + gap)), y + 22, buttonW, 16)) {
+        MenuModules.setWeatherMode(index);
+        XLauncherMenuClient.refreshModule(selectedIndex);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean handleTimeEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
+    int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
+    int gap = 4, buttonW = Math.max(17, (w - 20 - (gap * 3)) / 4);
+    int total = (buttonW * 4) + (gap * 3), startX = x + (w - total) / 2;
+    for (int index = 0; index < 4; index += 1) {
+      if (isInside(mouseX, mouseY, startX + (index * (buttonW + gap)), y + 22, buttonW, 16)) {
+        MenuModules.setTimeMode(index);
+        XLauncherMenuClient.refreshModule(selectedIndex);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean handleUpTimerEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
     return false;
   }
 
@@ -3724,7 +3815,7 @@ public final class XLauncherMenuScreen extends Screen {
   }
 
   private String overlayAt(double mouseX, double mouseY) {
-    String[] ids = { "sounddisplay", "armor", "uptimer", "clock", "cps", "keys", "nethercoords", "coords", "fps" };
+    String[] ids = { "effects", "sounddisplay", "armor", "uptimer", "clock", "cps", "keys", "nethercoords", "coords", "fps" };
     for (String id : ids) {
       int[] bounds = overlayBounds(id, overlayText(id));
       if (isInside(mouseX, mouseY, bounds[0], bounds[1], bounds[2], bounds[3])) {
@@ -3765,6 +3856,7 @@ public final class XLauncherMenuScreen extends Screen {
       case "clock" -> "TIME 12:00";
       case "uptimer" -> "00:00:00";
       case "sounddisplay" -> "Footsteps";
+      case "effects" -> "Speed II 1:30";
       default -> overlayText(id);
     };
   }
@@ -3789,13 +3881,13 @@ public final class XLauncherMenuScreen extends Screen {
     if ("sounddisplay".equals(id)) {
       return new int[] { x, y, 92 + (size * 4), 30 + (size * 2) };
     }
+    if ("effects".equals(id)) {
+      return new int[] { x, y, 106 + (size * 4), 30 + (size * 2) };
+    }
     if ("cps".equals(id)) {
       int wasdKey = Math.max(4, 13 + (size * 3)), wasdGap = Math.max(1, 2 + size), wasdPadding = Math.max(0, 3 + size);
       int w = (wasdKey * 3) + (wasdGap * 2) + (wasdPadding * 2);
       return new int[] { x, y, w, 14 };
-    }
-    if ("uptimer".equals(id) && TimerDisplaySettings.vertical()) {
-      return new int[] { x, y, 32, 31 };
     }
     int textScale = OverlaySettings.textSize(id);
     int paddingX = Math.max(1, 4 + (size * 2)), paddingY = Math.max(1, 2 + size);
@@ -3806,7 +3898,7 @@ public final class XLauncherMenuScreen extends Screen {
 
   private boolean overlayOverlaps(String id, int nextX, int nextY, int nextSize) {
     int[] next = overlayBoundsForStoredPosition(id, overlayText(id), nextX, nextY, nextSize);
-    String[] ids = { "sounddisplay", "armor", "uptimer", "clock", "cps", "keys", "nethercoords", "coords", "fps" };
+    String[] ids = { "effects", "sounddisplay", "armor", "uptimer", "clock", "cps", "keys", "nethercoords", "coords", "fps" };
     for (String other : ids) {
       if (other.equals(id)) {
         continue;
@@ -3831,6 +3923,7 @@ public final class XLauncherMenuScreen extends Screen {
       case "cps" -> "";
       case "clock" -> "TIME 12:00";
       case "uptimer" -> "00:00:00";
+      case "effects" -> "Speed II 1:30";
       case "armor" -> "ARMOR 100% 429";
       case "inventory" -> "INVENTORY 9 SLOTS";
       case "combo" -> "COMBO 4 | BEST 8";
@@ -3949,7 +4042,7 @@ public final class XLauncherMenuScreen extends Screen {
     }
     if ("pvp".equals(activeTab)) {
       return "zoom".equals(module.id) || "sprint".equals(module.id) || "nobob".equals(module.id)
-          || "bright".equals(module.id) || "trajectory".equals(module.id) || "hitboxes".equals(module.id) || "xray".equals(module.id) || "mobtrack".equals(module.id) || "breakspeed".equals(module.id) || "ghostblocks".equals(module.id) || "speed".equals(module.id) || "resistance".equals(module.id) || "invisibility".equals(module.id)
+          || "bright".equals(module.id) || "weather".equals(module.id) || "time".equals(module.id) || "trajectory".equals(module.id) || "hitboxes".equals(module.id) || "xray".equals(module.id) || "mobtrack".equals(module.id) || "breakspeed".equals(module.id) || "ghostblocks".equals(module.id) || "speed".equals(module.id) || "resistance".equals(module.id) || "invisibility".equals(module.id)
           || "crosshair".equals(module.id);
     }
     if ("hud".equals(activeTab)) {

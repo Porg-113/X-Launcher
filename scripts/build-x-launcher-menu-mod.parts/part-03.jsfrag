@@ -1,9 +1,9 @@
 
 final class TimerDisplaySettings {
-  private static final Preferences PREFS = Preferences.userNodeForPackage(TimerDisplaySettings.class);
   private TimerDisplaySettings() {}
-  static boolean vertical() { return PREFS.getBoolean("vertical", false); }
-  static void setVertical(boolean value) { PREFS.putBoolean("vertical", value); }
+  /** The HUD timer is deliberately kept as one compact, horizontal readout. */
+  static boolean vertical() { return false; }
+  static void setVertical(boolean value) { }
 }
 `,
   'dev/xlauncher/client/OverlaySettings.java': String.raw`
@@ -19,22 +19,22 @@ import java.util.regex.Pattern;
 final class OverlaySettings {
   static final int MIN_SIZE = -3;
   static final int MAX_SIZE = 1;
-  private static final String[] IDS = { "fps", "coords", "nethercoords", "direction", "keys", "cps", "clock", "armor", "inventory", "combo", "session", "sounddisplay", "uptimer" };
-  private static final int[] DEFAULT_X = { 8, 8, 8, 8, 8, 82, 82, 8, 8, 82, 82, 8, 82 };
-  private static final int[] DEFAULT_Y = { 8, 28, 48, 68, 88, 8, 28, 104, 132, 48, 68, 158, 88 };
-  private static final int[] DEFAULT_COLOR = { 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF };
+  private static final String[] IDS = { "fps", "coords", "nethercoords", "direction", "keys", "cps", "clock", "armor", "inventory", "combo", "session", "sounddisplay", "uptimer", "effects" };
+  private static final int[] DEFAULT_X = { 8, 8, 8, 8, 8, 82, 82, 8, 8, 82, 82, 8, 82, 220 };
+  private static final int[] DEFAULT_Y = { 8, 28, 48, 68, 88, 8, 28, 104, 132, 48, 68, 158, 88, 8 };
+  private static final int[] DEFAULT_COLOR = { 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF };
   private static final int[] x = DEFAULT_X.clone();
   private static final int[] y = DEFAULT_Y.clone();
-  private static final int[] size = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
-  private static final int[] textSize = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+  private static final int[] size = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+  private static final int[] textSize = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
   private static final int[] color = DEFAULT_COLOR.clone();
-  private static final int[] opacity = { 145, 145, 145, 145, 118, 145, 145, 145, 145, 145, 145, 145, 0 };
-  private static final int[] radius = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0 };
-  private static final int[] alignment = { 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0 };
-  private static final boolean[] background = { true, true, true, true, true, true, true, true, true, true, true, true, false };
-  private static final boolean[] shadow = { true, true, true, true, true, true, true, true, true, true, true, true, false };
-  private static final boolean[] durabilityPercent = { false, false, false, false, false, false, false, true, false, false, false, false, false };
-  private static final boolean[] durabilityRemaining = { false, false, false, false, false, false, false, true, false, false, false, false, false };
+  private static final int[] opacity = { 145, 145, 145, 145, 118, 145, 145, 145, 145, 145, 145, 145, 0, 145 };
+  private static final int[] radius = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 4 };
+  private static final int[] alignment = { 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0 };
+  private static final boolean[] background = { true, true, true, true, true, true, true, true, true, true, true, true, false, true };
+  private static final boolean[] shadow = { true, true, true, true, true, true, true, true, true, true, true, true, false, true };
+  private static final boolean[] durabilityPercent = { false, false, false, false, false, false, false, true, false, false, false, false, false, false };
+  private static final boolean[] durabilityRemaining = { false, false, false, false, false, false, false, true, false, false, false, false, false, false };
   private static boolean loaded;
   private static boolean savePending;
   private static long lastSaveMs;
@@ -618,6 +618,7 @@ public final class HudOverlay {
   private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
   private static volatile boolean registered;
   private static volatile boolean crosshairReplaced;
+  private static volatile boolean statusEffectsReplaced;
   private static volatile long smartScreenshotToastUntilMs;
   private static float leftCpsPressAnimation;
   private static float rightCpsPressAnimation;
@@ -685,6 +686,7 @@ public final class HudOverlay {
           });
       registryClass.getMethod("addLast", identifierClass, hudElementClass).invoke(null, identifier, element);
       crosshairReplaced = replaceVanillaCrosshair(identifierClass, hudElementClass, registryClass);
+      statusEffectsReplaced = replaceVanillaStatusEffects(identifierClass, hudElementClass, registryClass);
     } catch (Throwable ignored) {
       // Old or obfuscated runtimes may not expose the modern Fabric HUD API.
     }
@@ -713,6 +715,40 @@ public final class HudOverlay {
             return null;
           });
       registryClass.getMethod("replaceElement", identifierClass, Function.class).invoke(null, crosshairId, wrapper);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  /**
+   * The standard potion HUD has a fixed location. Replacing just that vanilla
+   * element keeps status effects normal while letting the UI editor position
+   * the X Client readout. It is intentionally not a module in the menu.
+   */
+  private static boolean replaceVanillaStatusEffects(Class<?> identifierClass, Class<?> hudElementClass, Class<?> registryClass) {
+    try {
+      Class<?> vanillaClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements");
+      Object effectId = null;
+      for (String fieldName : new String[] { "STATUS_EFFECTS", "POTION_ICONS" }) {
+        try {
+          effectId = vanillaClass.getField(fieldName).get(null);
+          break;
+        } catch (Throwable ignored) {
+          // Try the next Fabric API name.
+        }
+      }
+      if (effectId == null) return false;
+      Function<Object, Object> wrapper = oldElement -> Proxy.newProxyInstance(
+          hudElementClass.getClassLoader(),
+          new Class<?>[] { hudElementClass },
+          (proxy, method, args) -> {
+            if ("extractRenderState".equals(method.getName()) && args != null && args.length > 0) {
+              drawEffectStatus(args[0]);
+            }
+            return null;
+          });
+      registryClass.getMethod("replaceElement", identifierClass, Function.class).invoke(null, effectId, wrapper);
       return true;
     } catch (Throwable ignored) {
       return false;
@@ -771,6 +807,9 @@ public final class HudOverlay {
       }
       if (moduleEnabled("armor") && player != null) {
         drawArmorStatus(graphics, font, player);
+      }
+      if (!statusEffectsReplaced && player != null) {
+        drawEffectStatus(graphics);
       }
       if (player != null) {
         SessionHud.update(client, player);
@@ -893,13 +932,7 @@ public final class HudOverlay {
     long seconds = Math.max(0L, (now - upTimerStartedMs) / 1000L);
     long hours = seconds / 3600L, minutes = (seconds / 60L) % 60L, secs = seconds % 60L;
     int x = OverlaySettings.x("uptimer"), y = OverlaySettings.y("uptimer"), color = 0xFF000000 | OverlaySettings.textColor("uptimer");
-    if (TimerDisplaySettings.vertical()) {
-      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d h", hours), x, y, color);
-      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d m", minutes), x, y + 10, color);
-      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d s", secs), x, y + 20, color);
-    } else {
-      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d:%02d:%02d", hours, minutes, secs), x, y, color);
-    }
+    drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d:%02d:%02d", hours, minutes, secs), x, y, color);
   }
 
   private static void drawKeyCap(Object graphics, Object font, String label, int x, int y, int w, int h, boolean pressed) throws ReflectiveOperationException {
@@ -996,6 +1029,111 @@ public final class HudOverlay {
     }
   }
 
+  private static void drawEffectStatus(Object graphics) {
+    try {
+      Object client = clientInstance();
+      Object font = getAnyField(client, "font", "field_1772");
+      Object player = getAnyField(client, "player", "field_1724");
+      if (font == null || player == null) return;
+      String[] entries = activeEffectEntries(player);
+      if (entries.length == 0) return;
+      int size = OverlaySettings.size("effects");
+      int rowH = Math.max(10, 11 + size);
+      int width = 92 + (size * 4);
+      for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
+      int height = (entries.length * rowH) + 6;
+      int[] anchored = anchoredOverlayPosition(client, "effects", width, height, 106 + (size * 4), (3 * rowH) + 6);
+      int x = anchored[0], y = anchored[1];
+      if (OverlaySettings.shadow("effects")) roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius("effects"), LauncherTheme.argb(90, 0x000000));
+      if (OverlaySettings.background("effects")) {
+        roundedFill(graphics, x, y, width, height, OverlaySettings.radius("effects"), LauncherTheme.rawArgb(OverlaySettings.opacity("effects"), OverlaySettings.restColor("effects")));
+        border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
+      }
+      for (int index = 0; index < entries.length; index += 1) {
+        int rowY = y + 3 + (index * rowH);
+        fill(graphics, x + 4, rowY + 2, x + 6, rowY + rowH - 2, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
+        drawText(graphics, font, entries[index], x + 10, rowY + 1, 0xFF000000 | OverlaySettings.color("effects"));
+      }
+    } catch (Throwable ignored) {
+      // Status effects are optional HUD data and must never interrupt rendering.
+    }
+  }
+
+  private static String[] activeEffectEntries(Object player) {
+    java.util.ArrayList<String> entries = new java.util.ArrayList<>();
+    Object active = invokeAny(player, "getActiveEffects", "method_6026");
+    if (active instanceof Iterable<?> iterable) {
+      for (Object instance : iterable) {
+        String label = effectEntryLabel(instance);
+        if (!label.isEmpty()) entries.add(label);
+        if (entries.size() >= 5) break;
+      }
+    } else if (active != null && active.getClass().isArray()) {
+      int length = java.lang.reflect.Array.getLength(active);
+      for (int index = 0; index < length && entries.size() < 5; index += 1) {
+        String label = effectEntryLabel(java.lang.reflect.Array.get(active, index));
+        if (!label.isEmpty()) entries.add(label);
+      }
+    }
+    return entries.toArray(String[]::new);
+  }
+
+  private static String effectEntryLabel(Object instance) {
+    if (instance == null) return "";
+    Object holder = invokeAny(instance, "getEffect", "method_5576", "method_6112");
+    Object effect = invokeAny(holder, "value", "method_63500");
+    if (effect == null) effect = holder;
+    Object descriptionId = invokeAny(effect, "getDescriptionId", "method_5563");
+    String name = formatEffectName(String.valueOf(descriptionId == null ? "" : descriptionId));
+    if (name.isEmpty()) return "";
+    int amplifier = effectNumber(instance, "getAmplifier", "method_5578");
+    int duration = effectNumber(instance, "getDuration", "method_5584");
+    String level = amplifier > 0 ? " " + romanNumeral(Math.min(10, amplifier + 1)) : "";
+    if (duration < 0 || duration >= 1000000) return name + level;
+    int seconds = Math.max(0, duration / 20);
+    return name + level + " " + (seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + (seconds % 60);
+  }
+
+  private static int effectNumber(Object instance, String... names) {
+    Object value = invokeAny(instance, names);
+    return value instanceof Number number ? number.intValue() : 0;
+  }
+
+  private static String formatEffectName(String descriptionId) {
+    String value = String.valueOf(descriptionId == null ? "" : descriptionId).trim();
+    int dot = value.lastIndexOf('.');
+    if (dot >= 0 && dot + 1 < value.length()) value = value.substring(dot + 1);
+    if (value.isEmpty() || value.equals("null")) return "";
+    StringBuilder result = new StringBuilder();
+    boolean upper = true;
+    for (int index = 0; index < value.length(); index += 1) {
+      char character = value.charAt(index);
+      if (character == '_' || character == '-') {
+        result.append(' ');
+        upper = true;
+      } else {
+        result.append(upper ? Character.toUpperCase(character) : character);
+        upper = false;
+      }
+    }
+    return result.toString();
+  }
+
+  private static String romanNumeral(int value) {
+    return switch (Math.max(1, Math.min(10, value))) {
+      case 2 -> "II";
+      case 3 -> "III";
+      case 4 -> "IV";
+      case 5 -> "V";
+      case 6 -> "VI";
+      case 7 -> "VII";
+      case 8 -> "VIII";
+      case 9 -> "IX";
+      case 10 -> "X";
+      default -> "I";
+    };
+  }
+
   // The UI editor renders these with the same primitives and measurements as
   // the live HUD. Only the data is a stable preview sample, never player data.
   public static void drawEditorPreview(Object graphics, Object font, String id, String sampleText, int x, int y) {
@@ -1005,6 +1143,7 @@ public final class HudOverlay {
         case "cps" -> drawEditorCpsPreview(graphics, font, x, y);
         case "armor" -> drawEditorArmorPreview(graphics, x, y);
         case "sounddisplay" -> drawEditorSoundPreview(graphics, font, x, y);
+        case "effects" -> drawEditorEffectsPreview(graphics, font, x, y);
         case "uptimer" -> drawEditorUpTimerPreview(graphics, font, x, y);
         default -> drawEditorOverlayCard(graphics, font, id, sampleText, x, y);
       }
@@ -1104,15 +1243,28 @@ public final class HudOverlay {
     }
   }
 
+  private static void drawEditorEffectsPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
+    String[] entries = { "Speed II 1:30", "Resistance 0:45" };
+    int size = OverlaySettings.size("effects");
+    int rowH = Math.max(10, 11 + size);
+    int width = 92 + (size * 4);
+    for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
+    int height = (entries.length * rowH) + 6;
+    if (OverlaySettings.shadow("effects")) roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius("effects"), LauncherTheme.argb(90, 0x000000));
+    if (OverlaySettings.background("effects")) {
+      roundedFill(graphics, x, y, width, height, OverlaySettings.radius("effects"), LauncherTheme.rawArgb(OverlaySettings.opacity("effects"), OverlaySettings.restColor("effects")));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
+    }
+    for (int index = 0; index < entries.length; index += 1) {
+      int rowY = y + 3 + (index * rowH);
+      fill(graphics, x + 4, rowY + 2, x + 6, rowY + rowH - 2, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
+      drawText(graphics, font, entries[index], x + 10, rowY + 1, 0xFF000000 | OverlaySettings.color("effects"));
+    }
+  }
+
   private static void drawEditorUpTimerPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
     int color = 0xFF000000 | OverlaySettings.textColor("uptimer");
-    if (TimerDisplaySettings.vertical()) {
-      drawText(graphics, font, "00 h", x, y, color);
-      drawText(graphics, font, "00 m", x, y + 10, color);
-      drawText(graphics, font, "00 s", x, y + 20, color);
-    } else {
-      drawText(graphics, font, "00:00:00", x, y, color);
-    }
+    drawText(graphics, font, "00:00:00", x, y, color);
   }
 
   private static final int[] EDITOR_ARMOR_PREVIEW_PERCENT = {

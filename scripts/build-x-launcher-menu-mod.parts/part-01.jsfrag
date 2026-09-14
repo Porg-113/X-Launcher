@@ -11,7 +11,7 @@ const OUTPUT_DIR = path.join(PROJECT_ROOT, 'assets', 'required-mods');
 const MINECRAFT_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '.minecraft');
 const LIBRARIES_DIR = path.join(MINECRAFT_DIR, 'libraries');
 const VERSIONS_DIR = path.join(MINECRAFT_DIR, 'versions');
-const MOD_VERSION = '1.0.155';
+const MOD_VERSION = '1.0.156';
 const MOD_ICON_SOURCE = path.join(PROJECT_ROOT, 'icons', 'icon.png');
 const MOD_MENU_BACKGROUND_SOURCE = path.join(PROJECT_ROOT, 'assets', 'x-client', 'menu-blur.png');
 const MOD_FAVORITE_ICON_SOURCE = path.join(PROJECT_ROOT, 'assets', 'x-client', 'icons', 'favorite-star.png');
@@ -1024,6 +1024,8 @@ final class MenuModules {
   private static final Pattern FAKE_FPS_PATTERN = Pattern.compile("\"fakeFps\"\\s*:\\s*(-?\\d+)");
   private static final Pattern KEYBOARD_SOUND_PATTERN = Pattern.compile("\"keyboardSound\"\\s*:\\s*(\\d+)");
   private static final Pattern KEYBOARD_VOLUME_PATTERN = Pattern.compile("\"keyboardVolume\"\\s*:\\s*(\\d+)");
+  private static final Pattern WEATHER_MODE_PATTERN = Pattern.compile("\"weatherMode\"\\s*:\\s*(\\d+)");
+  private static final Pattern TIME_MODE_PATTERN = Pattern.compile("\"timeMode\"\\s*:\\s*(\\d+)");
   private static final Pattern KEY_ENTRY_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*:\\s*(-?\\d+)");
   private static final Pattern STRING_PATTERN = Pattern.compile("\"([^\"]+)\"");
   private static final int MOD_SHIFT = 1;
@@ -1056,10 +1058,14 @@ final class MenuModules {
   private static int fakeFps;
   private static int keyboardSound = 1;
   private static int keyboardVolume = 4;
+  private static int weatherMode;
+  private static int timeMode = 1;
 
   static final Module[] MODULES = {
       new Module("sprint", "Sprint", "Sprint", "Sprintet beim Vorwärtslaufen automatisch, ohne die Sprinttaste zu halten.", true, true),
       new Module("bright", "Fullbright", "Fullbright", "Erhellt Höhlen clientseitig mit Gamma, Night Vision und Lightmap-Boost.", true, true),
+      new Module("weather", "Weather", "Weather", "Stellt das Wetter nur auf deinem Client ein.", true, false),
+      new Module("time", "Time", "Time", "Stellt die Tageszeit nur auf deinem Client ein.", true, false),
       new Module("zoom", "Zoom", "Zoom", "Verbindet den X-Client-Key mit Infinite Zoom. Mausrad-Zoom kommt direkt von Infinite Zoom.", true, true),
       new Module("blockoutline", "Block Outline", "Outline", "Passt Farbe und Dicke der normalen Block-Markierung an.", true, false),
       new Module("freecam", "Free Cam", "Freie Kamera", "Loest die Kamera lokal vom Spieler. WASD/Leertaste/Shift bewegen nur die Kamera; der Spieler bleibt am Server unveraendert.", true, true),
@@ -1380,6 +1386,45 @@ final class MenuModules {
     save();
   }
 
+  static int weatherMode() {
+    load();
+    return weatherMode;
+  }
+
+  static void setWeatherMode(int value) {
+    load();
+    weatherMode = clampWeatherMode(value);
+    save();
+  }
+
+  static String weatherModeLabel() {
+    return switch (weatherMode()) {
+      case 1 -> "Rain";
+      case 2 -> "Thunder";
+      default -> "Clear";
+    };
+  }
+
+  static int timeMode() {
+    load();
+    return timeMode;
+  }
+
+  static void setTimeMode(int value) {
+    load();
+    timeMode = clampTimeMode(value);
+    save();
+  }
+
+  static String timeModeLabel() {
+    return switch (timeMode()) {
+      case 0 -> "Sunrise";
+      case 2 -> "Sunset";
+      case 3 -> "Night";
+      default -> "Noon";
+    };
+  }
+
 
   static Module setKeyCombo(int index, int keyCode, int keyModifiers) {
     load();
@@ -1506,6 +1551,10 @@ final class MenuModules {
       if (keyboardSoundMatcher.find()) keyboardSound = Math.max(1, Math.min(12, Integer.parseInt(keyboardSoundMatcher.group(1))));
       Matcher keyboardVolumeMatcher = KEYBOARD_VOLUME_PATTERN.matcher(json);
       if (keyboardVolumeMatcher.find()) keyboardVolume = clampKeyboardVolume(Integer.parseInt(keyboardVolumeMatcher.group(1)) > MAX_KEYBOARD_VOLUME ? MAX_KEYBOARD_VOLUME : Integer.parseInt(keyboardVolumeMatcher.group(1)));
+      Matcher weatherModeMatcher = WEATHER_MODE_PATTERN.matcher(json);
+      if (weatherModeMatcher.find()) weatherMode = clampWeatherMode(Integer.parseInt(weatherModeMatcher.group(1)));
+      Matcher timeModeMatcher = TIME_MODE_PATTERN.matcher(json);
+      if (timeModeMatcher.find()) timeMode = clampTimeMode(Integer.parseInt(timeModeMatcher.group(1)));
       normalizeLoadedDefaults();
     } catch (IOException | RuntimeException ignored) {
       // Broken state should never prevent the menu from opening.
@@ -1519,6 +1568,8 @@ final class MenuModules {
     flightSpeed = clampFlightSpeed(flightSpeed);
     keyboardSound = Math.max(1, Math.min(12, keyboardSound));
     keyboardVolume = clampKeyboardVolume(keyboardVolume);
+    weatherMode = clampWeatherMode(weatherMode);
+    timeMode = clampTimeMode(timeMode);
     for (Module module : MODULES) {
       if (OWNER_ONLY_MODULES.contains(module.id) && !OwnerAccess.hasPermission(module.id)) {
         module.enabled = false;
@@ -1597,7 +1648,7 @@ final class MenuModules {
           levels.append('"').append(module.id).append("\": ").append(clampEffectLevel(module.effectLevel));
         }
       }
-      Files.writeString(path, "{\n  \"enabled\": [" + enabled + "],\n  \"unlocked\": [" + unlockedIds + "],\n  \"favorites\": [" + favoritesJson + "],\n  \"keys\": {" + keys + "},\n  \"keyModifiers\": {" + keyModifiers + "},\n  \"levels\": {" + levels + "},\n  \"zoomStrength\": " + clampZoomStrength(zoomStrength) + ",\n  \"zoomSmoothness\": " + clampZoomSmoothness(zoomSmoothness) + ",\n  \"breakSpeed\": " + clampBreakSpeed(breakSpeed) + ",\n  \"flightSpeed\": " + clampFlightSpeed(flightSpeed) + ",\n  \"keyboardSound\": " + keyboardSound + ",\n  \"keyboardVolume\": " + clampKeyboardVolume(keyboardVolume) + ",\n  \"fakeFps\": " + fakeFps + "\n}\n", StandardCharsets.UTF_8);
+      Files.writeString(path, "{\n  \"enabled\": [" + enabled + "],\n  \"unlocked\": [" + unlockedIds + "],\n  \"favorites\": [" + favoritesJson + "],\n  \"keys\": {" + keys + "},\n  \"keyModifiers\": {" + keyModifiers + "},\n  \"levels\": {" + levels + "},\n  \"zoomStrength\": " + clampZoomStrength(zoomStrength) + ",\n  \"zoomSmoothness\": " + clampZoomSmoothness(zoomSmoothness) + ",\n  \"breakSpeed\": " + clampBreakSpeed(breakSpeed) + ",\n  \"flightSpeed\": " + clampFlightSpeed(flightSpeed) + ",\n  \"keyboardSound\": " + keyboardSound + ",\n  \"keyboardVolume\": " + clampKeyboardVolume(keyboardVolume) + ",\n  \"weatherMode\": " + clampWeatherMode(weatherMode) + ",\n  \"timeMode\": " + clampTimeMode(timeMode) + ",\n  \"fakeFps\": " + fakeFps + "\n}\n", StandardCharsets.UTF_8);
     } catch (IOException ignored) {
       // Settings persistence is optional.
     }
@@ -1629,6 +1680,14 @@ final class MenuModules {
 
   private static int clampKeyboardVolume(int percent) {
     return Math.max(MIN_KEYBOARD_VOLUME, Math.min(MAX_KEYBOARD_VOLUME, percent));
+  }
+
+  private static int clampWeatherMode(int value) {
+    return Math.max(0, Math.min(2, value));
+  }
+
+  private static int clampTimeMode(int value) {
+    return Math.max(0, Math.min(3, value));
   }
 
   private static int readInt(String json, Pattern pattern, int fallback) {
@@ -2151,6 +2210,14 @@ final class GameTimer {
     finished = false;
     save();
     showNotice(enabled ? "Timer: Auto täglich an" : "Timer: Auto aus");
+  }
+
+  static synchronized void reset() {
+    load();
+    lastAutoDate = "";
+    resetRun();
+    save();
+    showNotice("Timer reset");
   }
 
   static synchronized String remainingText() {
