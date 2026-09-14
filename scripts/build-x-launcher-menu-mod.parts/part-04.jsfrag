@@ -1,0 +1,4499 @@
+  }
+  protected void init() { int x=(width-W)/2,y=(height-H)/2; addRenderableWidget(Button.builder(Component.literal("SAVE"),b->saveAndClose()).bounds(x+18,y+H-30,W-36,20).build()); }
+  public void extractRenderState(GuiGraphicsExtractor g,int mx,int my,float dt) {
+    super.extractRenderState(g,mx,my,dt); int x=(width-W)/2,y=(height-H)/2;
+    g.fill(x+2,y+2,x+W+2,y+H+2,0x99000000); g.fill(x,y,x+W,y+H,0xF010151C); box(g,x,y,W,H,0xFF5B6875);
+    g.centeredText(font,label,width/2,y+10,0xFFFFFFFF); int preview=(opacity<<24)|rgb();
+    round(g,x+W-38,y+7,20,14,preview); box(g,x+W-38,y+7,20,14,0xFFFFFFFF);
+    slider(g,x,y+32,"R",red,0xFFFF4A4A); slider(g,x,y+32+ROW,"G",green,0xFF43D66F); slider(g,x,y+32+ROW*2,"B",blue,0xFF4A8CFF); slider(g,x,y+32+ROW*3,"A",opacity,0xFFFFFFFF);
+    if(allowRainbow){int ry=y+32+ROW*4; boolean rainbow=XClientColorModes.rainbow(target); round(g,x+18,ry,W-36,20,rainbow?preview:0xFF242B34);
+    box(g,x+18,ry,W-36,20,rainbow?0xFFFFFFFF:0xFF697582); g.centeredText(font,rainbow?"RAINBOW: ON":"RAINBOW: OFF",width/2,ry+6,0xFFFFFFFF);}
+  }
+  public boolean mouseClicked(MouseButtonEvent e,boolean dbl) { int x=(width-W)/2,y=(height-H)/2;
+    for(int row=0;row<4;row++){int ry=y+32+row*ROW;if(inside(e.x(),e.y(),x+18,ry,W-36,20)){dragging=row;update(e.x(),x);return true;}}
+    int ry=y+32+ROW*4;if(allowRainbow&&inside(e.x(),e.y(),x+18,ry,W-36,20)){XClientColorModes.setRainbow(target,!XClientColorModes.rainbow(target));return true;}
+    return super.mouseClicked(e,dbl);
+  }
+  public boolean mouseDragged(MouseButtonEvent e,double dx,double dy){if(dragging>=0){update(e.x(),(width-W)/2);return true;}return super.mouseDragged(e,dx,dy);}
+  public boolean mouseReleased(MouseButtonEvent e){if(dragging>=0){dragging=-1;return true;}return super.mouseReleased(e);}
+  public void onClose(){saveAndClose();}
+  private void saveAndClose(){if(!allowRainbow||!XClientColorModes.rainbow(target))XClientColorModes.setColor(target,rgb());XClientColorModes.setOpacity(target,opacity);minecraft.gui.setScreen(parent);}
+  private void slider(GuiGraphicsExtractor g,int px,int y,String name,int value,int color){int x=px+18,w=W-36;round(g,x,y,w,20,0xFF1C232C);box(g,x,y,w,20,0xFF596572);
+    g.text(font,name,x+8,y+6,0xFFFFFFFF);int tx=x+30,tw=w-70;g.fill(tx,y+9,tx+tw,y+12,0xFF000000);int f=Math.round(value/255f*tw);g.fill(tx,y+9,tx+f,y+12,0xFF000000);g.fill(tx+f-2,y+5,tx+f+3,y+16,color);g.text(font,String.valueOf(value),x+w-31,y+6,0xFFFFFFFF);}
+  private void update(double mx,int px){int tx=px+48,tw=W-106,v=Math.max(0,Math.min(255,(int)Math.round((mx-tx)/tw*255d)));if(dragging==0)red=v;if(dragging==1)green=v;if(dragging==2)blue=v;if(dragging==3){opacity=Math.max(XClientColorModes.MIN_OPACITY,v);XClientColorModes.setOpacity(target,opacity);}else XClientColorModes.setColor(target,rgb());}
+  private int rgb(){return red<<16|green<<8|blue;} private static boolean inside(double mx,double my,int x,int y,int w,int h){return mx>=x&&mx<x+w&&my>=y&&my<y+h;}
+  private static void round(GuiGraphicsExtractor g,int x,int y,int w,int h,int c){g.fill(x+2,y,x+w-2,y+h,c);g.fill(x,y+2,x+w,y+h-2,c);g.fill(x+1,y+1,x+w-1,y+h-1,c);}
+  private static void box(GuiGraphicsExtractor g,int x,int y,int w,int h,int c){g.fill(x,y,x+w,y+1,c);g.fill(x,y+h-1,x+w,y+h,c);g.fill(x,y,x+1,y+h,c);g.fill(x+w-1,y,x+w,y+h,c);}
+}
+`,
+  'dev/xlauncher/client/BlockOutlineSettings.java': String.raw`
+package dev.xlauncher.client;
+
+import java.util.prefs.Preferences;
+
+public final class BlockOutlineSettings {
+  public static final int MIN_THICKNESS = 1;
+  public static final int MAX_THICKNESS = 5;
+  public static final int[] COLORS = {
+      0x66000000, 0xFFFFFFFF, 0xFFFF3B30, 0xFFFFCC00,
+      0xFF34C759, 0xFF00BFFF, 0xFF5856D6, 0xFFFF2D95
+  };
+  private static final Preferences PREFS = Preferences.userNodeForPackage(BlockOutlineSettings.class);
+  private static int color = PREFS.getInt("color", COLORS[0]);
+  private static int thickness = clamp(PREFS.getInt("thickness", MIN_THICKNESS));
+
+  private BlockOutlineSettings() {}
+
+  public static int color() { return XClientColorModes.resolve("blockoutline", color); }
+  public static int thickness() { return thickness; }
+
+  public static void setColor(int value) {
+    color = value;
+    PREFS.putInt("color", color);
+  }
+
+  public static void setThickness(int value) {
+    thickness = clamp(value);
+    PREFS.putInt("thickness", thickness);
+  }
+
+  private static int clamp(int value) {
+    return Math.max(MIN_THICKNESS, Math.min(MAX_THICKNESS, value));
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherBlockOutlineMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import dev.xlauncher.client.BlockOutlineSettings;
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.level.BlockOutlineRenderState;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+@Mixin(LevelRenderer.class)
+public abstract class XLauncherBlockOutlineMixin {
+  @Redirect(
+      method = "submitBlockOutline",
+      at = @At(
+          value = "INVOKE",
+          target = "Lnet/minecraft/client/renderer/LevelRenderer;submitHitOutline(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/rendertype/RenderType;Lnet/minecraft/client/renderer/state/level/BlockOutlineRenderState;IFZ)V",
+          ordinal = 1
+      ),
+      require = 1
+  )
+  private void xclient$customBlockOutline(LevelRenderer renderer, PoseStack pose, SubmitNodeCollector collector,
+      RenderType renderType, BlockOutlineRenderState state, int vanillaColor, float vanillaWidth, boolean translucent) {
+    boolean enabled = XLauncherMenuClient.isModuleEnabled("blockoutline");
+    int color = enabled ? BlockOutlineSettings.color() : vanillaColor;
+    float width = enabled ? vanillaWidth * BlockOutlineSettings.thickness() : vanillaWidth;
+    collector.submitShapeOutline(pose, state.shape(), renderType, color, width, translucent);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherTitleCopyrightMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.PlainTextButton;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.network.chat.Component;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+@Mixin(TitleScreen.class)
+public abstract class XLauncherTitleCopyrightMixin {
+  @Redirect(
+      method = "init",
+      at = @At(
+          value = "NEW",
+          target = "net/minecraft/client/gui/components/PlainTextButton"
+      ),
+      require = 1
+  )
+  private PlainTextButton xclient$hideTitleCopyright(int x, int y, int width, int height,
+      Component message, Button.OnPress onPress, Font font) {
+    // Keep the vanilla title-screen layout intact, but replace only its
+    // bottom-right copyright link with a zero-sized, empty widget.
+    return new PlainTextButton(0, 0, 0, 0, Component.empty(), button -> {}, font);
+  }
+}
+`,
+  'dev/xlauncher/client/XClientJoinErrorScreen.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.util.Locale;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.network.DisconnectionDetails;
+import net.minecraft.network.chat.Component;
+
+public final class XClientJoinErrorScreen extends Screen {
+  private static final Component TITLE = Component.literal("X-Client hat den Fehler behoben");
+  private static final Component DESCRIPTION = Component.literal("Die Verbindung wurde unterbrochen.");
+  private static ServerData lastServer;
+  private final Screen parent;
+  private final ServerData server;
+
+  private XClientJoinErrorScreen(Screen parent, ServerData server) {
+    super(TITLE);
+    this.parent = parent;
+    this.server = server;
+  }
+
+  public static void remember(ServerData server) {
+    if (server != null) lastServer = server;
+  }
+
+  public static Screen create(Screen parent, ServerData server, DisconnectionDetails details) {
+    remember(server);
+    if (details == null || !isHandledReason(details.reason()) || lastServer == null) return null;
+    return new XClientJoinErrorScreen(parent, lastServer);
+  }
+
+  public static Screen createForFailedLogin(Screen parent, ServerData server, DisconnectionDetails details) {
+    // ClientHandshakePacketListenerImpl always labels this callback with
+    // CommonComponents.CONNECT_FAILED ("Failed to connect to the server").
+    // That title is not part of DisconnectionDetails.reason(), so this exact
+    // login callback must be treated as the fourth handled case directly.
+    remember(server);
+    if (details == null || lastServer == null || !isHandledLoginReason(details.reason())) return null;
+    return new XClientJoinErrorScreen(parent, lastServer);
+  }
+
+  public static Screen createFromVanilla(Screen vanilla, ServerData server, DisconnectionDetails details) {
+    Screen parent = vanilla == null ? null : screenField(vanilla, "parent");
+    return create(parent, server, details);
+  }
+
+  @Override
+  protected void init() {
+    int buttonY = Math.min(height - 54, (height / 2) + 42);
+    addRenderableWidget(Button.builder(Component.literal("Reconnect"), button -> reconnect())
+        .bounds((width - 200) / 2, buttonY, 200, 20).build());
+    addRenderableWidget(Button.builder(Component.literal("Cancel"), button -> cancel())
+        .bounds((width - 200) / 2, buttonY + 24, 200, 20).build());
+  }
+
+  @Override
+  public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float tickDelta) {
+    super.extractRenderState(graphics, mouseX, mouseY, tickDelta);
+    int centerY = Math.max(45, (height / 2) - 35);
+    graphics.centeredText(font, TITLE, width / 2, centerY, 0xFFFFFFFF);
+    graphics.centeredText(font, DESCRIPTION, width / 2, centerY + 26, 0xFFAAAAAA);
+  }
+
+  @Override
+  public boolean shouldCloseOnEsc() {
+    return false;
+  }
+
+  private void reconnect() {
+    // This is Minecraft's ordinary connection entry point. It performs the
+    // standard session/authentication handshake; no auth result is suppressed.
+    ServerAddress address = ServerAddress.parseString(server.ip);
+    ConnectScreen.startConnecting(parent == null ? this : parent, minecraft, address, server, false, null);
+  }
+
+  private void cancel() {
+    minecraft.gui.setScreen(parent);
+  }
+
+  private static boolean isHandledReason(Component component) {
+    String reason = component == null ? "" : component.getString().toLowerCase(Locale.ROOT);
+    return reason.contains("failed to log in: invalid session")
+        || reason.contains("ddos mitigation: please reconnect to the server")
+        || reason.contains("internal exception: java.net.socketexception: connection reset")
+        || reason.contains("failed to connect to the server");
+  }
+
+  private static boolean isHandledLoginReason(Component component) {
+    if (isHandledReason(component)) return true;
+    String reason = component == null ? "" : component.getString().toLowerCase(Locale.ROOT);
+    // These are client/network failures behind Minecraft's generic
+    // "Failed to connect to the server" heading. Any other text is kept as
+    // the server supplied it (for example bans, kicks and whitelist reasons).
+    return reason.contains("connection refused")
+        || reason.contains("connection timed out")
+        || reason.contains("timed out")
+        || reason.contains("unknown host")
+        || reason.contains("no route to host")
+        || reason.contains("network is unreachable")
+        || reason.contains("connection reset")
+        || reason.contains("closed channel")
+        || reason.contains("socketexception");
+  }
+
+  private static Screen screenField(Object target, String name) {
+    try {
+      Field field = target.getClass().getDeclaredField(name);
+      field.setAccessible(true);
+      Object value = field.get(target);
+      return value instanceof Screen screen ? screen : null;
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherLoginDisconnectMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XClientJoinErrorScreen;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientHandshakePacketListenerImpl;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.DisconnectionDetails;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(ClientHandshakePacketListenerImpl.class)
+public abstract class XLauncherLoginDisconnectMixin {
+  @Shadow private Minecraft minecraft;
+  @Shadow private ServerData serverData;
+  @Shadow private Screen parent;
+
+  @Inject(method = "onDisconnect", at = @At("HEAD"), cancellable = true, require = 1)
+  private void xclient$replaceLoginDisconnect(DisconnectionDetails details, CallbackInfo callback) {
+    Screen replacement = XClientJoinErrorScreen.createForFailedLogin(parent, serverData, details);
+    if (replacement != null) {
+      minecraft.gui.setScreen(replacement);
+      callback.cancel();
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherPlayDisconnectMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XClientJoinErrorScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.network.DisconnectionDetails;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(ClientCommonPacketListenerImpl.class)
+public abstract class XLauncherPlayDisconnectMixin {
+  @Shadow protected ServerData serverData;
+
+  @Inject(method = "createDisconnectScreen", at = @At("RETURN"), cancellable = true, require = 1)
+  private void xclient$replacePlayDisconnect(DisconnectionDetails details, CallbackInfoReturnable<Screen> callback) {
+    Screen replacement = XClientJoinErrorScreen.createFromVanilla(callback.getReturnValue(), serverData, details);
+    if (replacement != null) callback.setReturnValue(replacement);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherFriendsKeyMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.client.Minecraft;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Minecraft.class)
+public abstract class XLauncherFriendsKeyMixin {
+  @Inject(method = "toggleFriendsScreen", at = @At("HEAD"), cancellable = true, require = 1)
+  private void xclient$disableFriendsScreen(CallbackInfoReturnable<Boolean> callback) {
+    callback.setReturnValue(false);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherAttributeModifierSafetyMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+@Mixin(AttributeInstance.class)
+public abstract class XLauncherAttributeModifierSafetyMixin {
+  @Redirect(
+      method = "calculateValue",
+      at = @At(
+          value = "INVOKE",
+          target = "Lnet/minecraft/world/entity/ai/attributes/AttributeModifier;amount()D"
+      )
+  )
+  private double xlauncher$ignoreInvalidNullModifier(AttributeModifier modifier) {
+    return modifier == null ? 0.0D : modifier.amount();
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherCameraMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(Camera.class)
+public abstract class XLauncherCameraMixin {
+  @Inject(method = "update", at = @At("RETURN"), require = 0)
+  private void xclient$detachedCamera(DeltaTracker deltaTracker, CallbackInfo callback) {
+    XLauncherMenuClient.applyDetachedCamera(this);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherFreecamMouseMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.MouseHandler;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(MouseHandler.class)
+public abstract class XLauncherFreecamMouseMixin {
+  @Inject(method = "handleAccumulatedMovement", at = @At("HEAD"), cancellable = true, require = 0)
+  private void xclient$keepFreecamLookOffPlayer(CallbackInfo callback) {
+    if (XLauncherMenuClient.shouldLockPlayerLookForFreecam()) callback.cancel();
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherWorldDataMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(ClientLevel.class)
+public abstract class XLauncherWorldDataMixin {
+  @Inject(method = "setBlock", at = @At("RETURN"), require = 0)
+  private void xclient$realBlockChanged(BlockPos pos, BlockState state, int flags, int recursionLeft, CallbackInfoReturnable<Boolean> callback) {
+    if (Boolean.TRUE.equals(callback.getReturnValue())) XLauncherMenuClient.onRealWorldDataChanged("block-update", pos.getX() >> 4, pos.getZ() >> 4);
+  }
+
+  @Inject(method = "onChunkLoaded", at = @At("RETURN"), require = 0)
+  private void xclient$realChunkLoaded(ChunkPos pos, CallbackInfo callback) {
+    XLauncherMenuClient.onRealWorldDataChanged("received", pos.x(), pos.z());
+  }
+
+  @Inject(method = "unload", at = @At("HEAD"), require = 0)
+  private void xclient$realChunkUnloaded(LevelChunk chunk, CallbackInfo callback) {
+    XLauncherMenuClient.onRealWorldDataChanged("unloaded", chunk.getPos().x(), chunk.getPos().z());
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherRenderDistanceMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.client.Options;
+import net.minecraft.client.OptionInstance;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Constant;
+import org.spongepowered.asm.mixin.injection.ModifyConstant;
+import org.spongepowered.asm.mixin.injection.Slice;
+
+/** Extends only Minecraft's existing render-distance slider; it never forces a value. */
+@Mixin(Options.class)
+public abstract class XLauncherRenderDistanceMixin {
+  @ModifyConstant(
+      method = "<init>",
+      constant = @Constant(intValue = 32),
+      slice = @Slice(
+          from = @At(value = "CONSTANT", args = "stringValue=options.renderDistance"),
+          to = @At(value = "FIELD", target = "Lnet/minecraft/client/Options;renderDistance:Lnet/minecraft/client/OptionInstance;")),
+      require = 1)
+  private int xclient$renderDistanceMaximum(int vanillaMaximum) {
+    return 43;
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherZoomMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.Camera;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Camera.class)
+public abstract class XLauncherZoomMixin {
+  @Inject(method = "getFov", at = @At("RETURN"), cancellable = true, require = 0)
+  private void xclient$zoomCameraFov(CallbackInfoReturnable<Float> callback) {
+    Float original = callback.getReturnValue();
+    callback.setReturnValue(Float.valueOf((float) XLauncherMenuClient.applyZoomFov(original == null ? 70.0D : original.floatValue())));
+  }
+
+  @Inject(method = "calculateHudFov", at = @At("RETURN"), cancellable = true, require = 0)
+  private void xclient$zoomHudFov(float tickDelta, CallbackInfoReturnable<Float> callback) {
+    Float original = callback.getReturnValue();
+    callback.setReturnValue(Float.valueOf((float) XLauncherMenuClient.applyZoomFov(original == null ? 70.0D : original.floatValue())));
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherZoomScrollMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.MouseHandler;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(MouseHandler.class)
+public abstract class XLauncherZoomScrollMixin {
+  @Inject(method = "onScroll(JDD)V", at = @At("HEAD"), cancellable = true, require = 0)
+  private void xclient$zoomScroll(long window, double horizontal, double vertical, CallbackInfo callback) {
+    if (XLauncherMenuClient.handleZoomScroll(vertical)) {
+      callback.cancel();
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherGammaValidationMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import java.util.Optional;
+import net.minecraft.client.OptionInstance;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(OptionInstance.UnitDouble.class)
+public abstract class XLauncherGammaValidationMixin {
+  @Inject(method = "validateValue(Ljava/lang/Double;)Ljava/util/Optional;", at = @At("HEAD"), cancellable = true, require = 0)
+  private void xclient$allowFullbrightGamma(Double value, CallbackInfoReturnable<Optional<Double>> callback) {
+    if (XLauncherMenuClient.shouldForceFullbright() && value != null) {
+      callback.setReturnValue(Optional.of(value));
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherFullbrightMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.renderer.Lightmap;
+import net.minecraft.client.renderer.state.LightmapRenderState;
+import net.minecraft.world.level.dimension.DimensionType;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Lightmap.class)
+public abstract class XLauncherFullbrightMixin {
+  @Inject(method = "render", at = @At("HEAD"), require = 0)
+  private void xclient$forceLightmapState(LightmapRenderState state, CallbackInfo callback) {
+    if (!XLauncherMenuClient.shouldForceFullbright() || state == null) {
+      return;
+    }
+    state.needsUpdate = true;
+    state.blockFactor = 1.0F;
+    state.skyFactor = 1.0F;
+    state.brightness = 1.0F;
+    state.darknessEffectScale = 0.0F;
+    state.nightVisionEffectIntensity = 1.0F;
+    state.bossOverlayWorldDarkening = 0.0F;
+  }
+
+  @Inject(method = "getBrightness", at = @At("RETURN"), cancellable = true, require = 0)
+  private static void xclient$fullbrightDimension(DimensionType type, int lightLevel, CallbackInfoReturnable<Float> callback) {
+    if (XLauncherMenuClient.shouldForceFullbright()) {
+      callback.setReturnValue(Float.valueOf(1.0F));
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherLightmapStateMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.renderer.LightmapRenderStateExtractor;
+import net.minecraft.client.renderer.state.LightmapRenderState;
+import net.minecraft.world.entity.LivingEntity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(LightmapRenderStateExtractor.class)
+public abstract class XLauncherLightmapStateMixin {
+  @Inject(method = "extract", at = @At("RETURN"), require = 0)
+  private void xclient$forceExtractedLightmap(LightmapRenderState state, float tickDelta, CallbackInfo callback) {
+    if (XLauncherMenuClient.shouldForceFullbright()) {
+      forceFullbright(state);
+    }
+  }
+
+  @Inject(method = "calculateDarknessScale", at = @At("RETURN"), cancellable = true, require = 0)
+  private void xclient$removeDarkness(LivingEntity entity, float tickDelta, float factor, CallbackInfoReturnable<Float> callback) {
+    if (XLauncherMenuClient.shouldForceFullbright()) {
+      callback.setReturnValue(Float.valueOf(0.0F));
+    }
+  }
+
+  private static void forceFullbright(LightmapRenderState state) {
+    if (state == null) {
+      return;
+    }
+    state.needsUpdate = true;
+    state.blockFactor = 1.0F;
+    state.skyFactor = 1.0F;
+    state.brightness = 1.0F;
+    state.darknessEffectScale = 0.0F;
+    state.nightVisionEffectIntensity = 1.0F;
+    state.bossOverlayWorldDarkening = 0.0F;
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherClientNightVisionMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.world.entity.LivingEntity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(GameRenderer.class)
+public abstract class XLauncherClientNightVisionMixin {
+  @Inject(method = "getNightVisionScale", at = @At("HEAD"), cancellable = true, require = 0)
+  private static void xclient$clientNightVision(LivingEntity entity, float tickDelta, CallbackInfoReturnable<Float> callback) {
+    if (XLauncherMenuClient.shouldForceFullbright()) {
+      callback.setReturnValue(Float.valueOf(1.0F));
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherBlockBreakSpeedMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.state.BlockState;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Player.class)
+public abstract class XLauncherBlockBreakSpeedMixin {
+  @Inject(method = "getDestroySpeed", at = @At("RETURN"), cancellable = true, require = 0)
+  private void xclient$blockBreakSpeed(BlockState state, CallbackInfoReturnable<Float> callback) {
+    Float original = callback.getReturnValue();
+    callback.setReturnValue(Float.valueOf(XLauncherMenuClient.applyBlockBreakSpeed(original == null ? 0.0F : original.floatValue())));
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherPlayerSkinMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.LocalSkinOverride;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(targets = "net.minecraft.client.player.AbstractClientPlayer")
+public abstract class XLauncherPlayerSkinMixin {
+  @Inject(method = "getSkin", at = @At("RETURN"), cancellable = true, require = 0)
+  private void xclient$localSkin(CallbackInfoReturnable<Object> callback) {
+    Object skin = LocalSkinOverride.skinFor(this, callback.getReturnValue());
+    if (skin != null) {
+      callback.setReturnValue(skin);
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherCapeLayerDebugMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.entity.layers.CapeLayer;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import com.mojang.blaze3d.vertex.PoseStack;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(CapeLayer.class)
+public abstract class XLauncherCapeLayerDebugMixin {
+  private static String xclient$lastCape = "";
+
+  @Inject(method = "submit(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;ILnet/minecraft/client/renderer/entity/state/AvatarRenderState;FF)V", at = @At("HEAD"), require = 0)
+  private void xclient$traceCustomCape(PoseStack poseStack, SubmitNodeCollector collector, int light,
+      AvatarRenderState state, float yRot, float xRot, CallbackInfo callback) {
+    if (state == null || state.skin == null || state.skin.cape() == null) return;
+    String texture = String.valueOf(state.skin.cape().texturePath());
+    if (!texture.startsWith("x-client:") || texture.equals(xclient$lastCape)) return;
+    xclient$lastCape = texture;
+    System.out.println("[CustomCape] Vanilla CapeLayer render called, texture bound: " + texture);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherWingsLayerMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.LocalSkinOverride;
+import net.minecraft.client.renderer.entity.layers.WingsLayer;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.client.renderer.entity.state.HumanoidRenderState;
+import net.minecraft.resources.Identifier;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(WingsLayer.class)
+public abstract class XLauncherWingsLayerMixin {
+  @Inject(method = "getPlayerElytraTexture", at = @At("HEAD"), cancellable = true, require = 0)
+  private static void xclient$useVanillaElytra(HumanoidRenderState state,
+      CallbackInfoReturnable<Identifier> callback) {
+    if (state instanceof AvatarRenderState avatar
+        && LocalSkinOverride.shouldForceVanillaElytra(avatar.skin)) {
+      callback.setReturnValue(null);
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherTimerScreenMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.ServerModulePolicy;
+import dev.xlauncher.client.HudOverlay;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(Screen.class)
+public abstract class XLauncherTimerScreenMixin {
+  @Inject(method = "extractRenderState", at = @At("TAIL"), require = 0)
+  private void xclient$timerPauseOverlay(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float tickDelta, CallbackInfo callback) {
+    if ((Object) this instanceof PauseScreen) {
+      return;
+    }
+    HudOverlay.drawTimerStatus(graphics);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherMinecraftTickMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.Minecraft;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(Minecraft.class)
+public abstract class XLauncherMinecraftTickMixin {
+  @Inject(method = "tick", at = @At("TAIL"), require = 1)
+  private void xclient$clientTick(CallbackInfo callback) {
+    XLauncherMenuClient.clientTick((Minecraft) (Object) this);
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherOwnNameMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.entity.LivingEntityRenderer;
+import net.minecraft.world.entity.LivingEntity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(LivingEntityRenderer.class)
+public abstract class XLauncherOwnNameMixin {
+  @Inject(
+      method = "shouldShowName(Lnet/minecraft/world/entity/LivingEntity;D)Z",
+      at = @At("RETURN"),
+      cancellable = true,
+      require = 1
+  )
+  private void xclient$showOwnThirdPersonName(
+      LivingEntity entity,
+      double distanceToCameraSq,
+      CallbackInfoReturnable<Boolean> callback
+  ) {
+    // Never add a second label when vanilla (for example with a detached camera)
+    // already decided to render this entity's name.
+    if (Boolean.TRUE.equals(callback.getReturnValue())) {
+      return;
+    }
+
+    Minecraft client = Minecraft.getInstance();
+    if (client.player == null
+        || entity != client.player
+        || client.options.getCameraType().isFirstPerson()) {
+      return;
+    }
+
+    // Mirror the vanilla local-player branch of LivingEntityRenderer. The one
+    // condition intentionally omitted here is entity == client.getCameraEntity(),
+    // which is precisely what hides the local name in third person.
+    boolean withinSneakingRange = !entity.isDiscrete() || distanceToCameraSq < 1024.0D;
+    boolean vanillaVisibility = !client.gui.hud.isHidden()
+        && !entity.isInvisibleTo(client.player)
+        && !entity.isVehicle();
+    if (withinSneakingRange && vanillaVisibility) {
+      callback.setReturnValue(true);
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherOwnNamePrefixMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.LauncherTheme;
+import dev.xlauncher.client.NameTagSettings;
+import dev.xlauncher.client.SocialManager;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(EntityRenderer.class)
+public abstract class XLauncherOwnNamePrefixMixin {
+  @Inject(
+      method = "getNameTag(Lnet/minecraft/world/entity/Entity;)Lnet/minecraft/network/chat/Component;",
+      at = @At("RETURN"),
+      cancellable = true,
+      require = 1
+  )
+  private void xclient$prefixOwnName(
+      Entity entity,
+      CallbackInfoReturnable<Component> callback
+  ) {
+    Minecraft client = Minecraft.getInstance();
+    Component original = callback.getReturnValue();
+    if (client.player == null || original == null || !SocialManager.isXClient(entity.getUUID())) {
+      return;
+    }
+
+    boolean local = entity == client.player;
+    int xColor = local ? NameTagSettings.color() : SocialManager.nameColor(entity.getUUID());
+    callback.setReturnValue(Component.literal("X")
+        .withColor(xColor)
+        .append(Component.literal(" "))
+        .append(original.copy()));
+  }
+}
+`,
+  'dev/xlauncher/client/KeyboardSoundPlayer.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.resources.Identifier;
+import net.minecraft.sounds.SoundEvent;
+
+final class KeyboardSoundPlayer {
+  private static final SoundEvent[] SOUNDS = new SoundEvent[12];
+  private static long lastPlayNanos;
+
+  static {
+    for (int index = 0; index < SOUNDS.length; index += 1) {
+      SOUNDS[index] = SoundEvent.createVariableRangeEvent(
+          Identifier.fromNamespaceAndPath("x-client", "keyboard." + (index + 1)));
+    }
+  }
+
+  private KeyboardSoundPlayer() {}
+
+  static void onKeyPressed() {
+    if (!MenuModules.enabled("keysounds")) return;
+    playSelected();
+  }
+
+  static void preview() {
+    playSelected();
+  }
+
+  private static void playSelected() {
+    long now = System.nanoTime();
+    if (now - lastPlayNanos < 12_000_000L) return;
+    lastPlayNanos = now;
+    Minecraft client = Minecraft.getInstance();
+    if (client == null || client.getSoundManager() == null) return;
+    int selected = Math.max(1, Math.min(SOUNDS.length, MenuModules.keyboardSound()));
+    float voiceVolume = Math.max(0.0F, Math.min(1.0F, MenuModules.keyboardVolumePercent() / 50.0F));
+    if (voiceVolume <= 0.0F) return;
+    float pitch = 0.96F + (float) Math.random() * 0.08F;
+    client.getSoundManager().play(SimpleSoundInstance.forUI(SOUNDS[selected - 1], pitch, voiceVolume));
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherKeyboardMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.KeyboardHandler;
+import net.minecraft.client.input.KeyEvent;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(KeyboardHandler.class)
+public abstract class XLauncherKeyboardMixin {
+  @Inject(method = "keyPress(JILnet/minecraft/client/input/KeyEvent;)V", at = @At("HEAD"), cancellable = true, require = 1)
+  private void xclient$menuKey(long window, int action, KeyEvent event, CallbackInfo callback) {
+    if (XLauncherMenuClient.handleMenuKeyPress(event, action)) {
+      callback.cancel();
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherPauseScreenMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.XLauncherMenuClient;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(PauseScreen.class)
+public abstract class XLauncherPauseScreenMixin extends Screen {
+  @Shadow
+  private Button disconnectButton;
+
+  protected XLauncherPauseScreenMixin(Component title) {
+    super(title);
+  }
+
+  @Inject(method = "init", at = @At("TAIL"), require = 0)
+  private void xclient$addPauseMenuButton(CallbackInfo callback) {
+    if (!((PauseScreen) (Object) this).showsPauseMenu()) {
+      return;
+    }
+    int buttonW = 20;
+    int buttonH = 20;
+    java.util.List<AbstractWidget> compactButtons = new java.util.ArrayList<>();
+    int rowY = -1;
+    for (var child : children()) {
+      if (child instanceof AbstractWidget widget && widget.getWidth() == 20 && widget.getHeight() == 20) {
+        compactButtons.add(widget);
+        if (rowY < 0) rowY = widget.getY();
+      }
+    }
+    compactButtons.sort(java.util.Comparator.comparingInt(AbstractWidget::getX));
+    int spacing = 4;
+    int count = compactButtons.size() + 1;
+    int totalW = (count * buttonW) + ((count - 1) * spacing);
+    int x = (width - totalW) / 2;
+    int y = rowY < 0 ? Math.min(height - buttonH - 6, (height / 2) + 76) : rowY;
+    for (int index = 0; index < compactButtons.size(); index += 1) {
+      compactButtons.get(index).setPosition(x + ((index + 1) * (buttonW + spacing)), y);
+    }
+    addRenderableWidget(Button.builder(Component.empty(), button -> XLauncherMenuClient.openMenuFromPause())
+        .bounds(x, y, buttonW, buttonH)
+        .build());
+    final int iconX = x + 6;
+    final int iconY = y + 5;
+    addRenderableOnly((graphics, mouseX, mouseY, delta) -> {
+      int[] rows = { 0b1000001, 0b1000001, 0b0100010, 0b0010100, 0b0001000, 0b0010100, 0b0100010, 0b1000001, 0b1000001 };
+      for (int row = 0; row < rows.length; row += 1) {
+        for (int column = 0; column < 7; column += 1) {
+          if ((rows[row] & (1 << (6 - column))) == 0) continue;
+          int px = iconX + column, py = iconY + row;
+          graphics.fill(px + 1, py + 1, px + 3, py + 3, 0xC0000000);
+          int shade = row >= 6 ? 0xFFB8BEC4 : ((row + column) % 3 == 0 ? 0xFFD9DEE2 : 0xFFFFFFFF);
+          graphics.fill(px, py, px + 2, py + 2, shade);
+        }
+      }
+    });
+  }
+}
+`,
+  'dev/xlauncher/client/NativeHitboxController.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.debug.DebugScreenEntries;
+import net.minecraft.client.gui.components.debug.DebugScreenEntryStatus;
+
+/** Bridges the module to the exact vanilla renderer used by Minecraft's F3+B shortcut. */
+final class NativeHitboxController {
+  private NativeHitboxController() {
+  }
+
+  static void setEnabled(boolean enabled) {
+    Minecraft client = Minecraft.getInstance();
+    if (client == null || client.debugEntries == null) {
+      return;
+    }
+    client.debugEntries.setStatus(
+        DebugScreenEntries.ENTITY_HITBOXES,
+        enabled ? DebugScreenEntryStatus.ALWAYS_ON : DebugScreenEntryStatus.NEVER);
+  }
+}
+`,
+  'dev/xlauncher/client/XLauncherMenuClient.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.File;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Arrays;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+
+public final class XLauncherMenuClient implements ClientModInitializer {
+  private static final String MENU_KEY_ID = "key.xclient.menu";
+  private static final String MODULE_KEY_PREFIX = "key.xclient.";
+  private static final String ZOOM_KEY_ID = "key.xclient.zoom";
+  private static final KeyMapping.Category X_CLIENT_KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("x-client", "keybinds"));
+  private static final int RIGHT_SHIFT = 344;
+  private static final int MOD_SHIFT = 1;
+  private static final int MOD_CONTROL = 2;
+  private static final int MOD_ALT = 4;
+  private static final int MOD_SUPER = 8;
+  private static KeyMapping menuKey;
+  private static KeyMapping zoomKey;
+  private static KeyMapping[] moduleKeys = new KeyMapping[0];
+  private static int[] moduleKeyCodeSnapshots = new int[0];
+  private static boolean[] moduleKeyRegistered = new boolean[0];
+  private static volatile boolean keyRegistered;
+  private static volatile boolean zoomKeyRegistered;
+  private static volatile int zoomKeyCodeSnapshot = Integer.MIN_VALUE;
+  private static volatile Object originalInfiniteZoomKey;
+  private static volatile boolean originalInfiniteZoomKeyCaptured;
+  private static volatile boolean helperRegistered;
+  private static volatile boolean helperAttempted;
+  private static volatile boolean fallbackFailureLogged;
+  private static boolean watcherMenuWasDown;
+  private static volatile long menuKeyConsumedUntilMs;
+  private static Object activeSessionLevel;
+  private static Object activeSessionPlayer;
+  private static String lastTickFailure = "";
+  private static long lastTickFailureMs;
+  private static boolean clientTickStarted;
+  private static final long[] LEFT_CLICK_TIMES = new long[32];
+  private static final long[] RIGHT_CLICK_TIMES = new long[32];
+  private static int leftClickSlot;
+  private static int rightClickSlot;
+  private static volatile boolean leftMouseDown;
+  private static volatile boolean rightMouseDown;
+  private static Number previousGamma;
+  private static Number previousDarknessScale;
+  private static boolean fullbrightAddedNightVision;
+  private static Number previousFov;
+  private static final double FULLBRIGHT_GAMMA = 1.0D;
+  private static final int NIGHT_VISION_DURATION_TICKS = -1;
+  private static final int NIGHT_VISION_REFRESH_THRESHOLD_TICKS = 6000;
+  private static final int NIGHT_VISION_EFFECT_AMPLIFIER = 255;
+  private static final int SPEED_EFFECT_DURATION_TICKS = -1;
+  private static final int SPEED_EFFECT_REFRESH_THRESHOLD_TICKS = 6000;
+  private static final int SPEED_EFFECT_AMPLIFIER = 255;
+  private static final int RESISTANCE_EFFECT_DURATION_TICKS = -1;
+  private static final int RESISTANCE_EFFECT_REFRESH_THRESHOLD_TICKS = 6000;
+  private static final int RESISTANCE_EFFECT_AMPLIFIER = 255;
+  private static final int INVISIBILITY_EFFECT_DURATION_TICKS = -1;
+  private static final int INVISIBILITY_EFFECT_REFRESH_THRESHOLD_TICKS = 6000;
+  private static final int INVISIBILITY_EFFECT_AMPLIFIER = 255;
+  private static volatile boolean fullbrightApplied;
+  private static volatile boolean speedApplied;
+  private static volatile boolean resistanceApplied;
+  private static volatile boolean invisibilityApplied;
+  private static volatile int lastSpeedCommandAmplifier = -1;
+  private static volatile int lastResistanceCommandAmplifier = -1;
+  private static volatile int lastInvisibilityCommandAmplifier = -1;
+  private static volatile long lastFullbrightLightmapMs;
+  private static volatile boolean wasInWorld;
+  private static Boolean previousSmoothCamera;
+  private static Boolean previousBobView;
+  private static Double previousMouseSensitivity;
+  private static final int ZOOM_SCROLL_STEP_PERCENT = 25;
+  private static final int MAX_ZOOM_SCROLL_STEPS = 12;
+  private static volatile double zoomFactor = 3.0D;
+  private static volatile double currentZoomFactor = 1.0D;
+  private static volatile double lastBaseFov = 70.0D;
+  private static volatile boolean zoomApplied;
+  private static volatile boolean zoomKeyHeld;
+  private static volatile boolean zoomJustActivated;
+  private static long scrollCallbackHandle;
+  private static Object previousScrollCallback;
+  private static Object scrollCallbackProxy;
+  private static volatile boolean freecamApplied;
+  private static volatile double freecamX;
+  private static volatile double freecamY;
+  private static volatile double freecamZ;
+  private static volatile float freecamYaw;
+  private static volatile float freecamPitch;
+  private static volatile double freecamPlayerX;
+  private static volatile double freecamPlayerY;
+  private static volatile double freecamPlayerZ;
+  private static volatile float freecamPlayerYaw;
+  private static volatile float freecamPlayerPitch;
+  private static volatile float freecamPlayerHeadYaw;
+  private static volatile float freecamPlayerBodyYaw;
+  private static volatile double freecamSpeed = 1.15D;
+  private static volatile long lastFreecamMoveMs;
+  private static volatile boolean freecamMouseReady;
+  private static volatile double lastFreecamMouseX;
+  private static volatile double lastFreecamMouseY;
+  private static volatile Boolean freecamChunkAvailable;
+  private static Object previousSodiumChunkDeferMode;
+  private static final long SMART_SCREENSHOT_CAPTURE_DELAY_MS = 45L;
+  private static volatile boolean smartScreenshotRunning;
+
+  @Override
+  public void onInitializeClient() {
+    MenuModules.modules();
+    AdminFlightModule.register();
+    NativeHitboxController.setEnabled(moduleEnabled("hitboxes"));
+    menuKey = new KeyMapping(MENU_KEY_ID, RIGHT_SHIFT, X_CLIENT_KEY_CATEGORY);
+    syncModuleKeyMappings(null);
+    syncZoomKeyMapping(null);
+    tryFabricKeyBindingHelper();
+    // Clear movement mappings before LocalPlayer consumes them. Freecam itself
+    // reads GLFW directly, so its camera controls remain responsive.
+    ClientTickEvents.START_CLIENT_TICK.register(XLauncherMenuClient::freezeFreecamPlayerBeforeTick);
+    ClientTickEvents.END_CLIENT_TICK.register(XLauncherMenuClient::clientTick);
+    log("26.2 client tick event registered.");
+    HudOverlay.register();
+    EspRenderPipeline26.register();
+    TargetFrameRenderer.register();
+    SocialManager.start();
+    applyLauncherLocalSkin();
+  }
+
+  private static void applyLauncherLocalSkin() {
+    String skinPath = System.getProperty("xlauncher.skin.path", "").trim();
+    if (skinPath.isEmpty()) {
+      return;
+    }
+    try {
+      Path path = Path.of(skinPath);
+      if (!Files.isRegularFile(path)) {
+        log("Local skin file not found: " + skinPath);
+        return;
+      }
+      String id = System.getProperty("xlauncher.skin.id", "active");
+      String name = System.getProperty("xlauncher.skin.name", "Skin");
+      String model = System.getProperty("xlauncher.skin.model", "classic");
+      byte[] skinBytes = Files.readAllBytes(path);
+      Object client = minecraftClientReflective();
+      if (LocalSkinOverride.apply(client, id, name, skinBytes, model)) {
+        log("Local launcher skin applied: " + name);
+      } else {
+        log("Local launcher skin could not be applied.");
+      }
+    } catch (Throwable error) {
+      log("Local launcher skin failed: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+    }
+  }
+
+  private static Object minecraftClientReflective() {
+    for (String className : new String[] { "net.minecraft.client.Minecraft", "net.minecraft.class_310" }) {
+      try {
+        Class<?> clientClass = Class.forName(className);
+        for (String methodName : new String[] { "getInstance", "method_1551" }) {
+          try {
+            Method method = clientClass.getMethod(methodName);
+            if (java.lang.reflect.Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 0) {
+              return method.invoke(null);
+            }
+          } catch (Throwable ignored) {
+            // Try the next accessor.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next client class name.
+      }
+    }
+    return null;
+  }
+
+  static void toggleModule(int index) {
+    MenuModules.Module module = MenuModules.toggle(index);
+    if (module != null) {
+      applyModule(module);
+    }
+  }
+
+  static void setModuleEnabled(int index, boolean enabled) {
+    MenuModules.Module module = MenuModules.setEnabled(index, enabled);
+    if (module != null) {
+      applyModule(module);
+    }
+  }
+
+  static void refreshModule(int index) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    if (index >= 0 && index < modules.length) {
+      applyModule(modules[index]);
+    }
+  }
+
+  static void setModuleKey(int index, int keyCode) {
+    setModuleKey(index, keyCode, 0);
+  }
+
+  static void setModuleKey(int index, int keyCode, int keyModifiers) {
+    MenuModules.Module module = MenuModules.setKeyCombo(index, keyCode, keyModifiers);
+    resetModuleKeyMapping(index);
+    if (module != null && "zoom".equals(module.id)) {
+      try {
+        Minecraft client = Minecraft.getInstance();
+        if (client != null && client.options != null) {
+          restoreZoomSensitivity(client.options);
+        }
+      } catch (Throwable ignored) {
+        // The next client tick will finish cleanup if Minecraft is not ready.
+      }
+      zoomKeyHeld = false;
+      zoomApplied = false;
+      currentZoomFactor = 1.0D;
+      zoomKey = null;
+      zoomKeyCodeSnapshot = Integer.MIN_VALUE;
+      zoomKeyRegistered = false;
+      try {
+        syncInfiniteZoomKeyMapping(Minecraft.getInstance());
+      } catch (Throwable ignored) {
+        // The next client tick will update the Infinite Zoom bridge.
+      }
+    }
+  }
+
+  static int getLeftCps() {
+    return countRecentClicks(LEFT_CLICK_TIMES);
+  }
+
+  static int getRightCps() {
+    return countRecentClicks(RIGHT_CLICK_TIMES);
+  }
+
+  static boolean isLeftMouseDown() {
+    return leftMouseDown;
+  }
+
+  static boolean isRightMouseDown() {
+    return rightMouseDown;
+  }
+
+  private static int countRecentClicks(long[] clickTimes) {
+    long cutoff = System.currentTimeMillis() - 1000L;
+    int count = 0;
+    for (long clickTime : clickTimes) {
+      if (clickTime >= cutoff) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  static boolean isKeyDown(Object client, int keyCode) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int state = ((Number) glfw.getMethod("glfwGetKey", long.class, int.class).invoke(null, handle, keyCode)).intValue();
+      return state == press;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  static boolean isKeyComboDown(Object client, int keyCode, int keyModifiers) {
+    if (keyCode <= 0 || !isKeyDown(client, keyCode)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_SHIFT) != 0 && !isAnyKeyDown(client, 340, 344)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_CONTROL) != 0 && !isAnyKeyDown(client, 341, 345)) {
+      return false;
+    }
+    if ((keyModifiers & MOD_ALT) != 0 && !isAnyKeyDown(client, 342, 346)) {
+      return false;
+    }
+    return (keyModifiers & MOD_SUPER) == 0 || isAnyKeyDown(client, 343, 347);
+  }
+
+  public static void setVirtualInput(Object client, int code, boolean mouseButton, boolean down) {
+    if (client == null || code < 0) {
+      return;
+    }
+    Object options = getAnyField(client, "options", "field_1690");
+    Object mappings = getAnyField(options, "keyMappings", "field_1839");
+    if (mappings == null || !mappings.getClass().isArray()) {
+      return;
+    }
+    int length = java.lang.reflect.Array.getLength(mappings);
+    for (int index = 0; index < length; index += 1) {
+      Object mapping = java.lang.reflect.Array.get(mappings, index);
+      if (mapping == null || !mappingMatches(mapping, code, mouseButton)) {
+        continue;
+      }
+      setMappingDown(mapping, down);
+    }
+  }
+
+  private static boolean mappingMatches(Object mapping, int code, boolean mouseButton) {
+    Object key = getAnyField(mapping, "key", "boundKey", "field_1655");
+    int value = readIntFromObject(key, Integer.MIN_VALUE, "getValue", "method_1444");
+    if (value == Integer.MIN_VALUE) {
+      value = readIntFromObject(mapping, Integer.MIN_VALUE, "getKey", "getDefaultKey");
+    }
+    if (mouseButton) {
+      return value == code || value == -100 - code;
+    }
+    return value == code;
+  }
+
+  private static int readIntFromObject(Object target, int fallback, String... methods) {
+    if (target instanceof Number number) {
+      return number.intValue();
+    }
+    if (target == null) {
+      return fallback;
+    }
+    for (String methodName : methods) {
+      try {
+        Object value = target.getClass().getMethod(methodName).invoke(target);
+        if (value instanceof Number number) {
+          return number.intValue();
+        }
+      } catch (Throwable ignored) {
+      }
+    }
+    return fallback;
+  }
+
+  private static void setMappingDown(Object mapping, boolean down) {
+    for (String methodName : new String[] { "setDown", "method_23481" }) {
+      try {
+        Method method = mapping.getClass().getMethod(methodName, Boolean.TYPE);
+        method.invoke(mapping, Boolean.valueOf(down));
+        return;
+      } catch (Throwable ignored) {
+      }
+    }
+    for (String fieldName : new String[] { "isDown", "pressed", "field_1653" }) {
+      try {
+        Field field = mapping.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        if (field.getType() == Boolean.TYPE) {
+          field.setBoolean(mapping, down);
+          return;
+        }
+      } catch (Throwable ignored) {
+      }
+    }
+  }
+
+  private static boolean isAnyKeyDown(Object client, int leftKeyCode, int rightKeyCode) {
+    return isKeyDown(client, leftKeyCode) || isKeyDown(client, rightKeyCode);
+  }
+
+  public static void clientTick(Minecraft client) {
+    if (client == null) {
+      return;
+    }
+    if (!clientTickStarted) {
+      clientTickStarted = true;
+      log("26.2 client tick active.");
+    }
+    runClientStage("session", client, 0);
+    runClientStage("server-policy", client, 1);
+    runClientStage("key-registration", client, 2);
+    runClientStage("menu-key", client, 3);
+    if (!isXClientMenuOpen(client)) {
+      runClientStage("module-keys", client, 4);
+    }
+    runClientStage("clicks", client, 5);
+    runClientStage("zoom", client, 6);
+    runClientStage("fullbright", client, 7);
+    runClientStage("modules", client, 8);
+    runClientStage("timer", client, 9);
+    runClientStage("admin-flight", client, 10);
+  }
+
+  private static void updateMenuKey(Minecraft client) {
+    if (menuKey == null) {
+      return;
+    }
+    int keyCode = keyCodeFromMapping(menuKey);
+    boolean down = menuKey.isDown() || (keyCode > 0 && isKeyDown(client, keyCode));
+    boolean pressed = menuKey.consumeClick() || (down && !watcherMenuWasDown);
+    watcherMenuWasDown = down;
+    if (pressed && System.currentTimeMillis() >= menuKeyConsumedUntilMs) {
+      releaseConflictingMenuKeyMappings(client);
+      toggleMenu(client);
+    }
+  }
+
+  private static void updateSessionState(Minecraft client) {
+    Object level = client.level;
+    Object player = client.player;
+    boolean inWorld = level != null && player != null;
+    if (level == activeSessionLevel && player == activeSessionPlayer && inWorld == wasInWorld) {
+      return;
+    }
+    activeSessionLevel = level;
+    activeSessionPlayer = player;
+    wasInWorld = inWorld;
+    watcherMenuWasDown = false;
+    menuKeyConsumedUntilMs = 0L;
+    setMappingDown(menuKey, false);
+    if (menuKey != null) {
+      while (menuKey.consumeClick()) {
+        // Remove clicks belonging to the previous world/session.
+      }
+    }
+    for (MenuModules.Module module : MenuModules.modules()) {
+      module.keyDown = false;
+    }
+    zoomKeyHeld = false;
+    zoomJustActivated = false;
+    freecamApplied = false;
+    freecamMouseReady = false;
+    freecamChunkAvailable = null;
+    updateFreecamChunkRendering(false);
+    lastFreecamMoveMs = 0L;
+    leftMouseDown = false;
+    rightMouseDown = false;
+    speedApplied = false;
+    resistanceApplied = false;
+    invisibilityApplied = false;
+    lastSpeedCommandAmplifier = -1;
+    lastResistanceCommandAmplifier = -1;
+    lastInvisibilityCommandAmplifier = -1;
+    fullbrightAddedNightVision = false;
+    lastFullbrightLightmapMs = 0L;
+    MobCameraTracker.clear();
+    LocalSkinOverride.clearRemoteCosmetics();
+    EspRenderPipeline26.resetWorldState();
+    NativeHitboxController.setEnabled(inWorld && moduleEnabled("hitboxes"));
+    log(inWorld ? "World session initialized." : "World session cleared.");
+  }
+
+  private static void runClientStage(String stage, Minecraft client, int operation) {
+    try {
+      switch (operation) {
+        case 0 -> updateSessionState(client);
+        case 1 -> ServerModulePolicy.tick(client);
+        case 2 -> ensureKeyRegistered(client);
+        case 3 -> updateMenuKey(client);
+        case 4 -> pollModuleKeys(client);
+        case 5 -> updateClicks(client);
+        case 6 -> updateZoom(client);
+        case 7 -> updateFullbright(client);
+        case 8 -> updateMovementTweaks(client);
+        case 9 -> GameTimer.tick(client);
+        case 10 -> AdminFlightModule.tick(client);
+        default -> { }
+      }
+    } catch (Throwable error) {
+      long now = System.currentTimeMillis();
+      String signature = stage + ":" + error.getClass().getName() + ":" + String.valueOf(error.getMessage());
+      if (!signature.equals(lastTickFailure) || now - lastTickFailureMs >= 10000L) {
+        lastTickFailure = signature;
+        lastTickFailureMs = now;
+        log("Client tick recovered in " + stage + " from " + error.getClass().getSimpleName() + ": " + error.getMessage());
+      }
+    }
+  }
+
+  private static void toggleMenu(Minecraft client) {
+    if (isXClientMenuOpen(client)) {
+      setMenuScreenSafely(client, null);
+      return;
+    }
+    Object current = currentScreen(client);
+    if (shouldBlockFriendsScreen(current)) {
+      setMenuScreenSafely(client, null);
+    }
+    setMenuScreenSafely(client, new XLauncherMenuScreen());
+  }
+
+  public static boolean handleMenuKeyPress(KeyEvent event, int action) {
+    Minecraft client = Minecraft.getInstance();
+    if (event != null && action == 1) KeyboardSoundPlayer.onKeyPressed();
+    if (event == null || event.key() == 256) {
+      return false;
+    }
+    boolean matches = menuKey == null ? event.key() == RIGHT_SHIFT : menuKey.matches(event);
+    if (!matches || action != 1) {
+      return false;
+    }
+    if (client == null) {
+      return false;
+    }
+    menuKeyConsumedUntilMs = System.currentTimeMillis() + 250L;
+    setMappingDown(menuKey, false);
+    releaseConflictingMenuKeyMappings(client);
+    toggleMenu(client);
+    return true;
+  }
+
+  public static void openMenuFromPause() {
+    Minecraft client = Minecraft.getInstance();
+    if (client != null) {
+      setMenuScreenSafely(client, new XLauncherMenuScreen());
+    }
+  }
+
+  public static boolean closeMenuScreen(XLauncherMenuScreen screen) {
+    Minecraft client = Minecraft.getInstance();
+    if (client == null) {
+      return false;
+    }
+    Object current = currentScreen(client);
+    if (current != null && current != screen) {
+      return false;
+    }
+    setMenuScreenSafely(client, null);
+    return true;
+  }
+
+  private static void setMenuScreenSafely(Minecraft client, net.minecraft.client.gui.screens.Screen screen) {
+    try {
+      if (client != null) {
+        client.setScreenAndShow(screen);
+      }
+    } catch (Throwable error) {
+      System.out.println("[X Client] Menu screen failed to open: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+    }
+  }
+
+  private static boolean isXClientMenuOpen(Object client) {
+    return currentScreen(client) instanceof XLauncherMenuScreen;
+  }
+
+  private static Object currentScreen(Object client) {
+    if (!(client instanceof Minecraft minecraft) || minecraft.gui == null) {
+      return null;
+    }
+    return minecraft.gui.screen();
+  }
+
+  public static boolean shouldBlockFriendsScreen(Object screen) {
+    if (screen == null) {
+      return false;
+    }
+    String name = screen.getClass().getName();
+    return name.startsWith("net.minecraft.client.gui.screens.friends.")
+        || name.contains("FriendsOverlayScreen")
+        || name.endsWith(".SocialInteractionsScreen");
+  }
+  static void playMenuClickSound() {
+    try {
+      Minecraft client = Minecraft.getInstance();
+      if (client != null) {
+        AbstractWidget.playButtonClickSound(client.getSoundManager());
+        AbstractWidget.playButtonClickSound(client.getSoundManager());
+        AbstractWidget.playButtonClickSound(client.getSoundManager());
+        AbstractWidget.playButtonClickSound(client.getSoundManager());
+      }
+    } catch (Throwable ignored) {
+      // Missing sound APIs should not block menu interaction.
+    }
+  }
+
+  private static int currentZoomKeyCode() {
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if ("zoom".equals(module.id)) {
+        return module.keyCode > 0 ? module.keyCode : -1;
+      }
+    }
+    return -1;
+  }
+
+  private static void syncZoomKeyMapping(Minecraft client) {
+    syncModuleKeyMappings(client);
+    int zoomIndex = moduleIndex("zoom");
+    zoomKey = zoomIndex >= 0 && zoomIndex < moduleKeys.length ? moduleKeys[zoomIndex] : null;
+    zoomKeyRegistered = zoomKey == null || (zoomIndex >= 0 && zoomIndex < moduleKeyRegistered.length && moduleKeyRegistered[zoomIndex]);
+  }
+
+  private static void syncModuleKeyMappings(Minecraft client) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    ensureModuleKeyArrays(modules.length);
+    for (int index = 0; index < modules.length; index += 1) {
+      MenuModules.Module module = modules[index];
+      if (!module.keyBindable) {
+        moduleKeys[index] = null;
+        moduleKeyRegistered[index] = true;
+        moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+        continue;
+      }
+      int keyCode = module.keyCode > 0 ? module.keyCode : -1;
+      String keyId = moduleKeyId(module);
+      if (moduleKeys[index] != null && moduleKeyCodeSnapshots[index] == keyCode && isNamedKey(moduleKeys[index], keyId)) {
+        continue;
+      }
+      moduleKeys[index] = "zoom".equals(module.id) ? new BridgedZoomKeyMapping(index, keyCode) : new ModuleKeyMapping(index, keyCode);
+      moduleKeyCodeSnapshots[index] = keyCode;
+      moduleKeyRegistered[index] = false;
+      if ("zoom".equals(module.id)) {
+        zoomKey = moduleKeys[index];
+        zoomKeyCodeSnapshot = keyCode;
+        zoomKeyRegistered = false;
+      }
+    }
+  }
+
+  private static void ensureModuleKeyArrays(int length) {
+    if (moduleKeys.length == length && moduleKeyCodeSnapshots.length == length && moduleKeyRegistered.length == length) {
+      return;
+    }
+    moduleKeys = Arrays.copyOf(moduleKeys, length);
+    int oldLength = moduleKeyCodeSnapshots.length;
+    moduleKeyCodeSnapshots = Arrays.copyOf(moduleKeyCodeSnapshots, length);
+    moduleKeyRegistered = Arrays.copyOf(moduleKeyRegistered, length);
+    for (int index = oldLength; index < length; index += 1) {
+      moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+      moduleKeyRegistered[index] = false;
+    }
+  }
+
+  private static void resetModuleKeyMapping(int index) {
+    ensureModuleKeyArrays(MenuModules.modules().length);
+    if (index < 0 || index >= moduleKeys.length) {
+      return;
+    }
+    moduleKeyCodeSnapshots[index] = Integer.MIN_VALUE;
+    moduleKeyRegistered[index] = false;
+    if ("zoom".equals(MenuModules.modules()[index].id)) {
+      zoomKey = null;
+      zoomKeyCodeSnapshot = Integer.MIN_VALUE;
+      zoomKeyRegistered = false;
+    }
+  }
+
+  private static String moduleKeyId(MenuModules.Module module) {
+    return MODULE_KEY_PREFIX + module.id;
+  }
+
+  private static int moduleIndex(String id) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      if (modules[index].id.equals(id)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private static void syncInfiniteZoomKeyMapping(Minecraft client) {
+    try {
+      Class<?> infiniteZoomClient = Class.forName("de.n8M4.infinitezoom.client.InfinitezoomClient");
+      Field keyField = infiniteZoomClient.getField("KEY_TOGGLE_ZOOM");
+      Object currentKey = keyField.get(null);
+      if (!originalInfiniteZoomKeyCaptured) {
+        originalInfiniteZoomKey = currentKey;
+        originalInfiniteZoomKeyCaptured = true;
+      }
+      MenuModules.Module module = zoomModule();
+      if (module == null || module.keyCode <= 0) {
+        if (originalInfiniteZoomKey != null && keyField.getType().isInstance(originalInfiniteZoomKey)
+            && currentKey != originalInfiniteZoomKey) {
+          keyField.set(null, originalInfiniteZoomKey);
+        }
+        return;
+      }
+      syncZoomKeyMapping(client);
+      if (zoomKey != null && keyField.getType().isInstance(zoomKey) && currentKey != zoomKey) {
+        keyField.set(null, zoomKey);
+      }
+    } catch (Throwable ignored) {
+      // Infinite Zoom is optional at runtime; the launcher installs it for normal X Client profiles.
+    }
+  }
+
+  private static class ModuleKeyMapping extends KeyMapping {
+    private final int moduleIndex;
+
+    ModuleKeyMapping(int moduleIndex, int keyCode) {
+      super(moduleKeyId(MenuModules.modules()[moduleIndex]), keyCode, X_CLIENT_KEY_CATEGORY);
+      this.moduleIndex = moduleIndex;
+    }
+
+    @Override
+    public boolean isDown() {
+      MenuModules.Module[] modules = MenuModules.modules();
+      if (moduleIndex < 0 || moduleIndex >= modules.length) {
+        return false;
+      }
+      MenuModules.Module module = modules[moduleIndex];
+      Minecraft client = Minecraft.getInstance();
+      if (module.keyModifiers == 0) {
+        return super.isDown() || (module.keyCode > 0 && client != null && isKeyComboDown(client, module.keyCode, 0));
+      }
+      return module.keyCode > 0 && client != null && isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+  }
+
+  private static final class BridgedZoomKeyMapping extends ModuleKeyMapping {
+    BridgedZoomKeyMapping(int moduleIndex, int keyCode) {
+      super(moduleIndex, keyCode);
+    }
+  }
+
+  private static boolean isZoomKeyDown(Minecraft client, MenuModules.Module module) {
+    if (module == null) {
+      return false;
+    }
+    if (module.keyModifiers != 0 && module.keyCode > 0) {
+      return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+    try {
+      syncZoomKeyMapping(client);
+      if (zoomKey != null && zoomKey.isDown()) {
+        return true;
+      }
+    } catch (RuntimeException ignored) {
+      // Fall back to direct GLFW polling below.
+    }
+    return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+  }
+
+  private static boolean isModuleKeyDown(Minecraft client, int index, MenuModules.Module module) {
+    if ("zoom".equals(module.id)) {
+      return isZoomKeyDown(client, module);
+    }
+    if (module.keyModifiers != 0 && module.keyCode > 0) {
+      return isKeyComboDown(client, module.keyCode, module.keyModifiers);
+    }
+    try {
+      syncModuleKeyMappings(client);
+      KeyMapping keyMapping = index >= 0 && index < moduleKeys.length ? moduleKeys[index] : null;
+      if (keyMapping != null && keyMapping.isDown()) {
+        return true;
+      }
+    } catch (RuntimeException ignored) {
+      // Fall back to direct GLFW polling below.
+    }
+    return module.keyCode > 0 && isKeyComboDown(client, module.keyCode, module.keyModifiers);
+  }
+
+  private static void pollModuleKeys(Minecraft client) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      MenuModules.Module module = modules[index];
+      if (!module.keyBindable || !MenuModules.isUnlocked(module.id)) {
+        if ("zoom".equals(module.id)) {
+          zoomKeyHeld = false;
+        }
+        module.keyDown = false;
+        continue;
+      }
+      boolean down = isModuleKeyDown(client, index, module);
+      if ("zoom".equals(module.id)) {
+        zoomKeyHeld = down;
+        module.keyDown = down;
+        continue;
+      }
+      if (down && !module.keyDown) {
+        final int moduleIndex = index;
+        if ("mobtrack".equals(module.id)) {
+          ((Executor) client).execute(() -> triggerMobTrackKey(client, moduleIndex));
+        } else if ("smartscreenshot".equals(module.id)) {
+          ((Executor) client).execute(() -> triggerSmartScreenshot(client));
+        } else if ("ui".equals(module.id)) {
+          ((Executor) client).execute(() -> openUiEditor(client));
+        } else if ("code".equals(module.id)) {
+          ((Executor) client).execute(() -> openModulePanel(client, "code"));
+        } else if (module.toggleable) {
+          ((Executor) client).execute(() -> toggleModule(moduleIndex));
+        } else {
+          module.keyDown = down;
+        }
+      }
+      module.keyDown = down;
+    }
+  }
+
+  private static void openUiEditor(Minecraft client) {
+    XLauncherMenuScreen screen = new XLauncherMenuScreen();
+    screen.openUiEditorShortcut();
+    setMenuScreenSafely(client, screen);
+  }
+
+  private static void openModulePanel(Minecraft client, String moduleId) {
+    XLauncherMenuScreen screen = new XLauncherMenuScreen();
+    screen.openModuleShortcut(moduleId);
+    setMenuScreenSafely(client, screen);
+  }
+
+  private static void triggerMobTrackKey(Object client, int index) {
+    MenuModules.Module[] modules = MenuModules.modules();
+    if (index < 0 || index >= modules.length) {
+      return;
+    }
+    if (modules[index].enabled) {
+      MobCameraTracker.clear();
+      MenuModules.Module module = MenuModules.setEnabled(index, false);
+      if (module != null) {
+        applyModule(module);
+      }
+      return;
+    }
+    if (MobCameraTracker.lockLookedAt(client)) {
+      MenuModules.Module module = MenuModules.setEnabled(index, true);
+      if (module != null) {
+        applyModule(module);
+      }
+      return;
+    }
+    toggleModule(index);
+  }
+
+  private static void triggerSmartScreenshot(Object client) {
+    if (client == null || smartScreenshotRunning || !isGameplayFocused(client)) {
+      return;
+    }
+    smartScreenshotRunning = true;
+    Object options = getAnyField(client, "options", "field_1690");
+    boolean previousHideGui = readBooleanField(options, false, "hideGui", "field_1842");
+    setBooleanFields(options, true, "hideGui", "field_1842");
+    Thread worker = new Thread(() -> {
+      sleepQuietly(SMART_SCREENSHOT_CAPTURE_DELAY_MS);
+      runOnClient(client, () -> {
+        try {
+          boolean saved = captureScreenshot(client);
+          if (saved) {
+            HudOverlay.showSmartScreenshotToast();
+          }
+          ScreenshotGallery.refresh(client);
+        } finally {
+          setBooleanFields(options, previousHideGui, "hideGui", "field_1842");
+          smartScreenshotRunning = false;
+        }
+      });
+    }, "X Client Smart Screenshot");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  private static void runOnClient(Object client, Runnable task) {
+    if (client instanceof Executor executor) {
+      executor.execute(task);
+      return;
+    }
+    task.run();
+  }
+
+  private static boolean captureScreenshot(Object client) {
+    Object renderTarget = mainRenderTarget(client);
+    if (renderTarget == null) {
+      log("Smart Screenshot failed: render target not found.");
+      return false;
+    }
+    File gameDirectory = gameDirectory(client);
+    Consumer<Object> messageConsumer = message -> log("Smart Screenshot saved.");
+    for (String className : new String[] {
+        "net.minecraft.client.Screenshot",
+        "net.minecraft.client.util.ScreenshotRecorder",
+        "net.minecraft.class_318"
+    }) {
+      if (invokeScreenshotClass(className, gameDirectory, renderTarget, messageConsumer)) {
+        return true;
+      }
+    }
+    log("Smart Screenshot failed: screenshot API not found.");
+    return false;
+  }
+
+  private static boolean invokeScreenshotClass(String className, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    try {
+      Class<?> screenshotClass = Class.forName(className);
+      for (Method method : screenshotClass.getMethods()) {
+        if (invokeScreenshotMethod(method, gameDirectory, renderTarget, messageConsumer)) {
+          return true;
+        }
+      }
+      for (Method method : screenshotClass.getDeclaredMethods()) {
+        method.setAccessible(true);
+        if (invokeScreenshotMethod(method, gameDirectory, renderTarget, messageConsumer)) {
+          return true;
+        }
+      }
+    } catch (Throwable ignored) {
+      // Try the next screenshot class name.
+    }
+    return false;
+  }
+
+  private static boolean invokeScreenshotMethod(Method method, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())) {
+      return false;
+    }
+    Object[] args = screenshotArguments(method, gameDirectory, renderTarget, messageConsumer);
+    if (args == null) {
+      return false;
+    }
+    try {
+      method.invoke(null, args);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static Object[] screenshotArguments(Method method, File gameDirectory, Object renderTarget, Consumer<Object> messageConsumer) {
+    Class<?>[] types = method.getParameterTypes();
+    if (types.length < 3 || types.length > 5) {
+      return null;
+    }
+    Object[] args = new Object[types.length];
+    boolean usedFile = false;
+    boolean usedRenderTarget = false;
+    boolean usedConsumer = false;
+    for (int index = 0; index < types.length; index += 1) {
+      Class<?> type = types[index];
+      if (File.class.isAssignableFrom(type)) {
+        args[index] = gameDirectory;
+        usedFile = true;
+      } else if (Path.class.isAssignableFrom(type)) {
+        args[index] = gameDirectory.toPath();
+        usedFile = true;
+      } else if (String.class.equals(type)) {
+        args[index] = null;
+      } else if (Consumer.class.isAssignableFrom(type)) {
+        args[index] = messageConsumer;
+        usedConsumer = true;
+      } else if (renderTarget != null && type.isInstance(renderTarget)) {
+        args[index] = renderTarget;
+        usedRenderTarget = true;
+      } else if (!type.isPrimitive() && !usedRenderTarget) {
+        args[index] = renderTarget;
+        usedRenderTarget = true;
+      } else {
+        return null;
+      }
+    }
+    return usedFile && usedRenderTarget && usedConsumer ? args : null;
+  }
+
+  private static File gameDirectory(Object client) {
+    Object value = getAnyField(client, "gameDirectory", "runDirectory", "field_1697", "field_1703");
+    if (value instanceof File file) {
+      return file;
+    }
+    if (value instanceof Path path) {
+      return path.toFile();
+    }
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft").toFile();
+  }
+
+  private static Object mainRenderTarget(Object client) {
+    Object renderTarget = invokeAnyNullable(client, "getMainRenderTarget", "getFramebuffer", "method_1522");
+    if (renderTarget != null) {
+      return renderTarget;
+    }
+    Class<?> type = client == null ? null : client.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        String typeName = field.getType().getName().toLowerCase(java.util.Locale.ROOT);
+        if (!typeName.contains("rendertarget") && !typeName.contains("framebuffer") && !typeName.contains("class_276")) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(client);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next render target field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static boolean readBooleanField(Object target, boolean fallback, String... names) {
+    Object value = getAnyField(target, names);
+    return value instanceof Boolean bool ? bool.booleanValue() : fallback;
+  }
+
+  private static boolean hasWorld(Minecraft client) {
+    return getAnyField(client, "player", "level", "world", "field_1724", "field_1687") != null;
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value != null) {
+            return value;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+    return null;
+  }
+
+  private static void updateClicks(Minecraft client) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int leftButton = glfw.getField("GLFW_MOUSE_BUTTON_LEFT").getInt(null);
+      int rightButton = glfw.getField("GLFW_MOUSE_BUTTON_RIGHT").getInt(null);
+      int leftState = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, leftButton)).intValue();
+      int rightState = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, rightButton)).intValue();
+      boolean leftDown = leftState == press;
+      boolean rightDown = rightState == press;
+      long now = System.currentTimeMillis();
+      if (leftDown && !leftMouseDown) {
+        LEFT_CLICK_TIMES[leftClickSlot] = now;
+        leftClickSlot = (leftClickSlot + 1) % LEFT_CLICK_TIMES.length;
+      }
+      if (rightDown && !rightMouseDown) {
+        RIGHT_CLICK_TIMES[rightClickSlot] = now;
+        rightClickSlot = (rightClickSlot + 1) % RIGHT_CLICK_TIMES.length;
+      }
+      leftMouseDown = leftDown;
+      rightMouseDown = rightDown;
+    } catch (Throwable ignored) {
+      leftMouseDown = false;
+      rightMouseDown = false;
+    }
+  }
+
+  private static long windowHandle(Object client) throws ReflectiveOperationException {
+    Object window = invokeAny(client, "getWindow", "method_22683");
+    Object handle = invokeAny(window, "handle", "method_4490");
+    return ((Number) handle).longValue();
+  }
+
+  private static Object invokeAny(Object target, String... names) throws ReflectiveOperationException {
+    ReflectiveOperationException failure = null;
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name).invoke(target);
+      } catch (ReflectiveOperationException exception) {
+        failure = exception;
+      }
+    }
+    throw failure == null ? new NoSuchMethodException() : failure;
+  }
+
+  private static void ensureKeyRegistered(Minecraft client) {
+    if (client.options == null || menuKey == null) {
+      return;
+    }
+
+    syncModuleKeyMappings(client);
+    syncZoomKeyMapping(client);
+    if (!keyRegistered) {
+      tryFabricKeyBindingHelper();
+      boolean optionsRegistered = tryAddKeyToOptions(client);
+      keyRegistered = optionsRegistered || helperRegistered;
+    }
+    for (int index = 0; index < moduleKeys.length; index += 1) {
+      MenuModules.Module module = MenuModules.modules()[index];
+      if (!module.keyBindable || moduleKeys[index] == null || moduleKeyRegistered[index]) {
+        continue;
+      }
+      moduleKeyRegistered[index] = tryAddOrReplaceKeyToOptions(client, moduleKeys[index], moduleKeyId(module));
+      if ("zoom".equals(module.id)) {
+        zoomKeyRegistered = moduleKeyRegistered[index];
+      }
+    }
+    syncMenuKeysFromControls(client);
+  }
+
+  private static boolean tryAddKeyToOptions(Minecraft client) {
+    try {
+      Field field = keyMappingsField(client.options);
+      if (field == null) {
+        throw new NoSuchFieldException("key mappings");
+      }
+      KeyMapping[] mappings = (KeyMapping[]) field.get(client.options);
+      if (mappings == null) {
+        mappings = new KeyMapping[0];
+      }
+      for (KeyMapping mapping : mappings) {
+        if (isMenuKey(mapping)) {
+          menuKey = mapping;
+          KeyMapping.resetMapping();
+          log("Key mapping is present in Minecraft options.");
+          return true;
+        }
+      }
+
+      KeyMapping[] next = Arrays.copyOf(mappings, mappings.length + 1);
+      next[next.length - 1] = menuKey;
+      field.set(client.options, next);
+      KeyMapping.resetMapping();
+      log("Added key mapping to Minecraft options fallback.");
+      return true;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      // The key still works in-session; the controls list only needs this path as a fallback.
+      if (!fallbackFailureLogged) {
+        fallbackFailureLogged = true;
+        log("Could not add key mapping to Minecraft options fallback.");
+      }
+      return false;
+    }
+  }
+
+  private static boolean tryAddOrReplaceKeyToOptions(Minecraft client, KeyMapping keyMapping, String keyId) {
+    try {
+      Field field = keyMappingsField(client.options);
+      if (field == null) {
+        throw new NoSuchFieldException("key mappings");
+      }
+      KeyMapping[] mappings = (KeyMapping[]) field.get(client.options);
+      if (mappings == null) {
+        mappings = new KeyMapping[0];
+      }
+      for (int index = 0; index < mappings.length; index += 1) {
+        if (isNamedKey(mappings[index], keyId)) {
+          if (mappings[index] != keyMapping) {
+            KeyMapping[] next = Arrays.copyOf(mappings, mappings.length);
+            next[index] = keyMapping;
+            field.set(client.options, next);
+          }
+          KeyMapping.resetMapping();
+          log("Updated key mapping " + keyId + " in Minecraft options.");
+          return true;
+        }
+      }
+
+      KeyMapping[] next = Arrays.copyOf(mappings, mappings.length + 1);
+      next[next.length - 1] = keyMapping;
+      field.set(client.options, next);
+      KeyMapping.resetMapping();
+      log("Added key mapping " + keyId + " to Minecraft options fallback.");
+      return true;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      if (!fallbackFailureLogged) {
+        fallbackFailureLogged = true;
+        log("Could not add key mapping to Minecraft options fallback.");
+      }
+      return false;
+    }
+  }
+
+  private static Field keyMappingsField(Object options) {
+    String[] knownNames = { "keyMappings", "allKeys", "field_1839" };
+    for (String name : knownNames) {
+      try {
+        Field field = options.getClass().getDeclaredField(name);
+        if (KeyMapping[].class.isAssignableFrom(field.getType())) {
+          field.setAccessible(true);
+          return field;
+        }
+      } catch (ReflectiveOperationException | RuntimeException ignored) {
+      }
+    }
+
+    Class<?> type = options.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (KeyMapping[].class.isAssignableFrom(field.getType())) {
+          field.setAccessible(true);
+          return field;
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static boolean isMenuKey(KeyMapping mapping) {
+    return isNamedKey(mapping, MENU_KEY_ID);
+  }
+
+  private static void releaseConflictingMenuKeyMappings(Minecraft client) {
+    if (client == null || client.options == null || menuKey == null) {
+      return;
+    }
+    int menuCode = keyCodeFromMapping(menuKey);
+    if (menuCode <= 0) {
+      menuCode = RIGHT_SHIFT;
+    }
+    try {
+      Field field = keyMappingsField(client.options);
+      KeyMapping[] mappings = field == null ? null : (KeyMapping[]) field.get(client.options);
+      if (mappings == null) {
+        return;
+      }
+      for (KeyMapping mapping : mappings) {
+        if (mapping == null || mapping == menuKey || isMenuKey(mapping) || keyCodeFromMapping(mapping) != menuCode) {
+          continue;
+        }
+        setMappingDown(mapping, false);
+        while (mapping.consumeClick()) {
+          // Drain queued clicks so another menu cannot consume this X Client key press.
+        }
+      }
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      // The raw keyboard callback is already cancelled; this only clears queued conflicts.
+    }
+  }
+
+  private static boolean isNamedKey(KeyMapping mapping, String keyId) {
+    try {
+      return mapping != null && keyId.equals(mapping.getName());
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private static void syncMenuKeysFromControls(Minecraft client) {
+    if (client == null || moduleKeys == null) {
+      return;
+    }
+    MenuModules.Module[] modules = MenuModules.modules();
+    int limit = Math.min(modules.length, moduleKeys.length);
+    for (int index = 0; index < limit; index += 1) {
+      MenuModules.Module module = modules[index];
+      KeyMapping mapping = moduleKeys[index];
+      if (!module.keyBindable || mapping == null || !isNamedKey(mapping, moduleKeyId(module))) {
+        continue;
+      }
+      String saved = keyMappingSaveString(mapping).toLowerCase(java.util.Locale.ROOT);
+      int mappedCode = keyCodeFromMapping(mapping);
+      int menuCode = mappedCode > 0 ? mappedCode : -1;
+      if (saved.contains("unknown") || saved.endsWith(".none") || saved.contains("unbound")) {
+        menuCode = -1;
+      }
+      if (module.keyCode == menuCode) {
+        moduleKeyCodeSnapshots[index] = menuCode;
+        continue;
+      }
+      MenuModules.setKeyCombo(index, menuCode, 0);
+      moduleKeyCodeSnapshots[index] = menuCode;
+      if ("zoom".equals(module.id)) {
+        zoomKey = mapping;
+        zoomKeyCodeSnapshot = menuCode;
+        zoomKeyRegistered = index < moduleKeyRegistered.length && moduleKeyRegistered[index];
+      }
+    }
+  }
+
+  private static int keyCodeFromMapping(Object mapping) {
+    Object key = getAnyField(mapping, "key", "boundKey", "field_1655");
+    int value = readIntFromObject(key, Integer.MIN_VALUE, "getValue", "method_1444");
+    if (value == Integer.MIN_VALUE) {
+      value = readIntFromObject(mapping, Integer.MIN_VALUE, "getKey", "getDefaultKey", "method_1429");
+    }
+    return value == Integer.MIN_VALUE ? -1 : value;
+  }
+
+  private static boolean tryFabricKeyBindingHelper() {
+    if (helperRegistered || helperAttempted || menuKey == null) {
+      return helperRegistered;
+    }
+    helperAttempted = true;
+    syncModuleKeyMappings(Minecraft.getInstance());
+    String[][] helpers = {
+        { "net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper", "registerKeyMapping" },
+        { "net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper", "registerKeyBinding" }
+    };
+    for (String[] candidate : helpers) {
+      try {
+        Class<?> helper = Class.forName(candidate[0]);
+        for (Method method : helper.getMethods()) {
+          if (!candidate[1].equals(method.getName()) || method.getParameterCount() != 1) {
+            continue;
+          }
+          if (!method.getParameterTypes()[0].isInstance(menuKey)) {
+            continue;
+          }
+          boolean registeredAny = false;
+          Object registered = method.invoke(null, menuKey);
+          if (registered instanceof KeyMapping) {
+            menuKey = (KeyMapping) registered;
+          }
+          registeredAny = true;
+          for (int index = 0; index < moduleKeys.length; index += 1) {
+            if (moduleKeys[index] == null) {
+              continue;
+            }
+            Object moduleRegistered = method.invoke(null, moduleKeys[index]);
+            if (moduleRegistered instanceof KeyMapping) {
+              moduleKeys[index] = (KeyMapping) moduleRegistered;
+              if ("zoom".equals(MenuModules.modules()[index].id)) {
+                zoomKey = moduleKeys[index];
+              }
+            }
+            moduleKeyRegistered[index] = false;
+            registeredAny = true;
+          }
+          helperRegistered = registeredAny;
+          log("Registered key mapping through " + candidate[0] + "." + candidate[1] + ".");
+          return true;
+        }
+      } catch (ReflectiveOperationException | RuntimeException ignored) {
+        // Try the next Fabric API naming variant.
+      }
+    }
+    log("Fabric key mapping helper not available; using fallback registration.");
+    return false;
+  }
+
+  private static boolean isZoomActive() {
+    MenuModules.Module module = zoomModule();
+    if (module == null || !MenuModules.isUnlocked(module.id) || !isClientGameplayFocused()) {
+      return false;
+    }
+    int zoomIndex = moduleIndex("zoom");
+    if (module.keyCode > 0 || (zoomIndex >= 0 && isKeyMappingAssigned(zoomIndex))) {
+      return zoomKeyHeld || isZoomKeyCurrentlyDown(module);
+    }
+    return module.enabled;
+  }
+
+  private static boolean isKeyMappingAssigned(int index) {
+    if (index < 0 || index >= moduleKeys.length || moduleKeys[index] == null) {
+      return false;
+    }
+    String saved = keyMappingSaveString(moduleKeys[index]);
+    if (saved.isEmpty()) {
+      return MenuModules.modules()[index].keyCode > 0;
+    }
+    String normalized = saved.toLowerCase(java.util.Locale.ROOT);
+    return !normalized.contains("unknown") && !normalized.endsWith(".none") && !normalized.contains("unbound");
+  }
+
+  private static String keyMappingSaveString(Object keyMapping) {
+    if (keyMapping == null) {
+      return "";
+    }
+    for (String methodName : new String[] { "saveString", "method_1428" }) {
+      try {
+        Object value = keyMapping.getClass().getMethod(methodName).invoke(keyMapping);
+        return String.valueOf(value == null ? "" : value);
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    return "";
+  }
+
+  private static MenuModules.Module zoomModule() {
+    for (MenuModules.Module module : MenuModules.modules()) {
+      if ("zoom".equals(module.id)) {
+        return module;
+      }
+    }
+    return null;
+  }
+
+  private static boolean isClientGameplayFocused() {
+    try {
+      return isGameplayFocused(Minecraft.getInstance());
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static boolean isZoomKeyCurrentlyDown(MenuModules.Module module) {
+    try {
+      Minecraft client = Minecraft.getInstance();
+      return client != null && isZoomKeyDown(client, module);
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static void ensureScrollCallback(Minecraft client) {
+    try {
+      long handle = windowHandle(client);
+      if (scrollCallbackProxy != null && scrollCallbackHandle == handle) {
+        return;
+      }
+      Class<?> callbackType = Class.forName("org.lwjgl.glfw.GLFWScrollCallbackI");
+      InvocationHandler handler = (proxy, method, args) -> {
+        if ("invoke".equals(method.getName()) && args != null && args.length >= 3) {
+          double yOffset = ((Number) args[2]).doubleValue();
+          if (isGameplayFocused(client) && isZoomActive()) {
+            adjustZoom(yOffset);
+            return null;
+          }
+          forwardScroll(args);
+        }
+        return null;
+      };
+      Object proxy = Proxy.newProxyInstance(callbackType.getClassLoader(), new Class<?>[] { callbackType }, handler);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      Object previous = glfw.getMethod("glfwSetScrollCallback", long.class, callbackType).invoke(null, handle, proxy);
+      previousScrollCallback = previous;
+      scrollCallbackProxy = proxy;
+      scrollCallbackHandle = handle;
+    } catch (Throwable ignored) {
+      // Zoom still works; only mouse-wheel strength control is unavailable.
+    }
+  }
+
+  private static void forwardScroll(Object[] args) {
+    Object callback = previousScrollCallback;
+    if (callback == null) {
+      return;
+    }
+    for (Method method : callback.getClass().getMethods()) {
+      if (!"invoke".equals(method.getName()) || method.getParameterCount() != args.length) {
+        continue;
+      }
+      try {
+        method.invoke(callback, args);
+        return;
+      } catch (Throwable ignored) {
+        // Try another invoke signature.
+      }
+    }
+  }
+
+  public static boolean handleZoomScroll(double yOffset) {
+    return false;
+  }
+
+  private static void adjustZoom(double yOffset) {
+    if (yOffset == 0.0D) {
+      return;
+    }
+    int direction = yOffset > 0.0D ? 1 : -1;
+    int steps = Math.max(1, Math.min(MAX_ZOOM_SCROLL_STEPS, (int) Math.ceil(Math.abs(yOffset))));
+    int next = MenuModules.zoomStrengthPercent() + (direction * ZOOM_SCROLL_STEP_PERCENT * steps);
+    MenuModules.setZoomStrengthPercent(next);
+    zoomFactor = MenuModules.zoomStrength();
+    try {
+      updateZoom(Minecraft.getInstance());
+    } catch (Throwable ignored) {
+      // The watcher will apply it on the next tick.
+    }
+  }
+
+  private static void updateMovementTweaks(Minecraft client) {
+    if (client == null || client.options == null) {
+      return;
+    }
+    updateNoBob(client.options);
+    updateSprint(client);
+    updateSpeedEffect(client);
+    updateResistanceEffect(client);
+    updateInvisibilityEffect(client);
+    updateInstantBreak(client);
+    if (moduleEnabled("freecam") && freecamApplied) {
+      freezePlayerMovement(client);
+    }
+    MobCameraTracker.update(client, moduleEnabled("mobtrack") && isGameplayFocused(client));
+    AutoHitController.update(client, moduleEnabled("autohit") && isGameplayFocused(client));
+    HotbarAttributeController.update(client, moduleEnabled("atribute") && isGameplayFocused(client));
+  }
+
+  private static void updateInstantBreak(Minecraft client) {
+    if (!moduleEnabled("breakspeed") || !isGameplayFocused(client) || !isMouseButtonDown(client, 0)) {
+      return;
+    }
+    Object hitResult = getAnyField(client, "hitResult", "field_1765");
+    Object pos = blockHitPos(hitResult);
+    if (pos == null) {
+      return;
+    }
+    if (destroyIntegratedServerBlock(client, pos)) {
+      swingMainHand(playerObject(client));
+    }
+  }
+
+  private static boolean destroyIntegratedServerBlock(Object client, Object pos) {
+    Object server = integratedServer(client);
+    if (server == null || pos == null) {
+      return false;
+    }
+    Runnable task = () -> destroyIntegratedServerBlockNow(server, client, pos);
+    if (server instanceof Executor executor) {
+      executor.execute(task);
+    } else {
+      task.run();
+    }
+    return true;
+  }
+
+  private static void destroyIntegratedServerBlockNow(Object server, Object client, Object pos) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer == null) {
+      return;
+    }
+    Object serverGameMode = getAnyField(serverPlayer, "gameMode", "gameModeForPlayer", "field_13987");
+    if (invokeBlockDestroy(serverGameMode, pos)) {
+      return;
+    }
+    Object level = invokeAnyNullable(serverPlayer, "serverLevel", "level", "getCommandSenderWorld", "method_51469", "method_37908", "method_5681");
+    if (level == null) {
+      level = getAnyField(serverPlayer, "level", "serverLevel", "field_6002", "field_37908");
+    }
+    invokeLevelDestroyBlock(level, pos, serverPlayer);
+  }
+
+  private static boolean invokeLevelDestroyBlock(Object level, Object pos, Object player) {
+    if (level == null || pos == null) {
+      return false;
+    }
+    for (String name : new String[] { "destroyBlock", "removeBlock", "method_8650", "method_22352" }) {
+      for (Method method : level.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        if (types.length < 2 || types.length > 4 || !types[0].isInstance(pos) || types[1] != Boolean.TYPE) {
+          continue;
+        }
+        try {
+          Object result;
+          if (types.length == 2) {
+            result = method.invoke(level, pos, Boolean.TRUE);
+          } else if (types.length == 3) {
+            Object third = types[2] == Integer.TYPE ? Integer.valueOf(512) : player;
+            if (third != null && !types[2].isPrimitive() && !types[2].isInstance(third)) {
+              continue;
+            }
+            result = method.invoke(level, pos, Boolean.TRUE, third);
+          } else {
+            if (player != null && !types[2].isInstance(player)) {
+              continue;
+            }
+            result = method.invoke(level, pos, Boolean.TRUE, player, Integer.valueOf(512));
+          }
+          return !(result instanceof Boolean bool) || bool.booleanValue();
+        } catch (Throwable ignored) {
+          // Try another destroy/remove signature.
+        }
+      }
+    }
+    return false;
+  }
+
+  private static void primeInstantBreakState(Object gameMode, Object pos) {
+    if (gameMode == null) {
+      return;
+    }
+    setIntFields(gameMode, 0, "destroyDelay", "blockBreakingCooldown", "field_3716", "field_41932");
+    setFloatFields(gameMode, 1.0F, "destroyProgress", "currentBreakingProgress", "blockBreakingProgress", "field_3714", "field_3715");
+    setBooleanFields(gameMode, true, "isDestroying", "destroyingBlock", "breakingBlock", "field_3717");
+    if (pos != null) {
+      setObjectFields(gameMode, pos, "destroyBlockPos", "currentBreakingPos", "currentBreakingBlockPos", "field_3713");
+    }
+  }
+
+  private static boolean isMouseButtonDown(Object client, int button) {
+    try {
+      long handle = windowHandle(client);
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      int press = glfw.getField("GLFW_PRESS").getInt(null);
+      int state = ((Number) glfw.getMethod("glfwGetMouseButton", long.class, int.class).invoke(null, handle, button)).intValue();
+      return state == press;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static Object blockHitPos(Object hitResult) {
+    if (hitResult == null) {
+      return null;
+    }
+    String value = String.valueOf(hitResult);
+    String typeName = hitResult.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+    if (!typeName.contains("block") && !value.toLowerCase(java.util.Locale.ROOT).contains("block")) {
+      return null;
+    }
+    return invokeAnyNullable(hitResult, "getBlockPos", "getPos", "method_17777");
+  }
+
+  private static Object blockHitDirection(Object hitResult) {
+    if (hitResult == null) {
+      return null;
+    }
+    return invokeAnyNullable(hitResult, "getDirection", "getSide", "method_17780");
+  }
+
+  private static boolean invokeBlockDestroy(Object gameMode, Object pos) {
+    return invokeBlockAction(gameMode, pos, null, "destroyBlock", "breakBlock", "method_2899");
+  }
+
+  private static boolean invokeBlockAction(Object target, Object pos, Object direction, String... names) {
+    if (target == null || pos == null) {
+      return false;
+    }
+    for (String name : names) {
+      for (Method method : target.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        try {
+          if (types.length == 1 && types[0].isInstance(pos)) {
+            Object result = method.invoke(target, pos);
+            return !(result instanceof Boolean bool) || bool.booleanValue();
+          }
+          if (direction != null && types.length == 2 && types[0].isInstance(pos) && types[1].isInstance(direction)) {
+            Object result = method.invoke(target, pos, direction);
+            return !(result instanceof Boolean bool) || bool.booleanValue();
+          }
+        } catch (Throwable ignored) {
+          // Try the next overload or mapping name.
+        }
+      }
+    }
+    return false;
+  }
+
+  private static void swingMainHand(Object player) {
+    if (player == null) {
+      return;
+    }
+    for (String name : new String[] { "swing", "swingHand", "method_6104" }) {
+      for (Method method : player.getClass().getMethods()) {
+        if (!name.equals(method.getName())) {
+          continue;
+        }
+        try {
+          if (method.getParameterCount() == 0) {
+            method.invoke(player);
+            return;
+          }
+        } catch (Throwable ignored) {
+          // Visual hand swing is optional.
+        }
+      }
+    }
+  }
+
+  private static void updateSprint(Minecraft client) {
+    if (!moduleEnabled("sprint") || !isGameplayFocused(client) || !isKeyDown(client, 87) || isAnyKeyDown(client, 340, 344)) {
+      return;
+    }
+    Object player = playerObject(client);
+    if (player == null) {
+      return;
+    }
+    try {
+      for (String name : new String[] { "setSprinting", "method_5728" }) {
+        try {
+          Method method = player.getClass().getMethod(name, boolean.class);
+          method.invoke(player, Boolean.TRUE);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next mapping name.
+        }
+      }
+    } catch (Throwable ignored) {
+      // Sprint is best-effort and should never break the client loop.
+    }
+  }
+
+  private static void updateSpeedEffect(Minecraft client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("speed")) {
+      applySpeedEffect(client);
+      return;
+    }
+    if (speedApplied) {
+      clearSpeedEffect(client);
+    }
+  }
+
+  private static void applySpeedEffect(Minecraft client) {
+    try {
+      LocalPlayer player = client.player;
+      if (player == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("speed");
+      MobEffectInstance effect = new MobEffectInstance(MobEffects.SPEED, SPEED_EFFECT_DURATION_TICKS, amplifier, false, true, true);
+      forceEffectValues(effect, SPEED_EFFECT_DURATION_TICKS, amplifier, true, true);
+      if (!speedApplied || lastSpeedCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "speed", amplifier);
+        addIntegratedServerEffect(client, effect);
+        lastSpeedCommandAmplifier = amplifier;
+      }
+      MobEffectInstance current = player.getEffect(MobEffects.SPEED);
+      if (current != null && (current.getDuration() < 0 || current.getDuration() > SPEED_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && current.getAmplifier() >= amplifier) {
+        forceEffectValues(current, SPEED_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      speedApplied = true;
+    } catch (Throwable ignored) {
+      // Speed is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearSpeedEffect(Minecraft client) {
+    sendEffectClearCommand(client, "speed");
+    clearIntegratedServerEffect(client, MobEffects.SPEED);
+    lastSpeedCommandAmplifier = -1;
+    try {
+      LocalPlayer player = client == null ? null : client.player;
+      if (player != null) {
+        MobEffectInstance current = player.getEffect(MobEffects.SPEED);
+        if (current != null && (current.getAmplifier() >= MenuModules.effectLevel("speed") || (!current.isVisible() && !current.showIcon()))) {
+          player.removeEffect(MobEffects.SPEED);
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external speed effects untouched when cleanup fails.
+    }
+    speedApplied = false;
+  }
+
+  private static void updateResistanceEffect(Minecraft client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("resistance")) {
+      applyResistanceEffect(client);
+      return;
+    }
+    if (resistanceApplied) {
+      clearResistanceEffect(client);
+    }
+  }
+
+  private static void applyResistanceEffect(Minecraft client) {
+    try {
+      LocalPlayer player = client.player;
+      if (player == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("resistance");
+      MobEffectInstance effect = new MobEffectInstance(MobEffects.RESISTANCE, RESISTANCE_EFFECT_DURATION_TICKS, amplifier, false, true, true);
+      forceEffectValues(effect, RESISTANCE_EFFECT_DURATION_TICKS, amplifier, true, true);
+      if (!resistanceApplied || lastResistanceCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "resistance", amplifier);
+        addIntegratedServerEffect(client, effect);
+        lastResistanceCommandAmplifier = amplifier;
+      }
+      MobEffectInstance current = player.getEffect(MobEffects.RESISTANCE);
+      if (current != null && (current.getDuration() < 0 || current.getDuration() > RESISTANCE_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && current.getAmplifier() >= amplifier) {
+        forceEffectValues(current, RESISTANCE_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      resistanceApplied = true;
+    } catch (Throwable ignored) {
+      // Resistance is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearResistanceEffect(Minecraft client) {
+    sendEffectClearCommand(client, "resistance");
+    clearIntegratedServerEffect(client, MobEffects.RESISTANCE);
+    lastResistanceCommandAmplifier = -1;
+    try {
+      LocalPlayer player = client == null ? null : client.player;
+      if (player != null) {
+        MobEffectInstance current = player.getEffect(MobEffects.RESISTANCE);
+        if (current != null && (current.getAmplifier() >= MenuModules.effectLevel("resistance") || (!current.isVisible() && !current.showIcon()))) {
+          player.removeEffect(MobEffects.RESISTANCE);
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external resistance effects untouched when cleanup fails.
+    }
+    resistanceApplied = false;
+  }
+
+  private static void updateInvisibilityEffect(Minecraft client) {
+    if (client == null) {
+      return;
+    }
+    if (moduleEnabled("invisibility")) {
+      applyInvisibilityEffect(client);
+      return;
+    }
+    if (invisibilityApplied) {
+      clearInvisibilityEffect(client);
+    }
+  }
+
+  private static void applyInvisibilityEffect(Minecraft client) {
+    try {
+      LocalPlayer player = client.player;
+      if (player == null) {
+        return;
+      }
+      int amplifier = MenuModules.effectLevel("invisibility");
+      MobEffectInstance effect = new MobEffectInstance(MobEffects.INVISIBILITY, INVISIBILITY_EFFECT_DURATION_TICKS, amplifier, false, true, true);
+      forceEffectValues(effect, INVISIBILITY_EFFECT_DURATION_TICKS, amplifier, true, true);
+      if (!invisibilityApplied || lastInvisibilityCommandAmplifier != amplifier) {
+        sendEffectGiveCommand(client, "invisibility", amplifier);
+        addIntegratedServerEffect(client, effect);
+        lastInvisibilityCommandAmplifier = amplifier;
+      }
+      MobEffectInstance current = player.getEffect(MobEffects.INVISIBILITY);
+      if (current != null && (current.getDuration() < 0 || current.getDuration() > INVISIBILITY_EFFECT_REFRESH_THRESHOLD_TICKS)
+          && current.getAmplifier() >= amplifier) {
+        forceEffectValues(current, INVISIBILITY_EFFECT_DURATION_TICKS, amplifier, true, true);
+      }
+      invisibilityApplied = true;
+    } catch (Throwable ignored) {
+      // Invisibility is client-side best-effort and should never break the watcher.
+    }
+  }
+
+  private static void clearInvisibilityEffect(Minecraft client) {
+    sendEffectClearCommand(client, "invisibility");
+    clearIntegratedServerEffect(client, MobEffects.INVISIBILITY);
+    lastInvisibilityCommandAmplifier = -1;
+    try {
+      LocalPlayer player = client == null ? null : client.player;
+      if (player != null) {
+        MobEffectInstance current = player.getEffect(MobEffects.INVISIBILITY);
+        if (current != null && (current.getAmplifier() >= MenuModules.effectLevel("invisibility") || (!current.isVisible() && !current.showIcon()))) {
+          player.removeEffect(MobEffects.INVISIBILITY);
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave external invisibility effects untouched when cleanup fails.
+    }
+    invisibilityApplied = false;
+  }
+
+  private static void forceEffectValues(MobEffectInstance effect, int duration, int amplifier, boolean visible, boolean showIcon) {
+    if (effect == null) {
+      return;
+    }
+    setIntFields(effect, duration, "duration", "field_5895", "h", "d");
+    setIntFields(effect, amplifier, "amplifier", "field_5893", "i", "e");
+    setBooleanFields(effect, false, "ambient", "field_5892", "j", "f");
+    setBooleanFields(effect, visible, "visible", "showParticles", "field_5890", "k", "g");
+    setBooleanFields(effect, showIcon, "showIcon", "field_5889", "l", "h");
+    skipEffectBlend(effect);
+  }
+
+  private static void sendEffectGiveCommand(Object client, String effectId, int amplifier) {
+    sendMinecraftCommand(client, "effect give @s minecraft:" + effectId + " infinite " + amplifier);
+  }
+
+  private static void sendEffectClearCommand(Object client, String effectId) {
+    sendMinecraftCommand(client, "effect clear @s minecraft:" + effectId);
+  }
+
+  private static boolean sendMinecraftCommand(Object client, String command) {
+    if (client instanceof Executor executor) {
+      executor.execute(() -> sendMinecraftCommandNow(client, command));
+      return true;
+    }
+    return sendMinecraftCommandNow(client, command);
+  }
+
+  private static boolean sendMinecraftCommandNow(Object client, String command) {
+    Object player = playerObject(client);
+    Object connection = getAnyField(player, "connection", "networkHandler", "field_3944");
+    return invokeStringMethod(connection, command, "sendCommand", "sendChatCommand", "method_45730", "method_45731")
+        || invokeStringMethod(connection, "/" + command, "sendChat", "sendChatMessage", "method_45729", "method_3142")
+        || invokeStringMethod(player, "/" + command, "chat", "sendChat", "sendChatMessage", "method_7353", "method_3142");
+  }
+
+  private static void addIntegratedServerEffect(Object client, Object effectInstance) {
+    Object server = integratedServer(client);
+    if (server == null || effectInstance == null) {
+      return;
+    }
+    if (server instanceof Executor executor) {
+      executor.execute(() -> addIntegratedServerEffectNow(server, client, effectInstance));
+      return;
+    }
+    addIntegratedServerEffectNow(server, client, effectInstance);
+  }
+
+  private static void addIntegratedServerEffectNow(Object server, Object client, Object effectInstance) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer != null) {
+      invokeEffectMethod(serverPlayer, effectInstance, "addEffect", "addStatusEffect", "method_6092");
+    }
+  }
+
+  private static void clearIntegratedServerEffect(Object client, Object effect) {
+    Object server = integratedServer(client);
+    if (server == null || effect == null) {
+      return;
+    }
+    if (server instanceof Executor executor) {
+      executor.execute(() -> clearIntegratedServerEffectNow(server, client, effect));
+      return;
+    }
+    clearIntegratedServerEffectNow(server, client, effect);
+  }
+
+  private static void clearIntegratedServerEffectNow(Object server, Object client, Object effect) {
+    Object serverPlayer = integratedServerPlayer(server, client);
+    if (serverPlayer != null) {
+      invokeEffectMethod(serverPlayer, effect, "removeEffect", "removeStatusEffect", "method_6016");
+    }
+  }
+
+  private static Object integratedServer(Object client) {
+    return getAnyField(client, "singleplayerServer", "integratedServer", "field_1766", "field_1747");
+  }
+
+  private static Object integratedServerPlayer(Object server, Object client) {
+    Object playerList = invokeAnyNullable(server, "getPlayerList", "getPlayerManager", "method_3760", "method_13949");
+    if (playerList == null) {
+      return null;
+    }
+    String localName = playerName(playerObject(client));
+    if (!localName.isEmpty()) {
+      Object byName = invokeStringReturn(playerList, localName, "getPlayerByName", "method_14566");
+      if (byName != null) {
+        return byName;
+      }
+    }
+    Object players = invokeAnyNullable(playerList, "getPlayers", "getPlayerList", "method_14571", "method_18456");
+    if (players instanceof Iterable<?> iterable) {
+      Object first = null;
+      for (Object candidate : iterable) {
+        if (first == null) {
+          first = candidate;
+        }
+        if (!localName.isEmpty() && localName.equalsIgnoreCase(playerName(candidate))) {
+          return candidate;
+        }
+      }
+      return first;
+    }
+    return null;
+  }
+
+  private static Object invokeStringReturn(Object target, String value, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name, String.class).invoke(target, value);
+      } catch (Throwable ignored) {
+        // Try the next known method name.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeAnyNullable(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        if (method.getParameterCount() == 0) {
+          return method.invoke(target);
+        }
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          if (method.getParameterCount() == 0) {
+            return method.invoke(target);
+          }
+        } catch (Throwable alsoIgnored) {
+          // Try the next known method name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static String playerName(Object player) {
+    Object profile = invokeAnyNullable(player, "getGameProfile", "getProfile", "method_7334", "method_12593");
+    String profileName = textValue(invokeAnyNullable(profile, "getName"));
+    if (!profileName.isEmpty()) {
+      return profileName;
+    }
+    return textValue(invokeAnyNullable(player, "getName", "method_5477"));
+  }
+
+  private static String textValue(Object value) {
+    if (value instanceof String string) {
+      return string;
+    }
+    Object text = invokeAnyNullable(value, "getString", "getLiteralString", "method_10851");
+    return text instanceof String string ? string : "";
+  }
+
+  private static boolean invokeStringMethod(Object target, String value, String... names) {
+    if (target == null) {
+      return false;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name, String.class);
+        method.invoke(target, value);
+        return true;
+      } catch (Throwable ignored) {
+        // Try the next known method name.
+      }
+    }
+    return false;
+  }
+
+  private static Object invokeEffectMethod(Object target, Object argument, String... names) {
+    if (target == null || argument == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (Method method : target.getClass().getMethods()) {
+        if (!name.equals(method.getName()) || method.getParameterCount() != 1) {
+          continue;
+        }
+        Class<?> parameterType = method.getParameterTypes()[0];
+        if (!parameterType.isAssignableFrom(argument.getClass())) {
+          continue;
+        }
+        try {
+          return method.invoke(target, argument);
+        } catch (Throwable ignored) {
+          // Try the next compatible method.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void updateNoBob(Options options) {
+    if (moduleEnabled("nobob")) {
+      if (previousBobView == null) {
+        previousBobView = getOptionBoolean(options, "bobView");
+      }
+      forceOptionBoolean(options, "bobView", false);
+      return;
+    }
+    if (previousBobView != null) {
+      forceOptionBoolean(options, "bobView", previousBobView.booleanValue());
+      previousBobView = null;
+    }
+  }
+
+  private static void adjustFreecamSpeed(double yOffset) {
+    if (yOffset > 0.0D) {
+      freecamSpeed = Math.min(8.0D, freecamSpeed + (0.18D * Math.abs(yOffset)));
+    } else if (yOffset < 0.0D) {
+      freecamSpeed = Math.max(0.2D, freecamSpeed - (0.18D * Math.abs(yOffset)));
+    }
+  }
+
+  private static void updateZoom(Minecraft client) {
+    if (client == null || client.options == null) {
+      return;
+    }
+    if (zoomApplied) {
+      if (previousSmoothCamera != null) {
+        setSmoothCamera(client.options, previousSmoothCamera.booleanValue());
+      }
+      restoreZoomSensitivity(client.options);
+      previousFov = null;
+      previousSmoothCamera = null;
+      zoomJustActivated = false;
+      currentZoomFactor = 1.0D;
+      zoomApplied = false;
+    } else {
+      restoreZoomSensitivity(client.options);
+    }
+    syncInfiniteZoomKeyMapping(client);
+  }
+
+  public static double applyZoomFov(double originalFov) {
+    lastBaseFov = originalFov;
+    return originalFov;
+  }
+
+  private static void updateZoomSensitivity(Options options) {
+    if (options == null) {
+      return;
+    }
+    Number current = getOptionNumber(options, "sensitivity");
+    if (current == null) {
+      return;
+    }
+    if (previousMouseSensitivity == null) {
+      previousMouseSensitivity = Double.valueOf(current.doubleValue());
+    }
+    double base = previousMouseSensitivity.doubleValue();
+    double zoom = Math.max(1.0D, currentZoomFactor);
+    double target = Math.max(0.005D, Math.min(1.0D, base / zoom));
+    if (Math.abs(current.doubleValue() - target) > 0.0005D) {
+      forceOptionNumber(options, "sensitivity", target);
+    }
+  }
+
+  private static void restoreZoomSensitivity(Options options) {
+    if (options == null || previousMouseSensitivity == null) {
+      return;
+    }
+    forceOptionNumber(options, "sensitivity", previousMouseSensitivity.doubleValue());
+    previousMouseSensitivity = null;
+  }
+
+  public static void applyDetachedCamera(Object camera) {
+    Minecraft client = Minecraft.getInstance();
+    if (camera == null || client == null || !moduleEnabled("freecam") || !hasWorld(client)) {
+      if (freecamApplied) {
+        log("Freecam disabled; vanilla camera and player input restored.");
+      }
+      updateFreecamChunkRendering(false);
+      freecamApplied = false;
+      freecamMouseReady = false;
+      freecamChunkAvailable = null;
+      lastFreecamMoveMs = 0L;
+      return;
+    }
+
+    if (!freecamApplied) {
+      initFreecam(camera, client);
+    }
+    updateFreecam(client);
+    setCameraRotation(camera, freecamYaw, freecamPitch);
+    setCameraPosition(camera, freecamX, freecamY, freecamZ);
+    setBooleanFields(camera, true, "detached", "field_1874");
+  }
+
+  public static boolean shouldLockPlayerLookForFreecam() {
+    return freecamApplied && moduleEnabled("freecam") && hasWorld(Minecraft.getInstance());
+  }
+
+  private static void freezeFreecamPlayerBeforeTick(Minecraft client) {
+    if (client != null && moduleEnabled("freecam") && hasWorld(client)) {
+      freezePlayerMovement(client);
+    }
+  }
+
+  public static void onRealWorldDataChanged(String reason, int chunkX, int chunkZ) {
+    EspRenderPipeline26.markWorldDataDirty(reason, chunkX, chunkZ);
+  }
+
+  public static boolean shouldForceFullbright() {
+    return moduleEnabled("bright");
+  }
+
+  public static float applyBlockBreakSpeed(float original) {
+    if (!moduleEnabled("breakspeed") || original <= 0.0F
+        || integratedServer(Minecraft.getInstance()) == null) {
+      return original;
+    }
+    return 1000000000.0F;
+  }
+
+  public static boolean shouldPauseInOwnWorld() {
+    return shouldPauseInOwnWorld(Minecraft.getInstance());
+  }
+
+  private static boolean shouldPauseInOwnWorld(Object client) {
+    if (client == null || getAnyField(client, "player", "field_1724") == null) {
+      return false;
+    }
+    if (SocialManager.keepHostedWorldOnline() && SocialManager.hasHostedWorld()) {
+      return false;
+    }
+    Boolean singleplayer = invokeAnyBoolean(client, "isSingleplayer", "hasSingleplayerServer", "isLocalServer");
+    if (Boolean.TRUE.equals(singleplayer)) {
+      return true;
+    }
+    return getAnyField(client, "singleplayerServer", "integratedServer", "field_1747") != null;
+  }
+
+  private static Boolean invokeAnyBoolean(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Object value = target.getClass().getMethod(name).invoke(target);
+        if (value instanceof Boolean bool) {
+          return bool;
+        }
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          Object value = method.invoke(target);
+          if (value instanceof Boolean bool) {
+            return bool;
+          }
+        } catch (Throwable alsoIgnored) {
+          // Try the next known mapping name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void initFreecam(Object camera, Minecraft client) {
+    Object player = playerObject(client);
+    double[] playerPosition = readPosition(player);
+    if (playerPosition != null) {
+      freecamPlayerX = playerPosition[0];
+      freecamPlayerY = playerPosition[1];
+      freecamPlayerZ = playerPosition[2];
+    }
+    freecamPlayerYaw = readFloat(player, 0.0F, "getYRot", "getYaw", "method_36454", "method_5705", "yRot", "yaw");
+    freecamPlayerPitch = readFloat(player, 0.0F, "getXRot", "getPitch", "method_36455", "method_5695", "xRot", "pitch");
+    freecamPlayerHeadYaw = readFloat(player, freecamPlayerYaw, "getYHeadRot", "getHeadYaw", "method_5791", "yHeadRot", "headYaw");
+    freecamPlayerBodyYaw = readFloat(player, freecamPlayerYaw, "getYBodyRot", "getBodyYaw", "method_43078", "yBodyRot", "bodyYaw");
+    double[] position = readPosition(camera);
+    if (position == null) {
+      position = readPosition(playerObject(client));
+    }
+    if (position == null) {
+      position = new double[] { 0.0D, 80.0D, 0.0D };
+    }
+    freecamX = position[0];
+    freecamY = position[1];
+    freecamZ = position[2];
+    freecamYaw = readFloat(camera, 0.0F, "yRot", "yaw", "method_19330");
+    freecamPitch = readFloat(camera, 25.0F, "xRot", "method_19329");
+    freecamPitch = clampFloat(freecamPitch, -89.0F, 89.0F);
+    freecamApplied = true;
+    freecamChunkAvailable = null;
+    freecamMouseReady = false;
+    lastFreecamMoveMs = System.currentTimeMillis();
+  }
+
+  private static void updateFreecam(Minecraft client) {
+    updateFreecamChunkRendering(true);
+    long now = System.currentTimeMillis();
+    double seconds = lastFreecamMoveMs <= 0L ? 0.0D : Math.min(0.08D, (now - lastFreecamMoveMs) / 1000.0D);
+    lastFreecamMoveMs = now;
+    if (!isGameplayFocused(client)) {
+      freecamMouseReady = false;
+      return;
+    }
+
+    updateFreecamLook(client);
+    restoreFreecamPlayerTransform(client);
+    freezePlayerMovement(client);
+
+    double forward = (isKeyDown(client, 87) ? 1.0D : 0.0D) - (isKeyDown(client, 83) ? 1.0D : 0.0D);
+    double strafe = (isKeyDown(client, 65) ? 1.0D : 0.0D) - (isKeyDown(client, 68) ? 1.0D : 0.0D);
+    double vertical = (isKeyDown(client, 32) ? 1.0D : 0.0D) - (isKeyDown(client, 340) ? 1.0D : 0.0D);
+    double length = Math.sqrt((forward * forward) + (strafe * strafe) + (vertical * vertical));
+    if (length <= 0.0D || seconds <= 0.0D) {
+      return;
+    }
+
+    forward /= length;
+    strafe /= length;
+    vertical /= length;
+    double yawRad = Math.toRadians(freecamYaw);
+    double forwardX = -Math.sin(yawRad);
+    double forwardZ = Math.cos(yawRad);
+    double rightX = Math.cos(yawRad);
+    double rightZ = Math.sin(yawRad);
+    double speed = freecamSpeed;
+    if (isKeyDown(client, 341) || isKeyDown(client, 345)) {
+      speed *= 2.6D;
+    }
+    if (isKeyDown(client, 342) || isKeyDown(client, 346)) {
+      speed *= 0.35D;
+    }
+    double distance = speed * seconds * 8.0D;
+    freecamX += ((forwardX * forward) + (rightX * strafe)) * distance;
+    freecamY += vertical * distance;
+    freecamZ += ((forwardZ * forward) + (rightZ * strafe)) * distance;
+    boolean available = client.level.hasChunk(((int)Math.floor(freecamX)) >> 4, ((int)Math.floor(freecamZ)) >> 4);
+    if (freecamChunkAvailable == null || freecamChunkAvailable.booleanValue() != available) {
+      freecamChunkAvailable = Boolean.valueOf(available);
+      log(available ? "Freecam entered a received client chunk." : "Freecam entered an unavailable chunk; no world data will be synthesized.");
+    }
+  }
+
+  /** Sodium normally defers off-screen chunk mesh uploads. Freecam needs all
+   * already-received chunks around the camera ready before they enter view. */
+  private static void updateFreecamChunkRendering(boolean enabled) {
+    try {
+      Class<?> sodium = Class.forName("net.caffeinemc.mods.sodium.client.SodiumClientMod");
+      Object options = sodium.getMethod("options").invoke(null);
+      Object performance = options.getClass().getField("performance").get(options);
+      java.lang.reflect.Field modeField = performance.getClass().getField("chunkBuildDeferMode");
+      if (enabled) {
+        if (previousSodiumChunkDeferMode == null) previousSodiumChunkDeferMode = modeField.get(performance);
+        Object immediate = Enum.valueOf((Class) modeField.getType(), "ZERO_FRAMES");
+        modeField.set(performance, immediate);
+      } else if (previousSodiumChunkDeferMode != null) {
+        modeField.set(performance, previousSodiumChunkDeferMode);
+        previousSodiumChunkDeferMode = null;
+      }
+    } catch (Throwable ignored) {
+      // Sodium is optional; vanilla rendering already builds received chunks normally.
+    }
+  }
+
+  private static void updateFreecamLook(Minecraft client) {
+    try {
+      long handle = windowHandle(client);
+      double[] x = new double[1];
+      double[] y = new double[1];
+      Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+      glfw.getMethod("glfwGetCursorPos", long.class, double[].class, double[].class).invoke(null, handle, x, y);
+      if (freecamMouseReady) {
+        double dx = x[0] - lastFreecamMouseX;
+        double dy = y[0] - lastFreecamMouseY;
+        double sensitivity = 0.12D;
+        freecamYaw = wrapDegrees((float) (freecamYaw + (dx * sensitivity)));
+        freecamPitch = clampFloat((float) (freecamPitch + (dy * sensitivity)), -89.0F, 89.0F);
+      }
+      lastFreecamMouseX = x[0];
+      lastFreecamMouseY = y[0];
+      freecamMouseReady = true;
+    } catch (Throwable ignored) {
+      freecamMouseReady = false;
+    }
+  }
+
+  private static void restoreFreecamPlayerTransform(Object client) {
+    Object player = playerObject(client);
+    if (player == null) return;
+    invokePosition(player, freecamPlayerX, freecamPlayerY, freecamPlayerZ, "setPos", "setPosition", "method_5814");
+    invokePosition(player, 0.0D, 0.0D, 0.0D, "setDeltaMovement", "setVelocity", "method_18799");
+    invokeFloat(player, freecamPlayerYaw, "setYRot", "setYaw", "method_36456");
+    invokeFloat(player, freecamPlayerPitch, "setXRot", "setPitch", "method_36457");
+    invokeFloat(player, freecamPlayerHeadYaw, "setYHeadRot", "setHeadYaw", "method_5847");
+    invokeFloat(player, freecamPlayerBodyYaw, "setYBodyRot", "setBodyYaw", "method_5784");
+    setDoubleFields(player, freecamPlayerX, "xo", "xOld", "lastRenderX", "field_6014");
+    setDoubleFields(player, freecamPlayerY, "yo", "yOld", "lastRenderY", "field_6036");
+    setDoubleFields(player, freecamPlayerZ, "zo", "zOld", "lastRenderZ", "field_5969");
+    setFloatFields(player, freecamPlayerYaw, "yRot", "yaw", "yRotO", "lastYaw", "field_6031", "field_5982");
+    setFloatFields(player, freecamPlayerPitch, "xRot", "pitch", "xRotO", "lastPitch", "field_5965", "field_6030");
+    setFloatFields(player, freecamPlayerHeadYaw, "yHeadRot", "headYaw", "yHeadRotO", "lastHeadYaw", "field_6241", "field_6259");
+    setFloatFields(player, freecamPlayerBodyYaw, "yBodyRot", "bodyYaw", "yBodyRotO", "lastBodyYaw", "field_6283");
+  }
+
+  private static void invokePosition(Object target, double x, double y, double z, String... methodNames) {
+    if (target == null) return;
+    for (String methodName : methodNames) {
+      for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+        try {
+          Method method = type.getDeclaredMethod(methodName, Double.TYPE, Double.TYPE, Double.TYPE);
+          method.setAccessible(true);
+          method.invoke(target, x, y, z);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next mapping or superclass.
+        }
+      }
+    }
+  }
+
+  private static boolean isGameplayFocused(Object client) {
+    return client instanceof Minecraft minecraft
+        && minecraft.level != null
+        && minecraft.player != null
+        && currentScreen(minecraft) == null;
+  }
+
+  private static Object playerObject(Object client) {
+    return getAnyField(client, "player", "field_1724");
+  }
+
+  private static double[] readPosition(Object target) {
+    if (target == null) {
+      return null;
+    }
+    try {
+      Object pos = invokeAny(target, "position", "getPosition", "method_19538", "method_19326");
+      double x = readDouble(pos, Double.NaN, "x", "method_10216", "getX", "x");
+      double y = readDouble(pos, Double.NaN, "y", "method_10214", "getY", "y");
+      double z = readDouble(pos, Double.NaN, "z", "method_10215", "getZ", "z");
+      if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+        return new double[] { x, y, z };
+      }
+    } catch (Throwable ignored) {
+      // Try entity coordinate methods below.
+    }
+    double x = readDouble(target, Double.NaN, "getX", "method_23317", "x");
+    double y = readDouble(target, Double.NaN, "getEyeY", "method_23320", "getY", "method_23318", "y");
+    double z = readDouble(target, Double.NaN, "getZ", "method_23321", "z");
+    if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+      return new double[] { x, y, z };
+    }
+    return null;
+  }
+
+  private static double readDouble(Object target, double fallback, String... names) {
+    if (target == null) {
+      return fallback;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        if (method.getParameterCount() == 0 && Number.class.isAssignableFrom(wrapType(method.getReturnType()))) {
+          return ((Number) method.invoke(target)).doubleValue();
+        }
+      } catch (Throwable ignored) {
+        // Try a field with the same name.
+      }
+      try {
+        Field field = target.getClass().getField(name);
+        Object value = field.get(target);
+        if (value instanceof Number number) {
+          return number.doubleValue();
+        }
+      } catch (Throwable ignored) {
+        // Try the next candidate.
+      }
+    }
+    return fallback;
+  }
+
+  private static float readFloat(Object target, float fallback, String... names) {
+    return (float) readDouble(target, fallback, names);
+  }
+
+  private static void setCameraPosition(Object camera, double x, double y, double z) {
+    for (String methodName : new String[] { "setPosition", "method_19327" }) {
+      try {
+        Method method = camera.getClass().getDeclaredMethod(methodName, Double.TYPE, Double.TYPE, Double.TYPE);
+        method.setAccessible(true);
+        method.invoke(camera, x, y, z);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+    setDoubleFields(camera, x, "x", "cameraX");
+    setDoubleFields(camera, y, "y", "cameraY");
+    setDoubleFields(camera, z, "z", "cameraZ");
+  }
+
+  private static void setCameraRotation(Object camera, float yaw, float pitch) {
+    for (String methodName : new String[] { "setRotation", "method_19325" }) {
+      try {
+        Method method = camera.getClass().getDeclaredMethod(methodName, Float.TYPE, Float.TYPE);
+        method.setAccessible(true);
+        method.invoke(camera, yaw, pitch);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next mapping name.
+      }
+    }
+  }
+
+  private static void freezePlayerMovement(Minecraft client) {
+    Object player = playerObject(client);
+    if (player == null) {
+      return;
+    }
+    if (freecamApplied) restoreFreecamPlayerTransform(client);
+    // KeyMapping state is what LocalPlayer reads during its tick. Clearing it at
+    // START_CLIENT_TICK prevents WASD/jump/sneak/sprint from reaching the player,
+    // while updateFreecam can still read the physical keys directly from GLFW.
+    if (client.options != null) {
+      client.options.keyUp.setDown(false);
+      client.options.keyDown.setDown(false);
+      client.options.keyLeft.setDown(false);
+      client.options.keyRight.setDown(false);
+      client.options.keyJump.setDown(false);
+      client.options.keyShift.setDown(false);
+      client.options.keySprint.setDown(false);
+    }
+    setFloatFields(player, 0.0F, "xxa", "yya", "zza", "field_6250", "field_6261", "field_6212");
+    setBooleanFields(player, false, "jumping", "field_3913");
+    invokeBoolean(player, false, "setJumping", "method_6043");
+    Object input = getAnyField(player, "input", "field_3913");
+    if (input == null) {
+      return;
+    }
+    setStaticValueByName(input, "EMPTY", "keyPresses", "field_3903");
+    setStaticValueByName(input, "ZERO", "moveVector", "field_3904");
+  }
+
+  private static void setStaticValueByName(Object target, String staticName, String... targetFieldNames) {
+    Object value = null;
+    Class<?> type = target.getClass();
+    for (Field field : type.getDeclaredFields()) {
+      try {
+        Field staticField = field.getType().getField(staticName);
+        value = staticField.get(null);
+        break;
+      } catch (Throwable ignored) {
+        // Try the next field type.
+      }
+    }
+    if (value != null) {
+      setObjectFields(target, value, targetFieldNames);
+    }
+  }
+
+  private static void invokeBoolean(Object target, boolean value, String... methodNames) {
+    for (String methodName : methodNames) {
+      try {
+        Method method = target.getClass().getMethod(methodName, Boolean.TYPE);
+        method.invoke(target, value);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next method.
+      }
+    }
+  }
+
+  private static void invokeFloat(Object target, float value, String... methodNames) {
+    for (String methodName : methodNames) {
+      try {
+        Method method = target.getClass().getMethod(methodName, Float.TYPE);
+        method.invoke(target, value);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next method.
+      }
+    }
+  }
+
+  private static void setObjectFields(Object target, Object value, String... names) {
+    setFields(target, field -> field.getType().isInstance(value), field -> field.set(target, value), names);
+  }
+
+  private static void setIntFields(Object target, int value, String... names) {
+    setFields(target, field -> field.getType() == Integer.TYPE || field.getType() == Integer.class, field -> {
+      if (field.getType() == Integer.TYPE) {
+        field.setInt(target, value);
+      } else {
+        field.set(target, Integer.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setDoubleFields(Object target, double value, String... names) {
+    setFields(target, field -> field.getType() == Double.TYPE || field.getType() == Double.class, field -> {
+      if (field.getType() == Double.TYPE) {
+        field.setDouble(target, value);
+      } else {
+        field.set(target, Double.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setFloatFields(Object target, float value, String... names) {
+    setFields(target, field -> field.getType() == Float.TYPE || field.getType() == Float.class, field -> {
+      if (field.getType() == Float.TYPE) {
+        field.setFloat(target, value);
+      } else {
+        field.set(target, Float.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setBooleanFields(Object target, boolean value, String... names) {
+    setFields(target, field -> field.getType() == Boolean.TYPE || field.getType() == Boolean.class, field -> {
+      if (field.getType() == Boolean.TYPE) {
+        field.setBoolean(target, value);
+      } else {
+        field.set(target, Boolean.valueOf(value));
+      }
+    }, names);
+  }
+
+  private static void setFields(Object target, FieldFilter filter, FieldSetter setter, String... names) {
+    if (target == null) {
+      return;
+    }
+    for (String name : names) {
+      Class<?> type = target.getClass();
+      while (type != null) {
+        try {
+          Field field = type.getDeclaredField(name);
+          if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) && filter.matches(field)) {
+            field.setAccessible(true);
+            setter.set(field);
+            return;
+          }
+        } catch (Throwable ignored) {
+          // Try superclass or next name.
+        }
+        type = type.getSuperclass();
+      }
+    }
+  }
+
+  private interface FieldFilter {
+    boolean matches(Field field);
+  }
+
+  private interface FieldSetter {
+    void set(Field field) throws IllegalAccessException;
+  }
+
+  private static Class<?> wrapType(Class<?> type) {
+    if (!type.isPrimitive()) {
+      return type;
+    }
+    if (type == Double.TYPE) {
+      return Double.class;
+    }
+    if (type == Float.TYPE) {
+      return Float.class;
+    }
+    if (type == Integer.TYPE) {
+      return Integer.class;
+    }
+    if (type == Long.TYPE) {
+      return Long.class;
+    }
+    return type;
+  }
+
+  private static float clampFloat(float value, float min, float max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static float wrapDegrees(float value) {
+    float result = value % 360.0F;
+    if (result >= 180.0F) {
+      result -= 360.0F;
+    }
+    if (result < -180.0F) {
+      result += 360.0F;
+    }
+    return result;
+  }
+
+  private static double smoothZoomFactor(double current, double target) {
+    double delta = target - current;
+    if (Math.abs(delta) < 0.01D) {
+      return target;
+    }
+    return current + (delta * MenuModules.zoomSmoothness());
+  }
+
+  private static boolean moduleEnabled(String id) {
+    return MenuModules.enabled(id);
+  }
+
+  public static boolean isModuleEnabled(String id) {
+    return moduleEnabled(id);
+  }
+
+  private static void log(String message) {
+    System.out.println("[X Client] " + message);
+  }
+
+  private static void applyModule(MenuModules.Module module) {
+    Minecraft client = Minecraft.getInstance();
+    if (client == null || client.options == null) {
+      return;
+    }
+
+    if ("bright".equals(module.id)) {
+      updateFullbright(client);
+    } else if ("speed".equals(module.id)) {
+      updateSpeedEffect(client);
+    } else if ("resistance".equals(module.id)) {
+      updateResistanceEffect(client);
+    } else if ("invisibility".equals(module.id)) {
+      updateInvisibilityEffect(client);
+    } else if ("zoom".equals(module.id)) {
+      updateZoom(client);
+    } else if ("hitboxes".equals(module.id)) {
+      NativeHitboxController.setEnabled(module.enabled);
+    } else if ("flight".equals(module.id)) {
+      AdminFlightModule.moduleChanged(client, module.enabled);
+    }
+  }
+
+  private static void updateFullbright(Minecraft client) {
+    if (client == null || client.options == null) {
+      return;
+    }
+
+    if (moduleEnabled("bright")) {
+      if (!fullbrightApplied) {
+        previousGamma = getOptionNumber(client.options, "gamma");
+        previousDarknessScale = getOptionNumber(client.options, "darknessEffectScale");
+      }
+      forceOptionNumber(client.options, "gamma", FULLBRIGHT_GAMMA);
+      forceOptionNumber(client.options, "darknessEffectScale", 0.0D);
+      applyNightVisionEffect(client);
+      boostLightTexture(client);
+      fullbrightApplied = true;
+      return;
+    }
+
+    if (fullbrightApplied) {
+      clearNightVisionEffect(client);
+    }
+    if (fullbrightApplied && previousGamma != null) {
+      forceOptionNumber(client.options, "gamma", previousGamma.doubleValue());
+      if (previousDarknessScale != null) {
+        forceOptionNumber(client.options, "darknessEffectScale", previousDarknessScale.doubleValue());
+      }
+    }
+    fullbrightApplied = false;
+    previousGamma = null;
+    previousDarknessScale = null;
+  }
+
+  private static void applyNightVisionEffect(Minecraft client) {
+    try {
+      LocalPlayer player = client.player;
+      if (player == null) {
+        return;
+      }
+      MobEffectInstance current = player.getEffect(MobEffects.NIGHT_VISION);
+      if (current != null && (current.getDuration() < 0 || current.getDuration() > NIGHT_VISION_REFRESH_THRESHOLD_TICKS)
+          && current.getAmplifier() >= NIGHT_VISION_EFFECT_AMPLIFIER && !current.showIcon()) {
+        return;
+      }
+      MobEffectInstance effect = new MobEffectInstance(MobEffects.NIGHT_VISION, NIGHT_VISION_DURATION_TICKS, NIGHT_VISION_EFFECT_AMPLIFIER, false, false, false);
+      skipEffectBlend(effect);
+      player.addEffect(effect);
+      fullbrightAddedNightVision = true;
+    } catch (Throwable ignored) {
+      // Shader fullbright still falls back to gamma and lightmap changes.
+    }
+  }
+
+  private static void skipEffectBlend(MobEffectInstance effect) {
+    try {
+      if (effect != null) {
+        effect.skipBlending();
+      }
+    } catch (Throwable ignored) {
+      // Older mappings may not expose blend controls.
+    }
+  }
+
+  private static void clearNightVisionEffect(Minecraft client) {
+    try {
+      LocalPlayer player = client == null ? null : client.player;
+      if (player != null) {
+        MobEffectInstance current = player.getEffect(MobEffects.NIGHT_VISION);
+        if (current != null && (fullbrightAddedNightVision || (!current.isVisible() && !current.showIcon()))) {
+          player.removeEffect(MobEffects.NIGHT_VISION);
+        }
+      }
+    } catch (Throwable ignored) {
+      // Leave externally supplied night vision untouched when cleanup fails.
+    }
+    fullbrightAddedNightVision = false;
+  }
+
+  private static void boostLightTexture(Minecraft client) {
+    long now = System.currentTimeMillis();
+    if (now - lastFullbrightLightmapMs < 150L) {
+      return;
+    }
+    lastFullbrightLightmapMs = now;
+    try {
+      Object renderer = findObjectByClassName(client, "GameRenderer", "class_757");
+      Object lightTexture = findObjectByClassName(renderer, "Lightmap", "LightTexture", "class_765");
+      Object image = findObjectByClassName(lightTexture, "NativeImage", "class_1011");
+      if (image != null) {
+        fillNativeImageWhite(image);
+      }
+      Object dynamicTexture = findObjectByClassName(lightTexture, "DynamicTexture", "class_1043");
+      uploadTexture(dynamicTexture);
+    } catch (Throwable ignored) {
+      // Some shader pipelines do not expose the vanilla lightmap.
+    }
+  }
+
+  private static Object findObjectByClassName(Object target, String... classNameParts) {
+    if (target == null) {
+      return null;
+    }
+    Class<?> type = target.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(target);
+          if (value == null) {
+            continue;
+          }
+          String className = value.getClass().getName();
+          for (String part : classNameParts) {
+            if (className.contains(part)) {
+              return value;
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static void fillNativeImageWhite(Object image) {
+    for (String methodName : new String[] { "setPixelRGBA", "method_4305" }) {
+      for (Method method : image.getClass().getMethods()) {
+        if (!methodName.equals(method.getName()) || method.getParameterCount() != 3) {
+          continue;
+        }
+        Class<?>[] parameterTypes = method.getParameterTypes();
+        if (parameterTypes[0] != Integer.TYPE || parameterTypes[1] != Integer.TYPE || parameterTypes[2] != Integer.TYPE) {
+          continue;
+        }
+        try {
+          for (int x = 0; x < 16; x += 1) {
+            for (int y = 0; y < 16; y += 1) {
+              method.invoke(image, Integer.valueOf(x), Integer.valueOf(y), Integer.valueOf(0xFFFFFFFF));
+            }
+          }
+          return;
+        } catch (Throwable ignored) {
+          // Try the next pixel setter.
+        }
+      }
+    }
+  }
+
+  private static void uploadTexture(Object texture) {
+    if (texture == null) {
+      return;
+    }
+    for (String methodName : new String[] { "upload", "method_4625" }) {
+      try {
+        Method method = texture.getClass().getMethod(methodName);
+        method.invoke(texture);
+        return;
+      } catch (Throwable ignored) {
+        // Try the next upload name.
+      }
+    }
+  }
+
+  private static double currentBaseFov(Options options) {
+    Number value = getOptionNumber(options, "fov");
+    if (value == null) {
+      return 70.0D;
+    }
+    return Math.max(30.0D, Math.min(110.0D, value.doubleValue()));
+  }
+
+  private static Number getOptionNumber(Options options, String methodName) {
+    try {
+      Object option = Options.class.getMethod(methodName).invoke(options);
+      Object value = option.getClass().getMethod("get").invoke(option);
+      return value instanceof Number ? (Number) value : null;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      return null;
+    }
+  }
+
+  private static Boolean getOptionBoolean(Options options, String methodName) {
+    Object option = null;
+    try {
+      option = Options.class.getMethod(methodName).invoke(options);
+      Object value = option.getClass().getMethod("get").invoke(option);
+      if (value instanceof Boolean bool) {
+        return bool;
+      }
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      option = optionByName(options, methodName);
+    }
+    if (option == null) {
+      option = optionByName(options, methodName);
+    }
+    return getOptionBooleanValue(option);
+  }
+
+  private static void setOptionNumber(Options options, String methodName, Object value) {
+    try {
+      Object option = Options.class.getMethod(methodName).invoke(options);
+      option.getClass().getMethod("set", Object.class).invoke(option, value);
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      // Option names changed; keep the rest of the client usable.
+    }
+  }
+
+  private static void forceOptionNumber(Options options, String methodName, double value) {
+    Object option = null;
+    try {
+      option = Options.class.getMethod(methodName).invoke(options);
+      option.getClass().getMethod("set", Object.class).invoke(option, Double.valueOf(value));
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      option = optionByName(options, methodName);
+    }
+    if (option == null) {
+      option = optionByName(options, methodName);
+    }
+    forceOptionValue(option, Double.valueOf(value));
+  }
+
+  private static void forceOptionInteger(Options options, String methodName, int value) {
+    Object option = null;
+    Integer boxed = Integer.valueOf(value);
+    try {
+      option = Options.class.getMethod(methodName).invoke(options);
+      option.getClass().getMethod("set", Object.class).invoke(option, boxed);
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      option = optionByName(options, methodName);
+    }
+    if (option == null) {
+      option = optionByName(options, methodName);
+    }
+    forceOptionValue(option, boxed);
+  }
+
+  private static void forceOptionBoolean(Options options, String methodName, boolean value) {
+    Object option = null;
+    Boolean boxed = Boolean.valueOf(value);
+    try {
+      option = Options.class.getMethod(methodName).invoke(options);
+      option.getClass().getMethod("set", Object.class).invoke(option, boxed);
+      return;
+    } catch (ReflectiveOperationException | RuntimeException ignored) {
+      option = optionByName(options, methodName);
+    }
+    if (option == null) {
+      option = optionByName(options, methodName);
+    }
+    forceOptionBooleanValue(option, value);
+  }
+
+  private static Object optionByName(Object options, String name) {
+    Class<?> type = options.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (!field.getName().equals(name)) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          return field.get(options);
+        } catch (Throwable ignored) {
+          return null;
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static void forceOptionValue(Object option, Number value) {
+    if (option == null) {
+      return;
+    }
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        Class<?> fieldType = field.getType();
+        if (fieldType != Double.class && fieldType != Double.TYPE && fieldType != Integer.class
+            && fieldType != Integer.TYPE && fieldType != Number.class && fieldType != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object current = field.get(option);
+          if (current == null || current instanceof Number) {
+            if (fieldType == Double.TYPE) {
+              field.setDouble(option, value.doubleValue());
+            } else if (fieldType == Integer.TYPE) {
+              field.setInt(option, value.intValue());
+            } else if (fieldType == Integer.class) {
+              field.set(option, Integer.valueOf(value.intValue()));
+            } else if (fieldType == Double.class) {
+              field.set(option, Double.valueOf(value.doubleValue()));
+            } else {
+              field.set(option, value);
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+  }
+
+  private static Boolean getOptionBooleanValue(Object option) {
+    if (option == null) {
+      return null;
+    }
+    try {
+      Object value = option.getClass().getMethod("get").invoke(option);
+      if (value instanceof Boolean bool) {
+        return bool;
+      }
+    } catch (Throwable ignored) {
+      // Fall back to field scan.
+    }
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        if (field.getType() != Boolean.class && field.getType() != Boolean.TYPE && field.getType() != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object value = field.get(option);
+          if (value instanceof Boolean bool) {
+            return bool;
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+    return null;
+  }
+
+  private static void forceOptionBooleanValue(Object option, boolean value) {
+    if (option == null) {
+      return;
+    }
+    Class<?> type = option.getClass();
+    while (type != null) {
+      for (Field field : type.getDeclaredFields()) {
+        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        Class<?> fieldType = field.getType();
+        if (fieldType != Boolean.class && fieldType != Boolean.TYPE && fieldType != Object.class) {
+          continue;
+        }
+        try {
+          field.setAccessible(true);
+          Object current = field.get(option);
+          if (current == null || current instanceof Boolean) {
+            if (fieldType == Boolean.TYPE) {
+              field.setBoolean(option, value);
+            } else {
+              field.set(option, Boolean.valueOf(value));
+            }
+          }
+        } catch (Throwable ignored) {
+          // Try the next field.
+        }
+      }
+      type = type.getSuperclass();
+    }
+  }
+
+  private static Boolean getSmoothCamera(Options options) {
+    try {
+      return Boolean.valueOf(options.smoothCamera);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static void setSmoothCamera(Options options, boolean value) {
+    try {
+      options.smoothCamera = value;
+    } catch (Throwable ignored) {
+      // Option names changed; keep zoom FOV active without smooth camera.
+    }
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/XClientTutorialScreen.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+
+public final class XClientTutorialScreen extends Screen {
+  private static final String[] TITLES = {
+      "X Client Tutorial",
+      "Rechts-Shift",
+      "X-Client-Menü",
+      "Fullbright",
+      "HUD & UI Editor",
+      "Crosshair & Social",
+      "Tutorial wiederholen"
+  };
+  private static final String[] TEXTS = {
+      "Folge dem Pfeil. Normale Klicks sind gesperrt.",
+      "Rechts-Shift öffnet dieses Menü.",
+      "Kachel anklicken. Danach Toggle, Keybind oder Optionen nutzen.",
+      "BRIGHT macht alles hell: Nacht, Höhlen und dunkle Räume.",
+      "HUD-Module anzeigen. Mit UI verschiebst du alles.",
+      "AIM stellt dein Crosshair ein. FRIENDS zeigt Spieler.",
+      "HELP spielt das Tutorial nochmal ab."
+  };
+  private static final int MENU_TILE_HEIGHT = 44;
+  private static final int MENU_GAP = 4;
+  private static final int MENU_SIDE_PADDING = 10;
+  private static final int MENU_HEADER_HEIGHT = 42;
+  private static final int MENU_FOOTER_HEIGHT = 8;
+  private static final int MENU_MAX_WIDTH = 270;
+  private static final int MENU_MAX_HEIGHT = 200;
+  private static final int MENU_MIN_MARGIN = 10;
+  private static final int CARD_SKIP_W = 32;
+  private static final int CARD_BACK_W = 34;
+  private static final int CARD_NEXT_W = 34;
+  private static final int CARD_BUTTON_H = 12;
+  private int step;
+
+  XClientTutorialScreen(boolean replay) {
+    super(TextBridge.literal("X Client Tutorial"));
+    if (replay) {
+      XClientTutorialState.reset();
+    }
+  }
+
+  @Override
+  public boolean isPauseScreen() {
+    return XLauncherMenuClient.shouldPauseInOwnWorld();
+  }
+
+  @Override
+  public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float tickDelta) {
+    Font font = Minecraft.getInstance().font;
+    int[] focus = focusBounds();
+    int[] card = cardBounds(focus);
+
+    drawWorldBackdrop(graphics, font);
+    drawShowcase(graphics, font, focus);
+    drawSpotlight(graphics, focus);
+    drawArrow(graphics, focus, card);
+    drawCard(graphics, font, card);
+  }
+
+  @Override
+  public boolean keyPressed(KeyEvent event) {
+    int key = event.key();
+    if (key == 256) {
+      finish();
+      return true;
+    }
+    if (key == 257 || key == 32 || key == 262) {
+      next();
+      return true;
+    }
+    if (key == 263 && step > 0) {
+      step -= 1;
+      return true;
+    }
+    return true;
+  }
+
+  @Override
+  public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+    if (event.button() != 0) {
+      return true;
+    }
+    int[] card = cardBounds(focusBounds());
+    double mouseX = event.x();
+    double mouseY = event.y();
+    if (isInside(mouseX, mouseY, card[0] + 8, card[1] + card[3] - 17, CARD_SKIP_W, CARD_BUTTON_H)) {
+      finish();
+      return true;
+    }
+    if (isInside(mouseX, mouseY, card[0] + card[2] - 78, card[1] + card[3] - 17, CARD_BACK_W, CARD_BUTTON_H)) {
+      if (step > 0) {
+        step -= 1;
+      }
+      return true;
+    }
+    if (isInside(mouseX, mouseY, card[0] + card[2] - 42, card[1] + card[3] - 17, CARD_NEXT_W, CARD_BUTTON_H)) {
+      next();
+      return true;
+    }
+    return true;
+  }
+
+  private void next() {
+    if (step >= TITLES.length - 1) {
+      finish();
+      return;
+    }
+    step += 1;
+  }
+
+  private void finish() {
+    XClientTutorialState.markCompleted();
+    Minecraft.getInstance().setScreen(null);
+  }
+
+  private void drawWorldBackdrop(GuiGraphicsExtractor graphics, Font font) {
+    graphics.fill(0, 0, width, height, LauncherTheme.argb(170, 0x03070B));
+    for (int y = 0; y < height; y += 18) {
+      int shade = (y / 18) % 2 == 0 ? 0x0A141D : 0x081019;
+      graphics.fill(0, y, width, Math.min(height, y + 18), LauncherTheme.argb(52, shade));
+    }
+    graphics.fill(0, height - 22, width, height, LauncherTheme.argb(95, 0x000000));
+    graphics.centeredText(font, "+", width / 2, Math.max(18, height / 2 - 4), LauncherTheme.argb(170, 0xFFFFFF));
+  }
+
+  private void drawShowcase(GuiGraphicsExtractor graphics, Font font, int[] focus) {
+    drawMenuPreview(graphics, font);
+    drawHudPreview(graphics, font);
+    if (step == 1) {
+      drawKeycap(graphics, font, focus[0], focus[1], focus[2], focus[3], "R-SHIFT", true);
+    }
+  }
+
+  private void drawMenuPreview(GuiGraphicsExtractor graphics, Font font) {
+    int[] layout = menuLayout();
+    int boxX = layout[4];
+    int boxY = layout[5];
+    int boxW = layout[6];
+    int boxH = layout[7];
+    int columns = layout[8];
+    int tileW = layout[9];
+    int accent = LauncherTheme.accent();
+    graphics.fill(boxX + 2, boxY + 2, boxX + boxW + 2, boxY + boxH + 2, LauncherTheme.argb(54, 0x000000));
+    graphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, LauncherTheme.argb(150, 0x070D12));
+    border(graphics, boxX, boxY, boxW, boxH, LauncherTheme.argb(118, 0xDCE8F2));
+    drawMenuSearch(graphics, font, layout);
+    drawMenuHeader(graphics, font, layout);
+
+    MenuModules.Module[] modules = MenuModules.modules();
+    for (int index = 0; index < modules.length; index += 1) {
+      int row = index / columns;
+      int column = index % columns;
+      int x = layout[0] + (column * (tileW + MENU_GAP));
+      int y = layout[1] + (row * (MENU_TILE_HEIGHT + MENU_GAP));
+      if (y + MENU_TILE_HEIGHT > boxY + boxH - MENU_FOOTER_HEIGHT) {
+        break;
+      }
+      drawMenuTile(graphics, font, modules[index], x, y, tileW, MENU_TILE_HEIGHT, isHighlighted(modules[index].id), accent);
+    }
+  }
+
+  private void drawMenuSearch(GuiGraphicsExtractor graphics, Font font, int[] layout) {
+    int x = layout[4] + 10;
+    int y = layout[5] + 10;
+    int w = Math.min(78, Math.max(42, layout[6] - (MENU_SIDE_PADDING * 2) - 32));
+    graphics.fill(x + 1, y + 1, x + w + 1, y + 25, LauncherTheme.argb(44, 0x000000));
+    graphics.fill(x, y, x + w, y + 24, LauncherTheme.argb(128, 0x0B1218));
+    border(graphics, x, y, w, 24, LauncherTheme.argb(148, 0xFFFFFF));
+    graphics.text(font, "Search", x + 7, y + 8, LauncherTheme.mutedTextColor());
+  }
+
+  private void drawMenuHeader(GuiGraphicsExtractor graphics, Font font, int[] layout) {
+    graphics.centeredText(font, "X Client", layout[4] + (layout[6] / 2), layout[5] + 18, LauncherTheme.textColor());
+    int x = layout[4] + layout[6] - 34;
+    int y = layout[5] + 10;
+    graphics.fill(x + 1, y + 1, x + 25, y + 25, LauncherTheme.argb(42, 0x000000));
+    graphics.fill(x, y, x + 24, y + 24, step == 4 ? LauncherTheme.accentArgb(84) : LauncherTheme.argb(104, 0x0B1218));
+    border(graphics, x, y, 24, 24, step == 4 ? LauncherTheme.accentArgb(215) : LauncherTheme.argb(148, 0xFFFFFF));
+    graphics.centeredText(font, "UI", x + 12, y + 8, step == 4 ? LauncherTheme.textColor() : LauncherTheme.mutedTextColor());
+  }
+
+  private void drawMenuTile(GuiGraphicsExtractor graphics, Font font, MenuModules.Module module, int x, int y, int w, int h, boolean highlighted, int accent) {
+    boolean active = highlighted || (module.toggleable && module.enabled);
+    int background = active ? LauncherTheme.accentArgb(highlighted ? 98 : 66) : LauncherTheme.argb(92, 0x101820);
+    graphics.fill(x + 1, y + 1, x + w + 1, y + h + 1, LauncherTheme.argb(54, 0x000000));
+    graphics.fill(x, y, x + w, y + h, background);
+    if (active) {
+      graphics.fill(x, y + h - 4, x + w, y + h, 0xFF000000 | accent);
+    }
+    border(graphics, x, y, w, h, highlighted ? LauncherTheme.accentArgb(245) : LauncherTheme.argb(172, 0xFFFFFF));
+    drawMenuIcon(graphics, font, module, x, y, w, h, accent);
+  }
+
+  private void drawMenuIcon(GuiGraphicsExtractor graphics, Font font, MenuModules.Module module, int x, int y, int w, int h, int accent) {
+    if (module != null) {
+      String label = module.subtitle == null || module.subtitle.trim().isEmpty() ? module.title : module.subtitle;
+      graphics.centeredText(font, fit(label, w - 8), x + (w / 2), y + (h / 2) - 4, 0xFFFFFFFF);
+      return;
+    }
+    int cx = x + (w / 2);
+    int cy = y + (h / 2);
+    int color = 0xFFFFFFFF;
+    if ("zoom".equals(module.id)) {
+      border(graphics, cx - 9, cy - 9, 17, 17, color);
+      graphics.fill(cx - 5, cy - 1, cx + 4, cy + 1, color);
+      graphics.fill(cx - 1, cy - 5, cx + 1, cy + 4, color);
+      graphics.fill(cx + 6, cy + 7, cx + 10, cy + 11, color);
+      graphics.fill(cx + 9, cy + 10, cx + 13, cy + 14, color);
+      return;
+    }
+    if ("bright".equals(module.id)) {
+      graphics.fill(cx - 4, cy - 4, cx + 4, cy + 4, color);
+      graphics.fill(cx - 1, cy - 13, cx + 1, cy - 7, color);
+      graphics.fill(cx - 1, cy + 7, cx + 1, cy + 13, color);
+      graphics.fill(cx - 13, cy - 1, cx - 7, cy + 1, color);
+      graphics.fill(cx + 7, cy - 1, cx + 13, cy + 1, color);
+      return;
+    }
+    if ("sprint".equals(module.id)) {
+      graphics.fill(cx - 12, cy + 8, cx + 10, cy + 10, color);
+      graphics.fill(cx + 6, cy + 5, cx + 12, cy + 10, color);
+      graphics.fill(cx - 5, cy - 10, cx - 1, cy + 4, color);
+      graphics.fill(cx - 1, cy + 1, cx + 7, cy + 4, color);
+      graphics.fill(cx + 5, cy + 4, cx + 9, cy + 11, color);
+      return;
+    }
+    if ("nobob".equals(module.id)) {
+      border(graphics, cx - 12, cy - 7, 24, 14, color);
+      graphics.fill(cx - 8, cy - 1, cx + 8, cy + 1, color);
+      graphics.fill(cx - 2, cy - 4, cx + 2, cy + 4, color);
+      return;
+    }
+    if ("crosshair".equals(module.id)) {
+      border(graphics, cx - 12, cy - 12, 7, 7, color);
+      border(graphics, cx + 5, cy - 12, 7, 7, color);
+      border(graphics, cx - 12, cy + 5, 7, 7, color);
+      border(graphics, cx + 5, cy + 5, 7, 7, color);
+      graphics.fill(cx - 3, cy - 1, cx + 3, cy + 1, color);
+      graphics.fill(cx - 1, cy - 3, cx + 1, cy + 3, color);
+      return;
+    }
+    if ("fps".equals(module.id)) {
+      border(graphics, cx - 12, cy - 9, 24, 18, color);
+      graphics.fill(cx - 8, cy + 3, cx - 5, cy + 7, color);
+      graphics.fill(cx - 2, cy, cx + 1, cy + 7, color);
+      graphics.fill(cx + 4, cy - 5, cx + 7, cy + 7, color);
+      return;
+    }
+    if ("coords".equals(module.id)) {
+      graphics.fill(cx - 1, cy - 13, cx + 1, cy + 12, color);
+      graphics.fill(cx - 13, cy - 1, cx + 13, cy + 1, color);
+      border(graphics, cx - 7, cy - 7, 14, 14, color);
+      return;
+    }
+    if ("keys".equals(module.id)) {
+      int key = 8;
+      drawTinyKey(graphics, cx - 4, cy - 12, key, key);
+      drawTinyKey(graphics, cx - 13, cy - 3, key, key);
+      drawTinyKey(graphics, cx - 4, cy - 3, key, key);
+      drawTinyKey(graphics, cx + 5, cy - 3, key, key);
+      return;
+    }
+    if ("cps".equals(module.id)) {
+      border(graphics, cx - 7, cy - 12, 14, 22, color);
+      graphics.fill(cx - 1, cy - 9, cx + 1, cy - 3, color);
+      graphics.fill(cx - 5, cy + 12, cx + 5, cy + 14, color);
+      return;
+    }
+    if ("clock".equals(module.id)) {
+      border(graphics, cx - 11, cy - 11, 22, 22, color);
+      graphics.fill(cx - 1, cy - 8, cx + 1, cy + 1, color);
+      graphics.fill(cx, cy, cx + 7, cy + 2, color);
+      return;
+    }
+    if ("ui".equals(module.id)) {
+      border(graphics, cx - 12, cy - 9, 24, 18, color);
+      graphics.fill(cx - 9, cy - 1, cx + 9, cy + 1, color);
+      graphics.fill(cx - 1, cy - 7, cx + 1, cy + 7, color);
+      return;
+    }
+    graphics.centeredText(font, fit(module.title, w - 8), cx, cy - 4, color);
+  }
+
+  private void drawTinyKey(GuiGraphicsExtractor graphics, int x, int y, int w, int h) {
+    graphics.fill(x, y, x + w, y + h, LauncherTheme.argb(120, 0x121C25));
+    border(graphics, x, y, w, h, LauncherTheme.argb(150, 0xDCE8F2));
+  }
+
+  private boolean isHighlighted(String id) {
+    return (step == 3 && "bright".equals(id)) || (step == 4 && "ui".equals(id))
+        || (step == 5 && ("crosshair".equals(id) || "friends".equals(id)))
+        || (step == 6 && "tutorial".equals(id));
+  }
+
+  private void drawHudPreview(GuiGraphicsExtractor graphics, Font font) {
+    drawPill(graphics, font, 9, 9, 68, 16, "FPS 144");
+    drawPill(graphics, font, 9, 29, 86, 16, "12 64 -8");
+    drawKeycap(graphics, font, Math.max(10, width - 88), Math.max(10, height - 58), 66, 18, "W A S D", step == 4);
+  }
+
+  private void drawFullbrightPreview(GuiGraphicsExtractor graphics, Font font, int[] focus) {
+    graphics.fill(focus[0], focus[1], focus[0] + focus[2], focus[1] + focus[3], LauncherTheme.argb(230, 0xFFF2A8));
+    graphics.fill(focus[0] + 8, focus[1] + 9, focus[0] + focus[2] - 8, focus[1] + focus[3] - 9, LauncherTheme.argb(90, 0xFFFFFF));
+    graphics.centeredText(font, "FULLBRIGHT", focus[0] + focus[2] / 2, focus[1] + focus[3] / 2 - 4, 0xFF141414);
+  }
+
+  private void drawPill(GuiGraphicsExtractor graphics, Font font, int x, int y, int w, int h, String label) {
+    graphics.fill(x, y, x + w, y + h, LauncherTheme.argb(112, 0x000000));
+    border(graphics, x, y, w, h, LauncherTheme.accentArgb(130));
+    graphics.text(font, fit(label, w - 8), x + 5, y + 6, LauncherTheme.textColor());
+  }
+
+  private void drawKeycap(GuiGraphicsExtractor graphics, Font font, int x, int y, int w, int h, String label, boolean active) {
+    graphics.fill(x, y, x + w, y + h, active ? LauncherTheme.accentArgb(120) : LauncherTheme.argb(95, 0xFFFFFF));
+    border(graphics, x, y, w, h, active ? LauncherTheme.accentArgb(235) : LauncherTheme.argb(130, 0xFFFFFF));
+    graphics.centeredText(font, fit(label, w - 8), x + w / 2, y + (h / 2) - 3, LauncherTheme.textColor());
+  }
+
+  private void drawSpotlight(GuiGraphicsExtractor graphics, int[] focus) {
+    int pad = 5;
+    int left = Math.max(0, focus[0] - pad);
+    int top = Math.max(0, focus[1] - pad);
+    int right = Math.min(width, focus[0] + focus[2] + pad);
+    int bottom = Math.min(height, focus[1] + focus[3] + pad);
+    int shade = LauncherTheme.argb(148, 0x000000);
+    graphics.fill(0, 0, width, top, shade);
+    graphics.fill(0, bottom, width, height, shade);
+    graphics.fill(0, top, left, bottom, shade);
+    graphics.fill(right, top, width, bottom, shade);
+    graphics.fill(left, top, right, top + 2, LauncherTheme.accentArgb(235));
+    graphics.fill(left, bottom - 2, right, bottom, LauncherTheme.accentArgb(235));
+    graphics.fill(left, top, left + 2, bottom, LauncherTheme.accentArgb(235));
+    graphics.fill(right - 2, top, right, bottom, LauncherTheme.accentArgb(235));
+  }
+
+  private void drawArrow(GuiGraphicsExtractor graphics, int[] focus, int[] card) {
+    int cardCenterX = card[0] + (card[2] / 2);
+    int cardCenterY = card[1] + (card[3] / 2);
+    int focusCenterX = focus[0] + (focus[2] / 2);
+    int focusCenterY = focus[1] + (focus[3] / 2);
+    int dx = focusCenterX - cardCenterX;
+    int dy = focusCenterY - cardCenterY;
+    int startX;
+    int startY;
+    int endX;
+    int endY;
+    int directionX = 0;
+    int directionY = 0;
+    int margin = 10;
+    if (Math.abs(dx) * Math.max(1, focus[3]) >= Math.abs(dy) * Math.max(1, focus[2])) {
+      directionX = dx >= 0 ? 1 : -1;
+      startX = directionX > 0 ? card[0] + card[2] + 2 : card[0] - 2;
+      endX = directionX > 0 ? focus[0] - margin : focus[0] + focus[2] + margin;
+      endY = clamp(cardCenterY, focus[1] + 5, focus[1] + focus[3] - 5);
+      startY = clamp(endY, card[1] + 8, card[1] + card[3] - 8);
+    } else {
+      directionY = dy >= 0 ? 1 : -1;
+      startY = directionY > 0 ? card[1] + card[3] + 2 : card[1] - 2;
+      endY = directionY > 0 ? focus[1] - margin : focus[1] + focus[3] + margin;
+      endX = clamp(cardCenterX, focus[0] + 5, focus[0] + focus[2] - 5);
+      startX = clamp(endX, card[0] + 8, card[0] + card[2] - 8);
+    }
+    int color = LauncherTheme.accentArgb(240);
+    int shadow = LauncherTheme.argb(95, 0x000000);
+    for (int i = 0; i <= 14; i += 1) {
+      int x = startX + ((endX - startX) * i / 14);
+      int y = startY + ((endY - startY) * i / 14);
+      graphics.fill(x - 2, y - 2, x + 3, y + 3, shadow);
+      graphics.fill(x - 1, y - 1, x + 2, y + 2, color);
+    }
+    drawArrowHead(graphics, endX, endY, directionX, directionY, color);
+  }
+
+  private void drawArrowHead(GuiGraphicsExtractor graphics, int x, int y, int directionX, int directionY, int color) {
+    if (directionX != 0) {
+      int tipX = x + (directionX * 6);
+      graphics.fill(Math.min(x, tipX), y - 1, Math.max(x, tipX), y + 2, color);
+      for (int i = 0; i < 5; i += 1) {
+        int bx = x + (directionX * (4 - i));
+        graphics.fill(Math.min(bx, bx + directionX * 2), y - 5 + i, Math.max(bx, bx + directionX * 2), y - 4 + i, color);
+        graphics.fill(Math.min(bx, bx + directionX * 2), y + 5 - i, Math.max(bx, bx + directionX * 2), y + 6 - i, color);
+      }
+      return;
+    }
+    int tipY = y + (directionY * 6);
+    graphics.fill(x - 1, Math.min(y, tipY), x + 2, Math.max(y, tipY), color);
+    for (int i = 0; i < 5; i += 1) {
+      int by = y + (directionY * (4 - i));
+      graphics.fill(x - 5 + i, Math.min(by, by + directionY * 2), x - 4 + i, Math.max(by, by + directionY * 2), color);
+      graphics.fill(x + 5 - i, Math.min(by, by + directionY * 2), x + 6 - i, Math.max(by, by + directionY * 2), color);
+    }
+  }
+
+  private void drawCard(GuiGraphicsExtractor graphics, Font font, int[] card) {
+    int x = card[0];
+    int y = card[1];
+    int w = card[2];
+    int h = card[3];
+    graphics.fill(x + 2, y + 2, x + w + 2, y + h + 2, LauncherTheme.argb(82, 0x000000));

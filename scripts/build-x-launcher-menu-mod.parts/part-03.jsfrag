@@ -725,7 +725,7 @@ public final class HudOverlay {
     try {
       Class<?> vanillaClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements");
       Object effectId = null;
-      for (String fieldName : new String[] { "STATUS_EFFECTS", "POTION_ICONS" }) {
+      for (String fieldName : new String[] { "MOB_EFFECTS", "STATUS_EFFECTS", "POTION_ICONS" }) {
         try {
           effectId = vanillaClass.getField(fieldName).get(null);
           break;

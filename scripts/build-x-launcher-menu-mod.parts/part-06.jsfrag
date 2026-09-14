@@ -300,7 +300,6 @@
       updateClicks(client);
       updateZoom(client);
       updateFullbright(client);
-      updateClientWorldOverrides(client);
       updateMovementTweaks(client);
       GameTimer.tick(client);
       if (menuKey.method_1436() && System.currentTimeMillis() >= menuKeyConsumedUntilMs) {
@@ -2277,8 +2276,6 @@
 
     if ("bright".equals(module.id)) {
       updateFullbright(client);
-    } else if ("weather".equals(module.id) || "time".equals(module.id)) {
-      updateClientWorldOverrides(client);
     } else if ("speed".equals(module.id)) {
       updateSpeedEffect(client);
     } else if ("resistance".equals(module.id)) {
@@ -2322,57 +2319,6 @@
     fullbrightApplied = false;
     previousGamma = null;
     previousDarknessScale = null;
-  }
-
-  /** Applies visual-only world settings every client tick; no packet is sent. */
-  private static void updateClientWorldOverrides(class_310 client) {
-    if (client == null) return;
-    Object level = getAnyField(client, "field_1687", "level", "world");
-    if (level == null) return;
-    if (moduleEnabled("time")) {
-      invokeWorldNumber(level, Long.valueOf(MenuModules.timeTicks()), "setTimeFromServer", "setTimeOfDay", "method_8448", "method_8430");
-    }
-    if (moduleEnabled("weather")) {
-      int mode = MenuModules.weatherMode();
-      float rain = mode == 0 ? 0.0F : 1.0F;
-      float thunder = mode == 2 ? 1.0F : 0.0F;
-      invokeWorldNumber(level, Float.valueOf(rain), "setRainLevel", "setRainGradient", "method_24784");
-      invokeWorldNumber(level, Float.valueOf(thunder), "setThunderLevel", "setThunderGradient", "method_24785");
-    }
-  }
-
-  private static boolean invokeWorldNumber(Object target, Number value, String... names) {
-    if (target == null || value == null) return false;
-    Class<?> type = target.getClass();
-    while (type != null) {
-      for (Method method : type.getDeclaredMethods()) {
-        if (method.getParameterCount() != 1 || !matchesName(method.getName(), names)) continue;
-        Object argument = numericArgument(value, method.getParameterTypes()[0]);
-        if (argument == null) continue;
-        try {
-          method.setAccessible(true);
-          method.invoke(target, argument);
-          return true;
-        } catch (Throwable ignored) {
-          // Continue with the alternate runtime mapping.
-        }
-      }
-      type = type.getSuperclass();
-    }
-    return false;
-  }
-
-  private static boolean matchesName(String candidate, String... names) {
-    for (String name : names) if (name.equals(candidate)) return true;
-    return false;
-  }
-
-  private static Object numericArgument(Number value, Class<?> type) {
-    if (type == Long.TYPE || type == Long.class) return Long.valueOf(value.longValue());
-    if (type == Integer.TYPE || type == Integer.class) return Integer.valueOf(value.intValue());
-    if (type == Float.TYPE || type == Float.class) return Float.valueOf(value.floatValue());
-    if (type == Double.TYPE || type == Double.class) return Double.valueOf(value.doubleValue());
-    return null;
   }
 
   private static void suppressScreenBlur(class_310 client) {

@@ -538,7 +538,7 @@ const KNOWN_MOD_CONFLICTS = [
 const HIDDEN_FABRIC_API_MINECRAFT_VERSIONS = new Set([
   '1.21.11'
 ]);
-const X_CLIENT_MOD_VERSION = '1.0.158';
+const X_CLIENT_MOD_VERSION = '1.0.159';
 const REQUIRED_BUNDLED_MODS = [
   {
     projectId: 'x-launcher-menu',
