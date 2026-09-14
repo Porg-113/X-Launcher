@@ -45,6 +45,12 @@ test('UI editor uses the live HUD visuals and shows randomized diamond armor', (
   assert.match(source, /drawArmorDurabilityBar\(graphics, slotX \+ 3, slotY \+ slot \+ 1, slot - 6, armor\[index\]\)/);
 });
 
+test('a clicked UI editor overlay remains visibly selected until deselected', () => {
+  assert.match(source, /selectedOverlay = hit;\s*draggingOverlay = hit;/);
+  assert.match(source, /id\.equals\(selectedOverlay\) \|\| id\.equals\(draggingOverlay\)/);
+  assert.match(source, /selectedOverlay = null;\s*resizingOverlay = false;/);
+});
+
 test('armor status color picker disables the rainbow control', () => {
   assert.match(source, /new XClientColorPickerScreen\(this, target, label, initialColor, false\)/);
   assert.match(source, /if\(allowRainbow\)\{int ry=/);
