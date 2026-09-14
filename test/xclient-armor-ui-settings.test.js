@@ -51,6 +51,15 @@ test('a clicked UI editor overlay remains visibly selected until deselected', ()
   assert.match(source, /selectedOverlay = null;\s*resizingOverlay = false;/);
 });
 
+test('right-edge coordinate overlays preserve their anchor as the text width changes', () => {
+  assert.match(source, /overlayBoundsForStoredPosition\(id, text, OverlaySettings\.x\(id\), OverlaySettings\.y\(id\), size\)/);
+  assert.match(source, /savedX \+ overlayBaseBounds\(id, size\)\[2\] >= width - 1/);
+  assert.match(source, /nextX = Math\.max\(0, width - base\[2\]\)/);
+  assert.match(source, /case "coords" -> "120 64 -32"/);
+  assert.match(source, /case "nethercoords" -> "NETHER 15 -4"/);
+  assert.match(source, /client\.font\.width\(text\)/);
+});
+
 test('armor status color picker disables the rainbow control', () => {
   assert.match(source, /new XClientColorPickerScreen\(this, target, label, initialColor, false\)/);
   assert.match(source, /if\(allowRainbow\)\{int ry=/);
