@@ -2304,6 +2304,7 @@
       }
       forceOptionNumber(client.field_1690, FULLBRIGHT_GAMMA, "method_42473", "gamma", "getGamma", "field_1840", "method_42495");
       forceOptionNumber(client.field_1690, 0.0D, "darknessEffectScale", "getDarknessEffectScale", "method_42472", "field_55190");
+      applyNightVisionEffect(client);
       boostLightTexture(client);
       fullbrightApplied = true;
       return;
@@ -2329,13 +2330,7 @@
     Object level = getAnyField(client, "field_1687", "level", "world");
     if (level == null) return;
     if (moduleEnabled("time")) {
-      long ticks = switch (MenuModules.timeMode()) {
-        case 0 -> 23000L;
-        case 2 -> 12000L;
-        case 3 -> 18000L;
-        default -> 6000L;
-      };
-      invokeWorldNumber(level, Long.valueOf(ticks), "setTimeFromServer", "setTimeOfDay", "method_8448", "method_8430");
+      invokeWorldNumber(level, Long.valueOf(MenuModules.timeTicks()), "setTimeFromServer", "setTimeOfDay", "method_8448", "method_8430");
     }
     if (moduleEnabled("weather")) {
       int mode = MenuModules.weatherMode();
@@ -2396,7 +2391,8 @@
       }
       Object current = invokeEffectMethod(player, nightVision, "method_6112", "getEffect");
       if ((effectDuration(current) < 0 || effectDuration(current) > NIGHT_VISION_REFRESH_THRESHOLD_TICKS)
-          && effectAmplifier(current) >= NIGHT_VISION_EFFECT_AMPLIFIER) {
+          && effectAmplifier(current) >= NIGHT_VISION_EFFECT_AMPLIFIER
+          && !effectBoolean(current, "method_5592", "showIcon")) {
         return;
       }
       Object instance = createNightVisionInstance(nightVision);

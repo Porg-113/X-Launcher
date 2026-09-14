@@ -20,7 +20,7 @@ final class OverlaySettings {
   static final int MIN_SIZE = -3;
   static final int MAX_SIZE = 1;
   private static final String[] IDS = { "fps", "coords", "nethercoords", "direction", "keys", "cps", "clock", "armor", "inventory", "combo", "session", "sounddisplay", "uptimer", "effects" };
-  private static final int[] DEFAULT_X = { 8, 8, 8, 8, 8, 82, 82, 8, 8, 82, 82, 8, 82, 220 };
+  private static final int[] DEFAULT_X = { 8, 8, 8, 8, 8, 82, 82, 8, 8, 82, 82, 8, 82, 640 };
   private static final int[] DEFAULT_Y = { 8, 28, 48, 68, 88, 8, 28, 104, 132, 48, 68, 158, 88, 8 };
   private static final int[] DEFAULT_COLOR = { 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF };
   private static final int[] x = DEFAULT_X.clone();
@@ -618,7 +618,6 @@ public final class HudOverlay {
   private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
   private static volatile boolean registered;
   private static volatile boolean crosshairReplaced;
-  private static volatile boolean statusEffectsReplaced;
   private static volatile long smartScreenshotToastUntilMs;
   private static float leftCpsPressAnimation;
   private static float rightCpsPressAnimation;
@@ -686,7 +685,7 @@ public final class HudOverlay {
           });
       registryClass.getMethod("addLast", identifierClass, hudElementClass).invoke(null, identifier, element);
       crosshairReplaced = replaceVanillaCrosshair(identifierClass, hudElementClass, registryClass);
-      statusEffectsReplaced = replaceVanillaStatusEffects(identifierClass, hudElementClass, registryClass);
+      replaceVanillaStatusEffects(identifierClass, hudElementClass, registryClass);
     } catch (Throwable ignored) {
       // Old or obfuscated runtimes may not expose the modern Fabric HUD API.
     }
@@ -721,11 +720,7 @@ public final class HudOverlay {
     }
   }
 
-  /**
-   * The standard potion HUD has a fixed location. Replacing just that vanilla
-   * element keeps status effects normal while letting the UI editor position
-   * the X Client readout. It is intentionally not a module in the menu.
-   */
+  /** Moves the one existing vanilla effect-icon element; it never draws a copy. */
   private static boolean replaceVanillaStatusEffects(Class<?> identifierClass, Class<?> hudElementClass, Class<?> registryClass) {
     try {
       Class<?> vanillaClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements");
@@ -744,7 +739,7 @@ public final class HudOverlay {
           new Class<?>[] { hudElementClass },
           (proxy, method, args) -> {
             if ("extractRenderState".equals(method.getName()) && args != null && args.length > 0) {
-              drawEffectStatus(args[0]);
+              renderVanillaEffectIcons(oldElement, method, args);
             }
             return null;
           });
@@ -753,6 +748,120 @@ public final class HudOverlay {
     } catch (Throwable ignored) {
       return false;
     }
+  }
+
+  private static void renderVanillaEffectIcons(Object oldElement, Method callbackMethod, Object[] args) {
+    if (oldElement == null) return;
+    Object graphics = args[0];
+    Object client = clientInstance();
+    Object player = getAnyField(client, "player", "field_1724");
+    int[] nativeBounds = vanillaEffectIconBounds(graphics, player);
+    if (nativeBounds[2] <= 0 || nativeBounds[3] <= 0) {
+      invokeHudElement(oldElement, callbackMethod, args);
+      return;
+    }
+    int[] target = effectIconTargetBounds(client, nativeBounds[2], nativeBounds[3]);
+    Object pose = invokeAny(graphics, "pose");
+    if (pose == null || !pushPose(pose)) {
+      invokeHudElement(oldElement, callbackMethod, args);
+      return;
+    }
+    try {
+      translatePose(pose, target[0] - nativeBounds[0], target[1] - nativeBounds[1]);
+      invokeHudElement(oldElement, callbackMethod, args);
+    } finally {
+      popPose(pose);
+    }
+  }
+
+  private static void invokeHudElement(Object element, Method callbackMethod, Object[] args) {
+    try {
+      callbackMethod.invoke(element, args);
+    } catch (Throwable ignored) {
+      // A failed optional HUD replacement must not prevent the vanilla HUD.
+    }
+  }
+
+  private static int[] vanillaEffectIconBounds(Object graphics, Object player) {
+    int positive = 0, negative = 0;
+    Object active = invokeAny(player, "getActiveEffects", "method_6026");
+    if (active instanceof Iterable<?> iterable) {
+      for (Object instance : iterable) {
+        if (!effectIconVisible(instance)) continue;
+        Object holder = invokeAny(instance, "getEffect", "method_5576", "method_6112");
+        Object effect = invokeAny(holder, "value", "method_63500");
+        Object beneficial = invokeAny(effect == null ? holder : effect, "isBeneficial", "method_5573");
+        if (Boolean.TRUE.equals(beneficial)) positive += 1;
+        else negative += 1;
+      }
+    }
+    int count = Math.max(positive, negative);
+    if (count <= 0) return new int[] { 0, 0, 0, 0 };
+    int screenW = guiWidth(graphics);
+    return new int[] { Math.max(0, screenW - (count * 25)), 1, count * 25, negative > 0 ? 50 : 24 };
+  }
+
+  private static boolean effectIconVisible(Object instance) {
+    Object visible = invokeAny(instance, "showIcon", "method_5592");
+    return !(visible instanceof Boolean value) || value.booleanValue();
+  }
+
+  private static int[] effectIconTargetBounds(Object client, int width, int height) {
+    int screenW = Math.max(1, scaledWidth(client));
+    int screenH = Math.max(1, scaledHeight(client));
+    int savedX = OverlaySettings.x("effects");
+    int savedY = OverlaySettings.y("effects");
+    int x = savedX + width >= screenW - 1 ? Math.max(0, screenW - width) : Math.max(0, Math.min(screenW - width, savedX));
+    int y = Math.max(0, Math.min(screenH - height, savedY));
+    return new int[] { x, y };
+  }
+
+  private static int guiWidth(Object graphics) {
+    Object value = invokeAny(graphics, "guiWidth", "method_25364");
+    return value instanceof Number number ? Math.max(1, number.intValue()) : scaledWidth(clientInstance());
+  }
+
+  private static boolean pushPose(Object pose) {
+    return invokePose(pose, "pushMatrix") || invokePose(pose, "push");
+  }
+
+  private static void popPose(Object pose) {
+    if (!invokePose(pose, "popMatrix")) invokePose(pose, "pop");
+  }
+
+  private static void translatePose(Object pose, int x, int y) {
+    if (!invokePose(pose, "translate", Float.valueOf(x), Float.valueOf(y))) {
+      invokePose(pose, "translate", Double.valueOf(x), Double.valueOf(y));
+    }
+  }
+
+  private static boolean invokePose(Object target, String name, Number... values) {
+    if (target == null) return false;
+    for (Method method : allMethods(target.getClass())) {
+      if (!name.equals(method.getName()) || method.getParameterCount() != values.length) continue;
+      Object[] arguments = new Object[values.length];
+      boolean compatible = true;
+      for (int index = 0; index < values.length; index += 1) {
+        arguments[index] = poseNumber(values[index], method.getParameterTypes()[index]);
+        if (arguments[index] == null) compatible = false;
+      }
+      if (!compatible) continue;
+      try {
+        method.setAccessible(true);
+        method.invoke(target, arguments);
+        return true;
+      } catch (Throwable ignored) {
+        // Try another overload.
+      }
+    }
+    return false;
+  }
+
+  private static Object poseNumber(Number value, Class<?> type) {
+    if (type == Float.TYPE || type == Float.class) return Float.valueOf(value.floatValue());
+    if (type == Double.TYPE || type == Double.class) return Double.valueOf(value.doubleValue());
+    if (type == Integer.TYPE || type == Integer.class) return Integer.valueOf(value.intValue());
+    return null;
   }
 
   private static void draw(Object graphics) {
@@ -807,9 +916,6 @@ public final class HudOverlay {
       }
       if (moduleEnabled("armor") && player != null) {
         drawArmorStatus(graphics, font, player);
-      }
-      if (!statusEffectsReplaced && player != null) {
-        drawEffectStatus(graphics);
       }
       if (player != null) {
         SessionHud.update(client, player);
@@ -1029,111 +1135,6 @@ public final class HudOverlay {
     }
   }
 
-  private static void drawEffectStatus(Object graphics) {
-    try {
-      Object client = clientInstance();
-      Object font = getAnyField(client, "font", "field_1772");
-      Object player = getAnyField(client, "player", "field_1724");
-      if (font == null || player == null) return;
-      String[] entries = activeEffectEntries(player);
-      if (entries.length == 0) return;
-      int size = OverlaySettings.size("effects");
-      int rowH = Math.max(10, 11 + size);
-      int width = 92 + (size * 4);
-      for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
-      int height = (entries.length * rowH) + 6;
-      int[] anchored = anchoredOverlayPosition(client, "effects", width, height, 106 + (size * 4), (3 * rowH) + 6);
-      int x = anchored[0], y = anchored[1];
-      if (OverlaySettings.shadow("effects")) roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius("effects"), LauncherTheme.argb(90, 0x000000));
-      if (OverlaySettings.background("effects")) {
-        roundedFill(graphics, x, y, width, height, OverlaySettings.radius("effects"), LauncherTheme.rawArgb(OverlaySettings.opacity("effects"), OverlaySettings.restColor("effects")));
-        border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
-      }
-      for (int index = 0; index < entries.length; index += 1) {
-        int rowY = y + 3 + (index * rowH);
-        fill(graphics, x + 4, rowY + 2, x + 6, rowY + rowH - 2, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
-        drawText(graphics, font, entries[index], x + 10, rowY + 1, 0xFF000000 | OverlaySettings.color("effects"));
-      }
-    } catch (Throwable ignored) {
-      // Status effects are optional HUD data and must never interrupt rendering.
-    }
-  }
-
-  private static String[] activeEffectEntries(Object player) {
-    java.util.ArrayList<String> entries = new java.util.ArrayList<>();
-    Object active = invokeAny(player, "getActiveEffects", "method_6026");
-    if (active instanceof Iterable<?> iterable) {
-      for (Object instance : iterable) {
-        String label = effectEntryLabel(instance);
-        if (!label.isEmpty()) entries.add(label);
-        if (entries.size() >= 5) break;
-      }
-    } else if (active != null && active.getClass().isArray()) {
-      int length = java.lang.reflect.Array.getLength(active);
-      for (int index = 0; index < length && entries.size() < 5; index += 1) {
-        String label = effectEntryLabel(java.lang.reflect.Array.get(active, index));
-        if (!label.isEmpty()) entries.add(label);
-      }
-    }
-    return entries.toArray(String[]::new);
-  }
-
-  private static String effectEntryLabel(Object instance) {
-    if (instance == null) return "";
-    Object holder = invokeAny(instance, "getEffect", "method_5576", "method_6112");
-    Object effect = invokeAny(holder, "value", "method_63500");
-    if (effect == null) effect = holder;
-    Object descriptionId = invokeAny(effect, "getDescriptionId", "method_5563");
-    String name = formatEffectName(String.valueOf(descriptionId == null ? "" : descriptionId));
-    if (name.isEmpty()) return "";
-    int amplifier = effectNumber(instance, "getAmplifier", "method_5578");
-    int duration = effectNumber(instance, "getDuration", "method_5584");
-    String level = amplifier > 0 ? " " + romanNumeral(Math.min(10, amplifier + 1)) : "";
-    if (duration < 0 || duration >= 1000000) return name + level;
-    int seconds = Math.max(0, duration / 20);
-    return name + level + " " + (seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + (seconds % 60);
-  }
-
-  private static int effectNumber(Object instance, String... names) {
-    Object value = invokeAny(instance, names);
-    return value instanceof Number number ? number.intValue() : 0;
-  }
-
-  private static String formatEffectName(String descriptionId) {
-    String value = String.valueOf(descriptionId == null ? "" : descriptionId).trim();
-    int dot = value.lastIndexOf('.');
-    if (dot >= 0 && dot + 1 < value.length()) value = value.substring(dot + 1);
-    if (value.isEmpty() || value.equals("null")) return "";
-    StringBuilder result = new StringBuilder();
-    boolean upper = true;
-    for (int index = 0; index < value.length(); index += 1) {
-      char character = value.charAt(index);
-      if (character == '_' || character == '-') {
-        result.append(' ');
-        upper = true;
-      } else {
-        result.append(upper ? Character.toUpperCase(character) : character);
-        upper = false;
-      }
-    }
-    return result.toString();
-  }
-
-  private static String romanNumeral(int value) {
-    return switch (Math.max(1, Math.min(10, value))) {
-      case 2 -> "II";
-      case 3 -> "III";
-      case 4 -> "IV";
-      case 5 -> "V";
-      case 6 -> "VI";
-      case 7 -> "VII";
-      case 8 -> "VIII";
-      case 9 -> "IX";
-      case 10 -> "X";
-      default -> "I";
-    };
-  }
-
   // The UI editor renders these with the same primitives and measurements as
   // the live HUD. Only the data is a stable preview sample, never player data.
   public static void drawEditorPreview(Object graphics, Object font, String id, String sampleText, int x, int y) {
@@ -1244,22 +1245,17 @@ public final class HudOverlay {
   }
 
   private static void drawEditorEffectsPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
-    String[] entries = { "Speed II 1:30", "Resistance 0:45" };
-    int size = OverlaySettings.size("effects");
-    int rowH = Math.max(10, 11 + size);
-    int width = 92 + (size * 4);
-    for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
-    int height = (entries.length * rowH) + 6;
-    if (OverlaySettings.shadow("effects")) roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius("effects"), LauncherTheme.argb(90, 0x000000));
-    if (OverlaySettings.background("effects")) {
-      roundedFill(graphics, x, y, width, height, OverlaySettings.radius("effects"), LauncherTheme.rawArgb(OverlaySettings.opacity("effects"), OverlaySettings.restColor("effects")));
-      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
-    }
-    for (int index = 0; index < entries.length; index += 1) {
-      int rowY = y + 3 + (index * rowH);
-      fill(graphics, x + 4, rowY + 2, x + 6, rowY + rowH - 2, LauncherTheme.rawArgb(255, OverlaySettings.restColor("effects")));
-      drawText(graphics, font, entries[index], x + 10, rowY + 1, 0xFF000000 | OverlaySettings.color("effects"));
-    }
+    // Editor-only thumbnail of the same two 24px vanilla effect-icon slots.
+    drawEditorEffectIcon(graphics, x, y, 0xFF58C86E);
+    drawEditorEffectIcon(graphics, x + 25, y, 0xFF4A8DFF);
+  }
+
+  private static void drawEditorEffectIcon(Object graphics, int x, int y, int color) throws ReflectiveOperationException {
+    fill(graphics, x, y, x + 24, y + 24, 0xFF303030);
+    fill(graphics, x + 1, y + 1, x + 23, y + 23, 0xFF171717);
+    fill(graphics, x + 3, y + 3, x + 21, y + 21, color);
+    fill(graphics, x + 7, y + 5, x + 17, y + 19, 0xFFF2F4F5);
+    fill(graphics, x + 5, y + 9, x + 19, y + 15, 0xFFF2F4F5);
   }
 
   private static void drawEditorUpTimerPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {

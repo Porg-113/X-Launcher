@@ -311,6 +311,7 @@ public final class XLauncherMenuScreen extends Screen {
   private boolean codeFocused;
   private boolean draggingEffectLevel;
   private boolean draggingFlightSpeed;
+  private boolean draggingClientTime;
   private boolean draggingKeyboardVolume;
   private boolean draggingZoomStrength;
   private boolean draggingZoomSmoothness;
@@ -600,6 +601,11 @@ public final class XLauncherMenuScreen extends Screen {
       updateFlightSpeedFromMouse(event.x(), layout[4], layout[5], layout[6]);
       return true;
     }
+    if (draggingClientTime && selectedIndex >= 0) {
+      int[] layout = layout();
+      updateClientTimeFromMouse(event.x(), layout[4], layout[5], layout[6]);
+      return true;
+    }
     if (draggingKeyboardVolume && selectedIndex >= 0) {
       int[] layout = layout();
       updateKeyboardVolumeFromMouse(event.x(), layout[4], layout[5], layout[6]);
@@ -641,6 +647,10 @@ public final class XLauncherMenuScreen extends Screen {
     }
     if (draggingFlightSpeed) {
       draggingFlightSpeed = false;
+      return true;
+    }
+    if (draggingClientTime) {
+      draggingClientTime = false;
       return true;
     }
     if (draggingKeyboardVolume) {
@@ -954,7 +964,7 @@ public final class XLauncherMenuScreen extends Screen {
     drawOverlayPreview(graphics, font, "uptimer", "00:00:00", mouseX, mouseY);
     drawOverlayPreview(graphics, font, "armor", "ARMOR 100% 429", mouseX, mouseY);
     drawOverlayPreview(graphics, font, "sounddisplay", "Footsteps", mouseX, mouseY);
-    drawOverlayPreview(graphics, font, "effects", "Speed II 1:30", mouseX, mouseY);
+    drawOverlayPreview(graphics, font, "effects", "", mouseX, mouseY);
   }
 
   private void drawScreenshotGallery(GuiGraphicsExtractor graphics, Font font, int mouseX, int mouseY) {
@@ -1788,15 +1798,13 @@ public final class XLauncherMenuScreen extends Screen {
 
   private void drawTimeEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
     int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
-    int gap = 4, buttonW = Math.max(17, (w - 20 - (gap * 3)) / 4);
-    int total = (buttonW * 4) + (gap * 3), startX = x + (w - total) / 2;
-    int selected = MenuModules.timeMode();
-    drawEditorCard(graphics, x, y, w, 44, true);
-    graphics.centeredText(font, "CLIENT TIME: " + MenuModules.timeModeLabel(), x + (w / 2), y + 6, LauncherTheme.textColor());
-    drawButton(graphics, font, startX, y + 22, buttonW, 16, "Sunrise", selected == 0);
-    drawButton(graphics, font, startX + buttonW + gap, y + 22, buttonW, 16, "Noon", selected == 1);
-    drawButton(graphics, font, startX + ((buttonW + gap) * 2), y + 22, buttonW, 16, "Sunset", selected == 2);
-    drawButton(graphics, font, startX + ((buttonW + gap) * 3), y + 22, buttonW, 16, "Night", selected == 3);
+    int ticks = MenuModules.timeTicks();
+    int trackX = x + 10, trackW = Math.max(1, w - 20);
+    int filled = Math.round((ticks / (float) MenuModules.MAX_TIME_TICKS) * trackW);
+    drawEditorCard(graphics, x, y, w, 38, true);
+    graphics.text(font, "CLIENT TIME", x + 9, y + 6, LauncherTheme.textColor());
+    graphics.text(font, ticks + " / " + MenuModules.MAX_TIME_TICKS, x + Math.max(46, w - 78), y + 6, LauncherTheme.mutedTextColor());
+    drawEditorSliderTrack(graphics, trackX, y + 25, trackW, filled);
   }
 
   private void drawTimerEditor(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int panelW) {
@@ -2924,16 +2932,19 @@ public final class XLauncherMenuScreen extends Screen {
 
   private boolean handleTimeEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
     int x = panelX + 14, y = panelY + DETAIL_EDITOR_TOP, w = Math.max(80, panelW - 28);
-    int gap = 4, buttonW = Math.max(17, (w - 20 - (gap * 3)) / 4);
-    int total = (buttonW * 4) + (gap * 3), startX = x + (w - total) / 2;
-    for (int index = 0; index < 4; index += 1) {
-      if (isInside(mouseX, mouseY, startX + (index * (buttonW + gap)), y + 22, buttonW, 16)) {
-        MenuModules.setTimeMode(index);
-        XLauncherMenuClient.refreshModule(selectedIndex);
-        return true;
-      }
-    }
-    return false;
+    if (!isInside(mouseX, mouseY, x, y, w, 38)) return false;
+    draggingClientTime = true;
+    updateClientTimeFromMouse(mouseX, panelX, panelY, panelW);
+    return true;
+  }
+
+  private void updateClientTimeFromMouse(double mouseX, int panelX, int panelY, int panelW) {
+    int x = panelX + 14, w = Math.max(80, panelW - 28);
+    int trackX = x + 10, trackW = Math.max(1, w - 20);
+    double ratio = Math.max(0.0D, Math.min(1.0D, (mouseX - trackX) / (double) trackW));
+    int range = MenuModules.MAX_TIME_TICKS - MenuModules.MIN_TIME_TICKS;
+    MenuModules.setTimeTicks(MenuModules.MIN_TIME_TICKS + (int) Math.round(ratio * range));
+    XLauncherMenuClient.refreshModule(selectedIndex);
   }
 
   private boolean handleUpTimerEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
@@ -3856,7 +3867,7 @@ public final class XLauncherMenuScreen extends Screen {
       case "clock" -> "TIME 12:00";
       case "uptimer" -> "00:00:00";
       case "sounddisplay" -> "Footsteps";
-      case "effects" -> "Speed II 1:30";
+      case "effects" -> "";
       default -> overlayText(id);
     };
   }
@@ -3882,7 +3893,7 @@ public final class XLauncherMenuScreen extends Screen {
       return new int[] { x, y, 92 + (size * 4), 30 + (size * 2) };
     }
     if ("effects".equals(id)) {
-      return new int[] { x, y, 106 + (size * 4), 30 + (size * 2) };
+      return new int[] { x, y, 49, 24 };
     }
     if ("cps".equals(id)) {
       int wasdKey = Math.max(4, 13 + (size * 3)), wasdGap = Math.max(1, 2 + size), wasdPadding = Math.max(0, 3 + size);
@@ -3923,7 +3934,7 @@ public final class XLauncherMenuScreen extends Screen {
       case "cps" -> "";
       case "clock" -> "TIME 12:00";
       case "uptimer" -> "00:00:00";
-      case "effects" -> "Speed II 1:30";
+      case "effects" -> "";
       case "armor" -> "ARMOR 100% 429";
       case "inventory" -> "INVENTORY 9 SLOTS";
       case "combo" -> "COMBO 4 | BEST 8";
