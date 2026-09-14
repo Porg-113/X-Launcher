@@ -1,0 +1,4725 @@
+
+final class TimerDisplaySettings {
+  private static final Preferences PREFS = Preferences.userNodeForPackage(TimerDisplaySettings.class);
+  private TimerDisplaySettings() {}
+  static boolean vertical() { return PREFS.getBoolean("vertical", false); }
+  static void setVertical(boolean value) { PREFS.putBoolean("vertical", value); }
+}
+`,
+  'dev/xlauncher/client/OverlaySettings.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+final class OverlaySettings {
+  static final int MIN_SIZE = -3;
+  static final int MAX_SIZE = 1;
+  private static final String[] IDS = { "fps", "coords", "nethercoords", "direction", "keys", "cps", "clock", "armor", "inventory", "combo", "session", "sounddisplay", "uptimer" };
+  private static final int[] DEFAULT_X = { 8, 8, 8, 8, 8, 82, 82, 8, 8, 82, 82, 8, 82 };
+  private static final int[] DEFAULT_Y = { 8, 28, 48, 68, 88, 8, 28, 104, 132, 48, 68, 158, 88 };
+  private static final int[] DEFAULT_COLOR = { 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF };
+  private static final int[] x = DEFAULT_X.clone();
+  private static final int[] y = DEFAULT_Y.clone();
+  private static final int[] size = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+  private static final int[] textSize = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+  private static final int[] color = DEFAULT_COLOR.clone();
+  private static final int[] opacity = { 145, 145, 145, 145, 118, 145, 145, 145, 145, 145, 145, 145, 0 };
+  private static final int[] radius = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0 };
+  private static final int[] alignment = { 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0 };
+  private static final boolean[] background = { true, true, true, true, true, true, true, true, true, true, true, true, false };
+  private static final boolean[] shadow = { true, true, true, true, true, true, true, true, true, true, true, true, false };
+  private static final boolean[] durabilityPercent = { false, false, false, false, false, false, false, true, false, false, false, false, false };
+  private static final boolean[] durabilityRemaining = { false, false, false, false, false, false, false, true, false, false, false, false, false };
+  private static boolean loaded;
+  private static boolean savePending;
+  private static long lastSaveMs;
+
+  private OverlaySettings() {
+  }
+
+  static boolean isOverlay(String id) {
+    return indexOf(id) >= 0;
+  }
+
+  static int x(String id) {
+    load();
+    int index = indexOf(id);
+    return index < 0 ? 8 : x[index];
+  }
+
+  static int y(String id) {
+    load();
+    int index = indexOf(id);
+    return index < 0 ? 8 : y[index];
+  }
+
+  static int size(String id) {
+    load();
+    int index = indexOf(id);
+    return index < 0 ? 1 : size[index];
+  }
+
+  static int textSize(String id) { return 1; }
+
+  static int color(String id) {
+    return textColor(id);
+  }
+
+  static int textColor(String id) {
+    load(); int index = indexOf(id);
+    return XClientColorModes.resolve("overlay." + id + ".text", index < 0 ? 0xFFFFFF : color[index]) & 0xFFFFFF;
+  }
+
+  static int restColor(String id) {
+    return XClientColorModes.resolve("overlay." + id + ".rest", LauncherTheme.accent()) & 0xFFFFFF;
+  }
+
+  static int armorHealthyColor() {
+    return XClientColorModes.staticColor("overlay.armor.health.healthy", 0x45D36B);
+  }
+
+  static int armorWarningColor() {
+    return XClientColorModes.staticColor("overlay.armor.health.warning", 0xEAC54F);
+  }
+
+  static int armorCriticalColor() {
+    return XClientColorModes.staticColor("overlay.armor.health.critical", 0xEA4F4F);
+  }
+
+  static boolean hasText(String id) {
+    return !("armor".equals(id) || "inventory".equals(id));
+  }
+
+  static int opacity(String id) {
+    int base = "keys".equals(id) ? 118 : 145;
+    int selected = XClientColorModes.opacity("overlay." + id + ".rest");
+    return Math.max(XClientColorModes.MIN_OPACITY, (base * selected) / 255);
+  }
+
+  static int radius(String id) {
+    return 0;
+  }
+
+  static int alignment(String id) {
+    return "armor".equals(id) ? 0 : 1;
+  }
+
+  static boolean background(String id) {
+    return true;
+  }
+
+  static boolean shadow(String id) {
+    return false;
+  }
+
+  static boolean durabilityPercent(String id) {
+    return "armor".equals(id);
+  }
+
+  static boolean durabilityRemaining(String id) {
+    return "armor".equals(id);
+  }
+
+  static void move(String id, int dx, int dy) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) {
+      return;
+    }
+    x[index] = clamp(x[index] + dx, 0, 640);
+    y[index] = clamp(y[index] + dy, 0, 360);
+    saveSoon();
+  }
+
+  static void setPosition(String id, int nextX, int nextY) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) {
+      return;
+    }
+    x[index] = clamp(nextX, 0, 640);
+    y[index] = clamp(nextY, 0, 360);
+    saveSoon();
+  }
+
+  static void setSize(String id, int nextSize) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) {
+      return;
+    }
+    size[index] = clamp(nextSize, MIN_SIZE, MAX_SIZE);
+    saveSoon();
+  }
+
+  static void resize(String id, int delta) {
+    load(); int index = indexOf(id); if (index < 0) return;
+    size[index] = clamp(size[index] + delta, MIN_SIZE, MAX_SIZE);
+    saveSoon();
+  }
+
+  static boolean canShrink(String id) { return size(id) > MIN_SIZE; }
+  static boolean canGrow(String id) { return size(id) < MAX_SIZE; }
+
+  static void adjustTextSize(String id, int delta) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) return;
+    textSize[index] = clamp(textSize[index] + delta, 1, 5);
+    saveSoon();
+  }
+
+  static void adjustOpacity(String id, int delta) {
+    load(); int index = indexOf(id); if (index < 0) return;
+    opacity[index] = clamp(opacity[index] + delta, 35, 245); saveSoon();
+  }
+
+  static void cycleColor(String id) {
+    load(); int index = indexOf(id); if (index < 0) return;
+    int current = color[index] & 0xFFFFFF;
+    color[index] = current == 0xFFFFFF ? (LauncherTheme.accent() & 0xFFFFFF) : (current == (LauncherTheme.accent() & 0xFFFFFF) ? 0x00FF41 : (current == 0x00FF41 ? 0xFFCE45 : 0xFFFFFF)); saveSoon();
+  }
+
+  static void cycleAlignment(String id) { load(); int index = indexOf(id); if (index >= 0) { alignment[index] = (alignment[index] + 1) % 3; saveSoon(); } }
+  static void toggleBackground(String id) { load(); int index = indexOf(id); if (index >= 0) { background[index] = !background[index]; saveSoon(); } }
+  static void toggleShadow(String id) { load(); int index = indexOf(id); if (index >= 0) { shadow[index] = !shadow[index]; saveSoon(); } }
+  static void cycleRadius(String id) { load(); int index = indexOf(id); if (index >= 0) { radius[index] = radius[index] >= 10 ? 2 : radius[index] + 2; saveSoon(); } }
+  static void cycleArmorDurabilityMode(String id) {
+    load(); int index = indexOf(id); if (index < 0) return;
+    if (durabilityPercent[index] && durabilityRemaining[index]) { durabilityPercent[index] = true; durabilityRemaining[index] = false; }
+    else if (durabilityPercent[index]) { durabilityPercent[index] = false; durabilityRemaining[index] = true; }
+    else if (durabilityRemaining[index]) { durabilityPercent[index] = false; durabilityRemaining[index] = false; }
+    else { durabilityPercent[index] = true; durabilityRemaining[index] = true; }
+    saveSoon();
+  }
+
+  static void reset(String id) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) {
+      return;
+    }
+    x[index] = DEFAULT_X[index];
+    y[index] = DEFAULT_Y[index];
+    size[index] = 1;
+    textSize[index] = 1; color[index] = DEFAULT_COLOR[index]; opacity[index] = "keys".equals(id) ? 118 : 145;
+    radius[index] = 4; alignment[index] = "armor".equals(id) ? 0 : 1; background[index] = true; shadow[index] = true;
+    durabilityPercent[index] = "armor".equals(id); durabilityRemaining[index] = "armor".equals(id);
+    save();
+  }
+
+  static void resetSize(String id) {
+    load();
+    int index = indexOf(id);
+    if (index < 0) {
+      return;
+    }
+    size[index] = 1;
+    save();
+  }
+
+  static void flush() {
+    if (savePending) {
+      save();
+    }
+  }
+
+  private static void load() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    resetAllToDefaults();
+    Path path = statePath();
+    if (!Files.exists(path)) {
+      return;
+    }
+    try {
+      String json = Files.readString(path, StandardCharsets.UTF_8);
+      for (int index = 0; index < IDS.length; index += 1) {
+        Matcher section = Pattern.compile("\"" + IDS[index] + "\"\\s*:\\s*\\{([^}]*)\\}", Pattern.DOTALL).matcher(json);
+        if (!section.find()) {
+          continue;
+        }
+        String body = section.group(1);
+        x[index] = clamp(readInt(body, "x", x[index]), 0, 640);
+        y[index] = clamp(readInt(body, "y", y[index]), 0, 360);
+        size[index] = clamp(readInt(body, "size", size[index]), MIN_SIZE, MAX_SIZE);
+      }
+    } catch (IOException | RuntimeException ignored) {
+      // Overlay settings are optional.
+    }
+  }
+
+  private static void resetAllToDefaults() {
+    for (int index = 0; index < IDS.length; index += 1) {
+      x[index] = DEFAULT_X[index];
+      y[index] = DEFAULT_Y[index];
+      size[index] = 1;
+      textSize[index] = 1; color[index] = DEFAULT_COLOR[index]; opacity[index] = "keys".equals(IDS[index]) ? 118 : 145;
+      radius[index] = 4; alignment[index] = "armor".equals(IDS[index]) ? 0 : 1; background[index] = true; shadow[index] = true;
+      durabilityPercent[index] = "armor".equals(IDS[index]); durabilityRemaining[index] = "armor".equals(IDS[index]);
+    }
+  }
+
+  private static boolean hasOverlaps() {
+    for (int left = 0; left < IDS.length; left += 1) {
+      for (int right = left + 1; right < IDS.length; right += 1) {
+        if (rectanglesOverlap(bounds(left), bounds(right))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static int[] bounds(int index) {
+    if ("keys".equals(IDS[index])) {
+      int key = Math.max(4, 13 + (size[index] * 3));
+      int gap = Math.max(1, 2 + size[index]);
+      int pad = Math.max(0, 3 + size[index]);
+      int w = (key * 3) + (gap * 2) + (pad * 2);
+      int h = (key * 2) + (gap * 2) + Math.max(8, key - 4) + (pad * 2);
+      return new int[] { x[index], y[index], w, h };
+    }
+    if ("armor".equals(IDS[index])) {
+      int slot = 18 + size[index], gap = 2;
+      int w = (slot * 4) + (gap * 3) + 4;
+      int h = slot + 7;
+      return new int[] { x[index], y[index], w, h };
+    }
+    if ("cps".equals(IDS[index])) {
+      int wasdKey = Math.max(4, 13 + (size[index] * 3));
+      int wasdGap = Math.max(1, 2 + size[index]);
+      int wasdPadding = Math.max(0, 3 + size[index]);
+      int w = (wasdKey * 3) + (wasdGap * 2) + (wasdPadding * 2);
+      return new int[] { x[index], y[index], w, 14 };
+    }
+    int paddingX = Math.max(1, 4 + (size[index] * 2)), paddingY = Math.max(1, 2 + size[index]);
+    int w = Math.max(34 + (size[index] * 3), overlayTextLength(IDS[index]) * 6 + (paddingX * 2) + (size[index] * 2));
+    int h = 10 + (paddingY * 2) + ((size[index] - 1) * 3);
+    return new int[] { x[index], y[index], w, h };
+  }
+
+  private static int overlayTextLength(String id) {
+    return switch (id) {
+      case "fps" -> 7;
+      case "coords" -> 15;
+      case "cps" -> 0;
+      case "clock" -> 10;
+      case "armor" -> 18;
+      default -> 4;
+    };
+  }
+
+  private static boolean rectanglesOverlap(int[] a, int[] b) {
+    return a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
+  }
+
+  private static void saveSoon() {
+    long now = System.currentTimeMillis();
+    if (now - lastSaveMs > 140L) {
+      save();
+      return;
+    }
+    savePending = true;
+  }
+
+  private static void save() {
+    Path path = statePath();
+    try {
+      Files.createDirectories(path.getParent());
+      StringBuilder json = new StringBuilder("{\n");
+      for (int index = 0; index < IDS.length; index += 1) {
+        if (index > 0) {
+          json.append(",\n");
+        }
+        json.append("  \"").append(IDS[index]).append("\": {")
+            .append("\"x\": ").append(x[index]).append(", ")
+            .append("\"y\": ").append(y[index]).append(", ")
+            .append("\"size\": ").append(size[index]).append(", ")
+            .append("\"textSize\": ").append(textSize[index]).append(", ")
+            .append("\"color\": ").append(color[index]).append(", ")
+            .append("\"opacity\": ").append(opacity[index]).append(", ")
+            .append("\"radius\": ").append(radius[index]).append(", ")
+            .append("\"alignment\": ").append(alignment[index]).append(", ")
+            .append("\"background\": ").append(background[index]).append(", ")
+            .append("\"shadow\": ").append(shadow[index]).append(", ")
+            .append("\"durabilityPercent\": ").append(durabilityPercent[index]).append(", ")
+            .append("\"durabilityRemaining\": ").append(durabilityRemaining[index]).append("}");
+      }
+      json.append("\n}\n");
+      Files.writeString(path, json.toString(), StandardCharsets.UTF_8);
+      savePending = false;
+      lastSaveMs = System.currentTimeMillis();
+    } catch (IOException ignored) {
+      // Overlay settings persistence is optional.
+    }
+  }
+
+  private static int readInt(String body, String name, int fallback) {
+    Matcher matcher = Pattern.compile("\"" + name + "\"\\s*:\\s*(-?\\d+)").matcher(body);
+    return matcher.find() ? Integer.parseInt(matcher.group(1)) : fallback;
+  }
+
+  private static int indexOf(String id) {
+    for (int index = 0; index < IDS.length; index += 1) {
+      if (IDS[index].equals(id)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private static int clamp(int value, int min, int max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static Path statePath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-client-overlays.json");
+  }
+
+}
+`,
+  'dev/xlauncher/client/SoundDisplay.java': String.raw`
+package dev.xlauncher.client;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+
+public final class SoundDisplay {
+  private static final long LIFETIME_MS = 2400L;
+  private static final long DEDUP_MS = 300L;
+  private static final int MAX_ENTRIES = 5;
+  private static final List<Entry> ENTRIES = new ArrayList<>();
+
+  private SoundDisplay() {}
+
+  public static synchronized void record(String soundId) {
+    String label = classify(soundId);
+    recordLabel(label);
+  }
+
+  public static synchronized void recordSubtitle(String subtitle, String soundId) {
+    String label = String.valueOf(subtitle == null ? "" : subtitle).trim();
+    if (label.isEmpty()) label = classify(soundId);
+    recordLabel(label);
+  }
+
+  private static void recordLabel(String label) {
+    if (label.isEmpty()) return;
+    long now = System.currentTimeMillis();
+    prune(now);
+    for (Entry entry : ENTRIES) {
+      if (entry.label.equals(label) && now - entry.lastSeen < DEDUP_MS) {
+        entry.lastSeen = now;
+        entry.expiresAt = now + LIFETIME_MS;
+        return;
+      }
+    }
+    ENTRIES.removeIf(entry -> entry.label.equals(label));
+    ENTRIES.add(0, new Entry(label, now, now + LIFETIME_MS));
+    while (ENTRIES.size() > MAX_ENTRIES) ENTRIES.remove(ENTRIES.size() - 1);
+  }
+
+  static synchronized String[] visible() {
+    prune(System.currentTimeMillis());
+    return ENTRIES.stream().map(entry -> entry.label).toArray(String[]::new);
+  }
+
+  private static void prune(long now) {
+    for (Iterator<Entry> iterator = ENTRIES.iterator(); iterator.hasNext();) {
+      if (iterator.next().expiresAt <= now) iterator.remove();
+    }
+  }
+
+  private static String classify(String id) {
+    String sound = String.valueOf(id == null ? "" : id).toLowerCase(Locale.ROOT);
+    if (sound.contains("step") || sound.contains("footstep")) return "Footsteps";
+    if (sound.contains("lava")) return "Lava";
+    if (sound.contains("water") || sound.contains("splash") || sound.contains("swim")) return "Water";
+    if (sound.contains("explode") || sound.contains("explosion")) return "Explosion";
+    if (sound.contains("block") && (sound.contains("break") || sound.contains("destroy"))) return "Block Break";
+    if (sound.contains("block") && (sound.contains("place") || sound.contains("hit"))) return "Block Place";
+    if (sound.contains("hurt") || sound.contains("death") || sound.contains("ambient")) return "Entity";
+    return "";
+  }
+
+  private static final class Entry {
+    final String label;
+    long lastSeen;
+    long expiresAt;
+    Entry(String label, long lastSeen, long expiresAt) {
+      this.label = label; this.lastSeen = lastSeen; this.expiresAt = expiresAt;
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/mixin/XLauncherSoundEngineMixin.java': String.raw`
+package dev.xlauncher.client.mixin;
+
+import dev.xlauncher.client.SoundDisplay;
+import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.client.sounds.SoundEngine;
+import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.client.sounds.WeighedSoundEvents;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(SoundEngine.class)
+public abstract class XLauncherSoundEngineMixin {
+  @Shadow private SoundManager soundManager;
+
+  @Inject(method = "play", at = @At("RETURN"))
+  private void xClient$recordSound(SoundInstance sound, CallbackInfoReturnable<SoundEngine.PlayResult> cir) {
+    if (sound != null && sound.getIdentifier() != null) {
+      WeighedSoundEvents event = sound.resolve(soundManager);
+      if (event != null && event.getSubtitle() != null) {
+        SoundDisplay.recordSubtitle(event.getSubtitle().getString(), sound.getIdentifier().toString());
+      }
+    }
+  }
+}
+`,
+  'dev/xlauncher/client/MoreChunksController.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+
+/** Diagnoses client-side chunk holes and rebuilds only render data already present locally. */
+final class MoreChunksController {
+  private static Object lastLevel;
+  private static long nextScanMs;
+  private static String lastLoggedStatus = "";
+  private static volatile String status = "Wartet auf Welt";
+
+  private MoreChunksController() {}
+
+  static void reset() {
+    lastLevel = null;
+    nextScanMs = 0L;
+    status = "Wartet auf Welt";
+  }
+
+  static String statusText() {
+    return status;
+  }
+
+  static void tick(Minecraft client, boolean enabled) {
+    if (!enabled) {
+      reset();
+      status = "Aus";
+      return;
+    }
+    if (client == null || client.level == null || client.player == null) {
+      status = "Wartet auf Welt";
+      return;
+    }
+    if (lastLevel != client.level) {
+      reset();
+      lastLevel = client.level;
+    }
+    long now = System.currentTimeMillis();
+    if (now < nextScanMs) return;
+    nextScanMs = now + 1000L;
+
+    int configured = optionDistance(client);
+    int server = serverDistance(client);
+    int effective = Math.max(2, Math.min(configured, server > 0 ? server : configured));
+    int radius = Math.min(effective, 12); // bounded diagnostic cost
+    int cx = ((int)Math.floor(client.player.getX())) >> 4;
+    int cz = ((int)Math.floor(client.player.getZ())) >> 4;
+    int missing = 0;
+    int internalHoles = 0;
+    for (int x = cx - radius; x <= cx + radius; x++) {
+      for (int z = cz - radius; z <= cz + radius; z++) {
+        if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) >= radius || hasChunk(client.level, x, z)) continue;
+        missing++;
+        if (hasChunk(client.level, x - 1, z) && hasChunk(client.level, x + 1, z)
+            && hasChunk(client.level, x, z - 1) && hasChunk(client.level, x, z + 1)) internalHoles++;
+      }
+    }
+    boolean limited = server > 0 && server < configured;
+    if (limited) {
+      status = "Server-Limit aktiv: " + server + " / eingestellt " + configured;
+    } else if (internalHoles > 0) {
+      status = "Echte Daten fehlen: " + internalHoles + " interne Chunk-Luecken";
+    } else if (missing > 0) {
+      status = "Ladebegrenzung erkannt: " + missing + " Chunks fehlen";
+    } else {
+      status = "Kein Chunk-Limit erkannt (" + effective + ")";
+    }
+    if (!status.equals(lastLoggedStatus)) {
+      lastLoggedStatus = status;
+      System.out.println("[X Client] More Chunks: " + status + ". Fehlende Chunks werden nicht erzeugt oder rekonstruiert.");
+    }
+  }
+
+  static boolean hasChunk(ClientLevel level, int x, int z) {
+    if (level == null) return false;
+    // A requested/placeholder chunk is not world data. Only a FULL chunk already
+    // present in ClientChunkCache is authoritative; the false flag forbids loads.
+    return level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false) != null;
+  }
+
+  private static int optionDistance(Minecraft client) {
+    try {
+      Object option = client.options.getClass().getMethod("renderDistance").invoke(client.options);
+      Object value = option.getClass().getMethod("get").invoke(option);
+      if (value instanceof Number number) return Math.max(2, number.intValue());
+    } catch (Throwable ignored) {}
+    return 8;
+  }
+
+  private static int serverDistance(Minecraft client) {
+    try {
+      Object connection = client.getConnection();
+      if (connection == null) return 0;
+      for (String name : new String[] { "getServerChunkRadius", "getServerSimulationDistance" }) {
+        try {
+          Object value = connection.getClass().getMethod(name).invoke(connection);
+          if (value instanceof Number number && number.intValue() > 0) return number.intValue();
+        } catch (Throwable ignored) {}
+      }
+    } catch (Throwable ignored) {}
+    return 0;
+  }
+
+}
+`,
+  'dev/xlauncher/client/HudOverlay.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.function.Function;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
+
+public final class HudOverlay {
+  private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
+  private static volatile boolean registered;
+  private static volatile boolean crosshairReplaced;
+  private static volatile long smartScreenshotToastUntilMs;
+  private static float leftCpsPressAnimation;
+  private static float rightCpsPressAnimation;
+  private static long upTimerStartedMs;
+  private static Object cachedPlayer;
+  private static long nextFastHudUpdateMs;
+  private static long nextSlowHudUpdateMs;
+  private static String cachedFpsText = "FPS 0";
+  private static String cachedCoordsText = "0 0 0";
+  private static String cachedNetherCoordsText = "NETHER 0 0";
+  private static String cachedDirectionText = "N | Biome | NETHER 0 0";
+  private static String cachedClockText = "TIME 00:00";
+  private static Object cachedArmorPlayer;
+  private static Object[] cachedArmorItems = new Object[] { null, null, null, null };
+  private static long nextArmorLookupMs;
+  private static long nextTargetLookupMs;
+  private static boolean cachedTargetInReach;
+
+  private HudOverlay() {
+  }
+
+  static void showSmartScreenshotToast() {
+    smartScreenshotToastUntilMs = System.currentTimeMillis() + 900L;
+  }
+
+  public static void drawTimerStatus(Object graphics) {
+    try {
+      Object client = clientInstance();
+      Object font = getAnyField(client, "font", "field_1772");
+      if (client == null || font == null) {
+        return;
+      }
+      String text = GameTimer.pauseOverlayText();
+      if (text.isEmpty()) {
+        text = GameTimer.noticeText();
+      }
+      if (!text.isEmpty()) {
+        drawTimerNotice(graphics, font, client, text);
+      }
+    } catch (Throwable ignored) {
+      // Timer status drawing is optional.
+    }
+  }
+
+  static void register() {
+    if (registered) {
+      return;
+    }
+    registered = true;
+    try {
+      Class<?> identifierClass = Class.forName("net.minecraft.resources.Identifier");
+      Class<?> hudElementClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement");
+      Class<?> registryClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry");
+      Object identifier = identifierClass
+          .getMethod("fromNamespaceAndPath", String.class, String.class)
+          .invoke(null, "x-client", "overlay");
+      Object element = Proxy.newProxyInstance(
+          hudElementClass.getClassLoader(),
+          new Class<?>[] { hudElementClass },
+          (proxy, method, args) -> {
+            if ("extractRenderState".equals(method.getName()) && args != null && args.length > 0) {
+              draw(args[0]);
+            }
+            return null;
+          });
+      registryClass.getMethod("addLast", identifierClass, hudElementClass).invoke(null, identifier, element);
+      crosshairReplaced = replaceVanillaCrosshair(identifierClass, hudElementClass, registryClass);
+    } catch (Throwable ignored) {
+      // Old or obfuscated runtimes may not expose the modern Fabric HUD API.
+    }
+  }
+
+  private static boolean replaceVanillaCrosshair(Class<?> identifierClass, Class<?> hudElementClass, Class<?> registryClass) {
+    try {
+      Class<?> vanillaClass = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements");
+      Object crosshairId = vanillaClass.getField("CROSSHAIR").get(null);
+      Function<Object, Object> wrapper = oldElement -> Proxy.newProxyInstance(
+          hudElementClass.getClassLoader(),
+          new Class<?>[] { hudElementClass },
+          (proxy, method, args) -> {
+            if ("extractRenderState".equals(method.getName()) && args != null && args.length > 0) {
+              if (!isVanillaPauseScreenOpen() && moduleEnabled("crosshair")) {
+                Object client = Class.forName("net.minecraft.client.Minecraft").getMethod("getInstance").invoke(null);
+                if (isFirstPersonView(client)) {
+                  drawCrosshair(args[0], client, CrosshairSettings.targetAlert() && cachedTargetInReach(client) ? CrosshairSettings.targetColor() : CrosshairSettings.normalColor());
+                  return null;
+                }
+              }
+              if (oldElement != null) {
+                return method.invoke(oldElement, args);
+              }
+            }
+            return null;
+          });
+      registryClass.getMethod("replaceElement", identifierClass, Function.class).invoke(null, crosshairId, wrapper);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static void draw(Object graphics) {
+    try {
+      if (isVanillaPauseScreenOpen()) {
+        return;
+      }
+      Object client = clientInstance();
+      Object options = getAnyField(client, "options", "field_1690");
+      if (client == null || options == null || Boolean.TRUE.equals(getAnyField(options, "hideGui", "field_1842"))) {
+        return;
+      }
+      Object font = getAnyField(client, "font", "field_1772");
+      Object player = getAnyField(client, "player", "field_1724");
+      if (font == null) {
+        return;
+      }
+      updateHudDataCache(client, player);
+      if (smartScreenshotToastUntilMs > System.currentTimeMillis()) {
+        drawSmartScreenshotToast(graphics, font);
+      }
+      String timerNotice = GameTimer.noticeText();
+      if (!timerNotice.isEmpty()) {
+        drawTimerNotice(graphics, font, client, timerNotice);
+      }
+      if (moduleEnabled("fps")) {
+        drawOverlayCard(graphics, font, "fps", cachedFpsText);
+      }
+      if (moduleEnabled("coords") && player != null) {
+        drawOverlayCard(graphics, font, "coords", cachedCoordsText);
+      }
+      if (moduleEnabled("nethercoords") && player != null) {
+        drawOverlayCard(graphics, font, "nethercoords", cachedNetherCoordsText);
+      }
+      if (moduleEnabled("direction") && player != null) {
+        drawOverlayCard(graphics, font, "direction", cachedDirectionText);
+      }
+      if (moduleEnabled("keys")) {
+        drawWasdOverlay(graphics, font, client);
+      }
+      if (moduleEnabled("cps")) {
+        drawCpsOverlay(graphics, font);
+      }
+      if (moduleEnabled("clock")) {
+        drawOverlayCard(graphics, font, "clock", cachedClockText);
+      }
+      if (moduleEnabled("uptimer")) {
+        drawUpTimer(graphics, font);
+      }
+      if (moduleEnabled("sounddisplay")) {
+        drawSoundDisplay(graphics, font, client);
+      }
+      if (moduleEnabled("armor") && player != null) {
+        drawArmorStatus(graphics, font, player);
+      }
+      if (player != null) {
+        SessionHud.update(client, player);
+        if (moduleEnabled("inventory")) drawInventoryHud(graphics, font, player);
+        if (moduleEnabled("combo")) drawOverlayCard(graphics, font, "combo", SessionHud.comboText());
+        if (moduleEnabled("session")) drawOverlayCard(graphics, font, "session", SessionHud.sessionText());
+      }
+      if (!crosshairReplaced && moduleEnabled("crosshair") && isFirstPersonView(client)) {
+        drawCrosshair(graphics, client, CrosshairSettings.targetAlert() && cachedTargetInReach(client) ? CrosshairSettings.targetColor() : CrosshairSettings.normalColor());
+      }
+    } catch (Throwable ignored) {
+      // HUD drawing must never crash the game.
+    }
+  }
+
+  private static void updateHudDataCache(Object client, Object player) throws ReflectiveOperationException {
+    long now = System.currentTimeMillis();
+    if (player != cachedPlayer) {
+      cachedPlayer = player;
+      nextFastHudUpdateMs = 0L;
+      nextSlowHudUpdateMs = 0L;
+    }
+    if (now >= nextFastHudUpdateMs) {
+      nextFastHudUpdateMs = now + 100L;
+      int displayedFps = invokeInt(client, "getFps");
+      if (moduleEnabled("fakefps")) {
+        long adjusted = (long) displayedFps + MenuModules.fakeFps();
+        displayedFps = (int) Math.max(0L, Math.min(Integer.MAX_VALUE, adjusted));
+      }
+      cachedFpsText = "FPS " + displayedFps;
+      if (player != null) {
+        int x = (int) Math.floor(invokeDouble(player, "getX"));
+        int y = (int) Math.floor(invokeDouble(player, "getY"));
+        int z = (int) Math.floor(invokeDouble(player, "getZ"));
+        cachedCoordsText = x + " " + y + " " + z;
+        cachedNetherCoordsText = convertedDimensionCoords(client, player);
+      }
+    }
+    if (now >= nextSlowHudUpdateMs) {
+      nextSlowHudUpdateMs = now + 500L;
+      cachedClockText = "TIME " + LocalTime.now().format(TIME_FORMATTER);
+      if (player != null) cachedDirectionText = directionBiomeText(client, player);
+    }
+  }
+
+  private static boolean isVanillaPauseScreenOpen() {
+    try {
+      Minecraft client = Minecraft.getInstance();
+      return client != null && client.gui != null && client.gui.screen() instanceof PauseScreen;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static void drawSmartScreenshotToast(Object graphics, Object font) throws ReflectiveOperationException {
+    long remaining = smartScreenshotToastUntilMs - System.currentTimeMillis();
+    if (remaining <= 0L) {
+      return;
+    }
+    int alpha = Math.max(55, Math.min(210, 80 + (int) (remaining / 5L)));
+    int x = 6;
+    int y = 6;
+    int width = 118;
+    int height = 20;
+    fill(graphics, x + 1, y + 1, x + width + 1, y + height + 1, LauncherTheme.argb(85, 0x000000));
+    fill(graphics, x, y, x + width, y + height, LauncherTheme.argb(alpha, 0x081018));
+    fill(graphics, x, y, x + 3, y + height, LauncherTheme.accentArgb(Math.min(240, alpha + 35)));
+    border(graphics, x, y, width, height, LauncherTheme.accentArgb(Math.min(220, alpha + 25)));
+    drawText(graphics, font, fitHudText(font, "Screenshot gespeichert", width - 14), x + 8, y + 6, 0xFFFFFFFF);
+  }
+
+  private static void drawTimerNotice(Object graphics, Object font, Object client, String text) throws ReflectiveOperationException {
+    int screenW = scaledWidth(client);
+    int width = Math.min(Math.max(108, screenW - 12), Math.max(132, textWidth(font, text) + 22));
+    int height = 20;
+    int x = Math.max(4, screenW - width - 6);
+    int y = 6;
+    fill(graphics, x + 1, y + 1, x + width + 1, y + height + 1, LauncherTheme.argb(90, 0x000000));
+    fill(graphics, x, y, x + width, y + height, LauncherTheme.argb(174, 0x081018));
+    fill(graphics, x, y, x + 3, y + height, LauncherTheme.accentArgb(225));
+    border(graphics, x, y, width, height, LauncherTheme.accentArgb(190));
+    drawText(graphics, font, fitHudText(font, text, width - 14), x + 8, y + 6, 0xFFFFFFFF);
+  }
+
+  private static void drawWasdOverlay(Object graphics, Object font, Object client) throws ReflectiveOperationException {
+    int size = OverlaySettings.size("keys");
+    int x = OverlaySettings.x("keys");
+    int y = OverlaySettings.y("keys");
+    int key = Math.max(4, 13 + (size * 3)), gap = Math.max(1, 2 + size), pad = Math.max(0, 3 + size);
+    int totalW = (key * 3) + (gap * 2) + (pad * 2);
+    int spaceH = Math.max(8, key - 4);
+    int totalH = (key * 2) + (gap * 2) + spaceH + (pad * 2);
+    int[] anchored = anchoredOverlayPosition(client, "keys", totalW, totalH, totalW, totalH);
+    x = anchored[0];
+    y = anchored[1];
+    if (OverlaySettings.shadow("keys")) {
+      roundedFill(graphics, x + 1, y + 1, totalW, totalH, OverlaySettings.radius("keys"), LauncherTheme.argb(85, 0x000000));
+    }
+    if (OverlaySettings.background("keys")) {
+      roundedFill(graphics, x, y, totalW, totalH, OverlaySettings.radius("keys"), LauncherTheme.rawArgb(OverlaySettings.opacity("keys"), OverlaySettings.restColor("keys")));
+      border(graphics, x, y, totalW, totalH, LauncherTheme.rawArgb(255, OverlaySettings.restColor("keys")));
+    }
+    int innerX = x + pad;
+    int innerY = y + pad;
+    boolean labels = size == 1;
+    drawKeyCap(graphics, font, labels ? "W" : "", innerX + key + gap, innerY, key, key, XLauncherMenuClient.isKeyDown(client, 87));
+    int rowY = innerY + key + gap;
+    drawKeyCap(graphics, font, labels ? "A" : "", innerX, rowY, key, key, XLauncherMenuClient.isKeyDown(client, 65));
+    drawKeyCap(graphics, font, labels ? "S" : "", innerX + key + gap, rowY, key, key, XLauncherMenuClient.isKeyDown(client, 83));
+    drawKeyCap(graphics, font, labels ? "D" : "", innerX + ((key + gap) * 2), rowY, key, key, XLauncherMenuClient.isKeyDown(client, 68));
+    int bottomY = innerY + ((key + gap) * 2);
+    int spaceW = (key * 2) + gap;
+    drawKeyCap(graphics, font, labels ? "SPACE" : "", innerX, bottomY, spaceW, spaceH, XLauncherMenuClient.isKeyDown(client, 32));
+    drawKeyCap(graphics, font, labels ? "LS" : "", innerX + spaceW + gap, bottomY, key, spaceH, XLauncherMenuClient.isKeyDown(client, 340));
+  }
+
+  private static void drawUpTimer(Object graphics, Object font) throws ReflectiveOperationException {
+    long now = System.currentTimeMillis();
+    if (upTimerStartedMs <= 0L) upTimerStartedMs = now;
+    long seconds = Math.max(0L, (now - upTimerStartedMs) / 1000L);
+    long hours = seconds / 3600L, minutes = (seconds / 60L) % 60L, secs = seconds % 60L;
+    int x = OverlaySettings.x("uptimer"), y = OverlaySettings.y("uptimer"), color = 0xFF000000 | OverlaySettings.textColor("uptimer");
+    if (TimerDisplaySettings.vertical()) {
+      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d h", hours), x, y, color);
+      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d m", minutes), x, y + 10, color);
+      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d s", secs), x, y + 20, color);
+    } else {
+      drawText(graphics, font, String.format(java.util.Locale.ROOT, "%02d:%02d:%02d", hours, minutes, secs), x, y, color);
+    }
+  }
+
+  private static void drawKeyCap(Object graphics, Object font, String label, int x, int y, int w, int h, boolean pressed) throws ReflectiveOperationException {
+    int textRgb = OverlaySettings.textColor("keys");
+    int restRgb = OverlaySettings.restColor("keys");
+    int textColor = pressed ? LauncherTheme.rawArgb(255, restRgb) : (0xFF000000 | textRgb);
+    drawCenteredText(graphics, font, label, x, y + Math.max(1, (h - 8) / 2), w, textColor);
+  }
+
+  private static void drawCpsOverlay(Object graphics, Object font) throws ReflectiveOperationException {
+    int size = OverlaySettings.size("cps");
+    int x = OverlaySettings.x("cps");
+    int y = OverlaySettings.y("cps");
+    int wasdKey = Math.max(4, 13 + (size * 3)), wasdGap = Math.max(1, 2 + size), wasdPadding = Math.max(0, 3 + size);
+    int baseW = (wasdKey * 3) + (wasdGap * 2) + (wasdPadding * 2);
+    int totalH = 14;
+    int gap = 2;
+    int leftCps = XLauncherMenuClient.getLeftCps();
+    int rightCps = XLauncherMenuClient.getRightCps();
+    int keyW = Math.max(Math.max(8, (baseW - gap) / 2), Math.max(textWidth(font, String.valueOf(leftCps)), textWidth(font, String.valueOf(rightCps))) + 8);
+    int totalW = (keyW * 2) + gap;
+    int[] anchored = anchoredOverlayPosition(clientInstance(), "cps", totalW, totalH, baseW, totalH);
+    x = anchored[0];
+    y = anchored[1];
+    leftCpsPressAnimation += ((XLauncherMenuClient.isLeftMouseDown() ? 1.0F : 0.0F) - leftCpsPressAnimation) * 0.42F;
+    rightCpsPressAnimation += ((XLauncherMenuClient.isRightMouseDown() ? 1.0F : 0.0F) - rightCpsPressAnimation) * 0.42F;
+    if (OverlaySettings.shadow("cps")) {
+      roundedFill(graphics, x + 1, y + 1, totalW, totalH, OverlaySettings.radius("cps"), LauncherTheme.argb(90, 0x000000));
+    }
+    if (OverlaySettings.background("cps")) {
+      roundedFill(graphics, x, y, totalW, totalH, OverlaySettings.radius("cps"), LauncherTheme.rawArgb(OverlaySettings.opacity("cps"), OverlaySettings.restColor("cps")));
+      border(graphics, x, y, totalW, totalH, LauncherTheme.rawArgb(255, OverlaySettings.restColor("cps")));
+    }
+    drawCpsKey(graphics, font, leftCps, x, y, keyW, totalH, leftCpsPressAnimation);
+    drawCpsKey(graphics, font, rightCps, x + keyW + gap, y, keyW, totalH, rightCpsPressAnimation);
+  }
+
+  private static void drawCpsKey(Object graphics, Object font, int cps, int x, int y, int w, int h, float animation) throws ReflectiveOperationException {
+    int inset = Math.max(0, Math.min(1, Math.round(animation)));
+    int drawX = x + inset;
+    int drawY = y + inset;
+    int drawW = Math.max(12, w - (inset * 2));
+    int drawH = Math.max(4, h - (inset * 2));
+    int textColor = animation > 0.45F ? LauncherTheme.textOnAccentColor() : (0xFF000000 | OverlaySettings.color("cps"));
+    drawCenteredText(graphics, font, String.valueOf(cps), drawX, drawY + Math.max(1, (drawH - 8) / 2), drawW, textColor);
+  }
+
+  private static void drawOverlayCard(Object graphics, Object font, String id, String text) throws ReflectiveOperationException {
+    int size = OverlaySettings.size(id);
+    int x = OverlaySettings.x(id);
+    int y = OverlaySettings.y(id);
+    int textScale = OverlaySettings.textSize(id);
+    int paddingX = Math.max(1, 4 + (size * 2)), paddingY = Math.max(1, 2 + size);
+    int textWidth = textWidth(font, text);
+    int width = Math.max(34 + (size * 3), textWidth + (paddingX * 2) + (size * 2) + ((textScale - 1) * 5));
+    int height = Math.max(6, 10 + (paddingY * 2) + ((size - 1) * 3) + ((textScale - 1) * 2));
+    String sampleText = overlaySampleText(id);
+    int sampleTextWidth = textWidth(font, sampleText);
+    int baseWidth = Math.max(34 + (size * 3), sampleTextWidth + (paddingX * 2) + (size * 2) + ((textScale - 1) * 5));
+    int[] anchored = anchoredOverlayPosition(clientInstance(), id, width, height, baseWidth, height);
+    x = anchored[0];
+    y = anchored[1];
+    int accent = 0xFF000000 | OverlaySettings.restColor(id);
+    if (OverlaySettings.shadow(id)) {
+      roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius(id), LauncherTheme.argb(95, 0x000000));
+    }
+    if (OverlaySettings.background(id)) {
+      roundedFill(graphics, x, y, width, height, OverlaySettings.radius(id), LauncherTheme.rawArgb(OverlaySettings.opacity(id), OverlaySettings.restColor(id)));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor(id)));
+    }
+    int align = OverlaySettings.alignment(id);
+    int textX = align == 0 ? x + paddingX + size : (align == 2 ? x + width - paddingX - textWidth : x + Math.max(2, (width - textWidth) / 2));
+    int textY = y + paddingY + ((size - 1) / 2);
+    drawAdaptiveText(graphics, font, text, textX, textY, 0xFF000000 | OverlaySettings.color(id), textScale);
+  }
+
+  private static void drawSoundDisplay(Object graphics, Object font, Object client) throws ReflectiveOperationException {
+    String[] entries = SoundDisplay.visible();
+    if (entries.length == 0) return;
+    int size = OverlaySettings.size("sounddisplay");
+    int rowH = 11 + size, width = 88 + (size * 4);
+    for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
+    int height = entries.length * rowH + 6;
+    int[] anchored = anchoredOverlayPosition(client, "sounddisplay", width, height, 92 + (size * 4), (4 * rowH) + 6);
+    int x = anchored[0], y = anchored[1];
+    if (OverlaySettings.shadow("sounddisplay")) roundedFill(graphics, x + 1, y + 1, width, height, 3, LauncherTheme.argb(90, 0x000000));
+    if (OverlaySettings.background("sounddisplay")) {
+      roundedFill(graphics, x, y, width, height, 0, LauncherTheme.rawArgb(OverlaySettings.opacity("sounddisplay"), OverlaySettings.restColor("sounddisplay")));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("sounddisplay")));
+    }
+    for (int index = 0; index < entries.length; index += 1) {
+      int rowY = y + 3 + (index * rowH);
+      drawText(graphics, font, entries[index], x + 9, rowY + 1, 0xFF000000 | OverlaySettings.color("sounddisplay"));
+    }
+  }
+
+  // The UI editor renders these with the same primitives and measurements as
+  // the live HUD. Only the data is a stable preview sample, never player data.
+  public static void drawEditorPreview(Object graphics, Object font, String id, String sampleText, int x, int y) {
+    try {
+      switch (id) {
+        case "keys" -> drawEditorWasdPreview(graphics, font, x, y);
+        case "cps" -> drawEditorCpsPreview(graphics, font, x, y);
+        case "armor" -> drawEditorArmorPreview(graphics, x, y);
+        case "sounddisplay" -> drawEditorSoundPreview(graphics, font, x, y);
+        case "uptimer" -> drawEditorUpTimerPreview(graphics, font, x, y);
+        default -> drawEditorOverlayCard(graphics, font, id, sampleText, x, y);
+      }
+    } catch (Throwable ignored) {
+      // The menu remains usable even if an optional item renderer is absent.
+    }
+  }
+
+  private static void drawEditorOverlayCard(Object graphics, Object font, String id, String text, int x, int y) throws ReflectiveOperationException {
+    int size = OverlaySettings.size(id);
+    int textScale = OverlaySettings.textSize(id);
+    int paddingX = Math.max(1, 4 + (size * 2));
+    int paddingY = Math.max(1, 2 + size);
+    int labelWidth = textWidth(font, text);
+    int width = Math.max(34 + (size * 3), labelWidth + (paddingX * 2) + (size * 2) + ((textScale - 1) * 5));
+    int height = Math.max(6, 10 + (paddingY * 2) + ((size - 1) * 3) + ((textScale - 1) * 2));
+    if (OverlaySettings.shadow(id)) {
+      roundedFill(graphics, x + 1, y + 1, width, height, OverlaySettings.radius(id), LauncherTheme.argb(95, 0x000000));
+    }
+    if (OverlaySettings.background(id)) {
+      roundedFill(graphics, x, y, width, height, OverlaySettings.radius(id), LauncherTheme.rawArgb(OverlaySettings.opacity(id), OverlaySettings.restColor(id)));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor(id)));
+    }
+    int align = OverlaySettings.alignment(id);
+    int textX = align == 0 ? x + paddingX + size : (align == 2 ? x + width - paddingX - labelWidth : x + Math.max(2, (width - labelWidth) / 2));
+    int textY = y + paddingY + ((size - 1) / 2);
+    drawAdaptiveText(graphics, font, text, textX, textY, 0xFF000000 | OverlaySettings.color(id), textScale);
+  }
+
+  private static void drawEditorWasdPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
+    int size = OverlaySettings.size("keys");
+    int key = Math.max(4, 13 + (size * 3));
+    int gap = Math.max(1, 2 + size);
+    int pad = Math.max(0, 3 + size);
+    int totalW = (key * 3) + (gap * 2) + (pad * 2);
+    int spaceH = Math.max(8, key - 4);
+    int totalH = (key * 2) + (gap * 2) + spaceH + (pad * 2);
+    if (OverlaySettings.shadow("keys")) {
+      roundedFill(graphics, x + 1, y + 1, totalW, totalH, OverlaySettings.radius("keys"), LauncherTheme.argb(85, 0x000000));
+    }
+    if (OverlaySettings.background("keys")) {
+      roundedFill(graphics, x, y, totalW, totalH, OverlaySettings.radius("keys"), LauncherTheme.rawArgb(OverlaySettings.opacity("keys"), OverlaySettings.restColor("keys")));
+      border(graphics, x, y, totalW, totalH, LauncherTheme.rawArgb(255, OverlaySettings.restColor("keys")));
+    }
+    Object client = clientInstance();
+    boolean labels = size == 1;
+    int innerX = x + pad;
+    int innerY = y + pad;
+    drawKeyCap(graphics, font, labels ? "W" : "", innerX + key + gap, innerY, key, key, XLauncherMenuClient.isKeyDown(client, 87));
+    int rowY = innerY + key + gap;
+    drawKeyCap(graphics, font, labels ? "A" : "", innerX, rowY, key, key, XLauncherMenuClient.isKeyDown(client, 65));
+    drawKeyCap(graphics, font, labels ? "S" : "", innerX + key + gap, rowY, key, key, XLauncherMenuClient.isKeyDown(client, 83));
+    drawKeyCap(graphics, font, labels ? "D" : "", innerX + ((key + gap) * 2), rowY, key, key, XLauncherMenuClient.isKeyDown(client, 68));
+    int bottomY = innerY + ((key + gap) * 2);
+    int spaceW = (key * 2) + gap;
+    drawKeyCap(graphics, font, labels ? "SPACE" : "", innerX, bottomY, spaceW, spaceH, XLauncherMenuClient.isKeyDown(client, 32));
+    drawKeyCap(graphics, font, labels ? "LS" : "", innerX + spaceW + gap, bottomY, key, spaceH, XLauncherMenuClient.isKeyDown(client, 340));
+  }
+
+  private static void drawEditorCpsPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
+    int size = OverlaySettings.size("cps");
+    int wasdKey = Math.max(4, 13 + (size * 3));
+    int wasdGap = Math.max(1, 2 + size);
+    int wasdPadding = Math.max(0, 3 + size);
+    int baseW = (wasdKey * 3) + (wasdGap * 2) + (wasdPadding * 2);
+    int totalH = 14;
+    int gap = 2;
+    int leftCps = 8;
+    int rightCps = 4;
+    int keyW = Math.max(Math.max(8, (baseW - gap) / 2), Math.max(textWidth(font, String.valueOf(leftCps)), textWidth(font, String.valueOf(rightCps))) + 8);
+    int totalW = (keyW * 2) + gap;
+    if (OverlaySettings.shadow("cps")) {
+      roundedFill(graphics, x + 1, y + 1, totalW, totalH, OverlaySettings.radius("cps"), LauncherTheme.argb(90, 0x000000));
+    }
+    if (OverlaySettings.background("cps")) {
+      roundedFill(graphics, x, y, totalW, totalH, OverlaySettings.radius("cps"), LauncherTheme.rawArgb(OverlaySettings.opacity("cps"), OverlaySettings.restColor("cps")));
+      border(graphics, x, y, totalW, totalH, LauncherTheme.rawArgb(255, OverlaySettings.restColor("cps")));
+    }
+    drawCpsKey(graphics, font, leftCps, x, y, keyW, totalH, 0.0F);
+    drawCpsKey(graphics, font, rightCps, x + keyW + gap, y, keyW, totalH, 0.0F);
+  }
+
+  private static void drawEditorSoundPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
+    String[] entries = { "Footsteps", "Water" };
+    int size = OverlaySettings.size("sounddisplay");
+    int rowH = 11 + size;
+    int width = 88 + (size * 4);
+    for (String entry : entries) width = Math.max(width, textWidth(font, entry) + 16);
+    int height = entries.length * rowH + 6;
+    if (OverlaySettings.shadow("sounddisplay")) roundedFill(graphics, x + 1, y + 1, width, height, 3, LauncherTheme.argb(90, 0x000000));
+    if (OverlaySettings.background("sounddisplay")) {
+      roundedFill(graphics, x, y, width, height, 0, LauncherTheme.rawArgb(OverlaySettings.opacity("sounddisplay"), OverlaySettings.restColor("sounddisplay")));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("sounddisplay")));
+    }
+    for (int index = 0; index < entries.length; index += 1) {
+      drawText(graphics, font, entries[index], x + 9, y + 4 + (index * rowH), 0xFF000000 | OverlaySettings.color("sounddisplay"));
+    }
+  }
+
+  private static void drawEditorUpTimerPreview(Object graphics, Object font, int x, int y) throws ReflectiveOperationException {
+    int color = 0xFF000000 | OverlaySettings.textColor("uptimer");
+    if (TimerDisplaySettings.vertical()) {
+      drawText(graphics, font, "00 h", x, y, color);
+      drawText(graphics, font, "00 m", x, y + 10, color);
+      drawText(graphics, font, "00 s", x, y + 20, color);
+    } else {
+      drawText(graphics, font, "00:00:00", x, y, color);
+    }
+  }
+
+  private static final int[] EDITOR_ARMOR_PREVIEW_PERCENT = {
+    15 + (int) (Math.random() * 80.0D),
+    15 + (int) (Math.random() * 80.0D),
+    15 + (int) (Math.random() * 80.0D),
+    15 + (int) (Math.random() * 80.0D)
+  };
+
+  private static void drawEditorArmorPreview(Object graphics, int x, int y) throws ReflectiveOperationException {
+    Object[] armor = editorDiamondArmor();
+    int size = OverlaySettings.size("armor");
+    int slot = 18 + size;
+    int icon = 16;
+    int gap = 2;
+    int width = (slot * 4) + (gap * 3) + 4;
+    int height = slot + 7;
+    if (OverlaySettings.shadow("armor")) {
+      roundedFill(graphics, x + 1, y + 1, width, height, 3, LauncherTheme.argb(110, 0x000000));
+    }
+    if (OverlaySettings.background("armor")) {
+      roundedFill(graphics, x, y, width, height, 0, LauncherTheme.rawArgb(OverlaySettings.opacity("armor"), OverlaySettings.restColor("armor")));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("armor")));
+    }
+    for (int index = 0; index < armor.length; index += 1) {
+      int slotX = x + 2 + (index * (slot + gap));
+      int slotY = y + 2;
+      drawItemStack(graphics, armor[index], slotX + Math.max(1, (slot - icon) / 2), slotY + 2, icon);
+      drawArmorDurabilityBar(graphics, slotX + 3, slotY + slot + 1, slot - 6, armor[index]);
+    }
+  }
+
+  private static Object[] editorDiamondArmor() {
+    String[] fields = { "DIAMOND_HELMET", "DIAMOND_CHESTPLATE", "DIAMOND_LEGGINGS", "DIAMOND_BOOTS" };
+    Object[] armor = new Object[fields.length];
+    for (int index = 0; index < fields.length; index += 1) {
+      Object item = editorDiamondItem(fields[index]);
+      Object stack = editorItemStack(item);
+      setEditorArmorDamage(stack, EDITOR_ARMOR_PREVIEW_PERCENT[index]);
+      armor[index] = stack;
+    }
+    return armor;
+  }
+
+  private static Object editorDiamondItem(String fieldName) {
+    for (String className : new String[] { "net.minecraft.world.item.Items", "net.minecraft.item.Items" }) {
+      try {
+        return Class.forName(className).getField(fieldName).get(null);
+      } catch (Throwable ignored) {
+        // Try the next runtime namespace.
+      }
+    }
+    return null;
+  }
+
+  private static Object editorItemStack(Object item) {
+    if (item == null) return null;
+    for (String className : new String[] { "net.minecraft.world.item.ItemStack", "net.minecraft.item.ItemStack", "net.minecraft.class_1799" }) {
+      try {
+        for (java.lang.reflect.Constructor<?> constructor : Class.forName(className).getConstructors()) {
+          Class<?>[] types = constructor.getParameterTypes();
+          if (types.length == 1 && types[0].isInstance(item)) return constructor.newInstance(item);
+        }
+      } catch (Throwable ignored) {
+        // Try the next runtime namespace.
+      }
+    }
+    return null;
+  }
+
+  private static void setEditorArmorDamage(Object stack, int remainingPercent) {
+    if (stack == null) return;
+    int maxDamage = safeInvokeInt(stack, "getMaxDamage");
+    if (maxDamage <= 0) maxDamage = safeInvokeInt(stack, "method_7936");
+    if (maxDamage <= 0) return;
+    int damage = Math.max(1, Math.min(maxDamage - 1, maxDamage - Math.round(maxDamage * (remainingPercent / 100.0F))));
+    for (Method method : allMethods(stack.getClass())) {
+      if (method.getParameterCount() != 1 || method.getParameterTypes()[0] != Integer.TYPE) continue;
+      String name = method.getName();
+      if (!("setDamageValue".equals(name) || "setDamage".equals(name) || "method_7611".equals(name))) continue;
+      try {
+        method.setAccessible(true);
+        method.invoke(stack, Integer.valueOf(damage));
+        return;
+      } catch (Throwable ignored) {
+        // Try another compatible setter.
+      }
+    }
+  }
+
+  private static void drawArmorStatus(Object graphics, Object font, Object player) throws ReflectiveOperationException {
+    Object[] armor = armorItems(player);
+    int size = OverlaySettings.size("armor");
+    int slot = 18 + size, icon = 16, gap = 2;
+    int x = OverlaySettings.x("armor");
+    int y = OverlaySettings.y("armor");
+    int width = (slot * 4) + (gap * 3) + 4;
+    int height = slot + 7;
+    int[] anchored = anchoredOverlayPosition(clientInstance(), "armor", width, height, width, height);
+    x = anchored[0];
+    y = anchored[1];
+    if (OverlaySettings.shadow("armor")) {
+      roundedFill(graphics, x + 1, y + 1, width, height, 3, LauncherTheme.argb(110, 0x000000));
+    }
+    if (OverlaySettings.background("armor")) {
+      roundedFill(graphics, x, y, width, height, 0, LauncherTheme.rawArgb(OverlaySettings.opacity("armor"), OverlaySettings.restColor("armor")));
+      border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("armor")));
+    }
+    int startX = x + 2;
+    for (int index = 0; index < armor.length && index < 4; index += 1) {
+      Object stack = armor[index];
+      int slotX = startX + (index * (slot + gap));
+      int slotY = y + 2;
+      int itemX = slotX + Math.max(1, (slot - icon) / 2);
+      int itemY = slotY + 2;
+      drawItemStack(graphics, stack, itemX, itemY, icon);
+      drawArmorDurabilityBar(graphics, slotX + 3, slotY + slot + 1, slot - 6, stack);
+    }
+  }
+
+  private static void drawArmorSlot(Object graphics, int x, int y, int size, int rgb) throws ReflectiveOperationException {
+    fill(graphics, x, y, x + size, y + size, LauncherTheme.rawArgb(255, rgb));
+    fill(graphics, x + 1, y + 1, x + size - 1, y + size - 1, LauncherTheme.rawArgb(225, rgb));
+    fill(graphics, x + 2, y + 2, x + size - 2, y + size - 2, LauncherTheme.rawArgb(205, rgb));
+  }
+
+  private static void drawArmorDurabilityBar(Object graphics, int x, int y, int width, Object stack) throws ReflectiveOperationException {
+    float ratio = armorDurabilityRatio(stack);
+    if (ratio < 0.0F) {
+      return;
+    }
+    int color = ratio > 0.50F ? OverlaySettings.armorHealthyColor()
+        : (ratio > 0.20F ? OverlaySettings.armorWarningColor() : OverlaySettings.armorCriticalColor());
+    int filledWidth = ratio <= 0.0F ? 0 : Math.max(1, Math.min(width, Math.round(ratio * width)));
+    // Tint the complete track with the active status color. Even nearly broken
+    // armor therefore keeps a clearly visible CRITICAL color instead of a
+    // single hard-to-see pixel.
+    fill(graphics, x, y, x + width, y + 2, LauncherTheme.rawArgb(90, color));
+    if (filledWidth > 0) {
+      fill(graphics, x, y, x + filledWidth, y + 2, 0xFF000000 | color);
+    }
+  }
+
+  private static boolean moduleEnabled(String id) {
+    return MenuModules.enabled(id);
+  }
+
+  private static String overlaySampleText(String id) {
+    return switch (id) {
+      case "fps" -> "FPS 144";
+      case "coords" -> "120 64 -32";
+      case "nethercoords" -> "NETHER 15 -4";
+      case "direction" -> "N | Plains | NETHER 15 -4";
+      case "combo" -> "COMBO 4 | BEST 8";
+      case "session" -> "SESSION 12:34 | 1.2 km | HITS 24";
+      case "inventory" -> "INVENTORY 9 SLOTS";
+      case "clock" -> "TIME 12:00";
+      case "uptimer" -> "00:00:00";
+      case "sounddisplay" -> "Footsteps";
+      default -> "";
+    };
+  }
+
+  private static String convertedDimensionCoords(Object client, Object player) {
+    try {
+      int x = (int)Math.floor(invokeDouble(player, "getX"));
+      int z = (int)Math.floor(invokeDouble(player, "getZ"));
+      Object level = getAnyField(client, "level", "world", "field_1687");
+      String dimension = String.valueOf(invokeAny(level, "dimension", "dimensionType", "method_27983")).toLowerCase(java.util.Locale.ROOT);
+      boolean inNether = dimension.contains("nether");
+      return inNether
+          ? "OVERWORLD " + (x * 8) + " " + (z * 8)
+          : "NETHER " + Math.floorDiv(x, 8) + " " + Math.floorDiv(z, 8);
+    } catch (Throwable ignored) {
+      return "NETHER 15 -4";
+    }
+  }
+
+  private static String directionBiomeText(Object client, Object player) throws ReflectiveOperationException {
+    double yaw = invokeDouble(player, "getYRot");
+    int direction = Math.floorMod((int)Math.floor((yaw / 90.0D) + 0.5D), 4);
+    String compass = new String[] { "S", "W", "N", "E" }[direction];
+    int x = (int)Math.floor(invokeDouble(player, "getX"));
+    int z = (int)Math.floor(invokeDouble(player, "getZ"));
+    String biome = biomeName(client, player);
+    return compass + " | " + biome + " | NETHER " + Math.floorDiv(x, 8) + " " + Math.floorDiv(z, 8);
+  }
+
+  private static String biomeName(Object client, Object player) {
+    try {
+      Object level = getAnyField(client, "level", "world", "field_1687");
+      Object pos = invokeAny(player, "blockPosition", "getBlockPos", "method_24515");
+      Object holder = invokeCompatibleOneArg(level, "getBiome", pos);
+      if (holder == null) holder = invokeCompatibleOneArg(level, "method_23753", pos);
+      String raw = String.valueOf(holder == null ? "Biome" : holder);
+      java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?:minecraft:)?([a-z0-9_]+)").matcher(raw.toLowerCase(java.util.Locale.ROOT));
+      String last = "biome";
+      while (matcher.find()) last = matcher.group(1);
+      String[] words = last.split("_");
+      StringBuilder name = new StringBuilder();
+      for (String word : words) if (!word.isEmpty()) name.append(name.length() == 0 ? "" : " ").append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+      return name.length() == 0 ? "Biome" : name.toString();
+    } catch (Throwable ignored) { return "Biome"; }
+  }
+
+  private static void drawInventoryHud(Object graphics, Object font, Object player) throws ReflectiveOperationException {
+    Object inventory = getAnyField(player, "inventory", "field_7514");
+    Object items = getAnyField(inventory, "items", "main", "mainInventory", "field_7547");
+    int slot = 18, gap = 1, width = (slot * 9) + (gap * 8) + 4, height = slot + 4;
+    int[] anchored = anchoredOverlayPosition(clientInstance(), "inventory", width, height, width, height);
+    int x = anchored[0], y = anchored[1];
+    if (OverlaySettings.shadow("inventory")) roundedFill(graphics, x + 1, y + 1, width, height, 3, LauncherTheme.argb(100, 0));
+    if (OverlaySettings.background("inventory")) { roundedFill(graphics, x, y, width, height, 3, LauncherTheme.rawArgb(OverlaySettings.opacity("inventory"), OverlaySettings.restColor("inventory"))); border(graphics, x, y, width, height, LauncherTheme.rawArgb(255, OverlaySettings.restColor("inventory"))); }
+    for (int index = 0; index < 9; index++) {
+      Object stack = listItem(items, index);
+      int sx = x + 2 + index * (slot + gap);
+      drawArmorSlot(graphics, sx, y + 2, slot, OverlaySettings.restColor("inventory"));
+      drawItemStack(graphics, stack, sx + 1, y + 3, 16);
+      int count = safeInvokeInt(stack, "getCount");
+      if (count > 1) drawText(graphics, font, String.valueOf(count), sx + 9, y + 11, 0xFFFFFFFF);
+    }
+  }
+
+  private static Object listItem(Object list, int index) {
+    try {
+      if (list instanceof java.util.List<?> values) return index < values.size() ? values.get(index) : null;
+      if (list != null && list.getClass().isArray() && index < java.lang.reflect.Array.getLength(list)) return java.lang.reflect.Array.get(list, index);
+      Object value = invokeCompatibleOneArg(list, "get", Integer.valueOf(index));
+      return value;
+    } catch (Throwable ignored) { return null; }
+  }
+
+  private static final class SessionHud {
+    private static Object world;
+    private static long startedMs;
+    private static long lastHitMs;
+    private static int hits, combo, best;
+    private static double lastX, lastY, lastZ, distance;
+    private static boolean ready, attackDown;
+    private static long lastUpdateMs;
+    static void update(Object client, Object player) throws ReflectiveOperationException {
+      long now = System.currentTimeMillis();
+      if (now - lastUpdateMs < 50L) return;
+      lastUpdateMs = now;
+      Object nextWorld = getAnyField(client, "level", "world", "field_1687");
+      if (world != nextWorld) { world = nextWorld; startedMs = now; hits = combo = best = 0; distance = 0; ready = false; }
+      double x = invokeDouble(player, "getX"), y = invokeDouble(player, "getY"), z = invokeDouble(player, "getZ");
+      if (ready) { double step = Math.sqrt(Math.pow(x-lastX,2)+Math.pow(y-lastY,2)+Math.pow(z-lastZ,2)); if (step < 20) distance += step; }
+      lastX=x; lastY=y; lastZ=z; ready=true;
+      boolean down = XLauncherMenuClient.isLeftMouseDown();
+      if (down && !attackDown && hasTargetInReach(client)) { hits++; combo = now-lastHitMs > 1800 ? 1 : combo+1; best=Math.max(best,combo); lastHitMs=now; }
+      if (now-lastHitMs > 1800) combo=0;
+      attackDown=down;
+    }
+    static String comboText() { return "COMBO " + combo + " | BEST " + best; }
+    static String sessionText() { long seconds=Math.max(0,(System.currentTimeMillis()-startedMs)/1000); return String.format(java.util.Locale.ROOT,"SESSION %02d:%02d | %.1f km | HITS %d",seconds/60,seconds%60,distance/1000.0,hits); }
+  }
+
+  private static int[] anchoredOverlayPosition(Object client, String id, int width, int height, int baseWidth, int baseHeight) {
+    int savedX = OverlaySettings.x(id);
+    int savedY = OverlaySettings.y(id);
+    int screenW = Math.max(1, scaledWidth(client));
+    int screenH = Math.max(1, scaledHeight(client));
+    int x;
+    if (savedX <= 1) {
+      x = 0;
+    } else if (savedX + baseWidth >= screenW - 1) {
+      x = Math.max(0, screenW - width);
+    } else {
+      x = Math.max(0, Math.min(Math.max(0, screenW - width), savedX));
+    }
+    int y = Math.max(0, Math.min(Math.max(0, screenH - height), savedY));
+    return new int[] { x, y };
+  }
+
+  private static Object[] armorItems(Object player) {
+    long now = System.currentTimeMillis();
+    if (player == cachedArmorPlayer && now < nextArmorLookupMs) return cachedArmorItems;
+    cachedArmorPlayer = player;
+    nextArmorLookupMs = now + 250L;
+    Object[] result = armorItemsFromEquipmentSlots(player);
+    if (hasAnyStack(result)) {
+      cachedArmorItems = result;
+      return cachedArmorItems;
+    }
+    Object value = invokeAny(player, "getArmorSlots", "method_5661");
+    java.util.List<Object> items = new java.util.ArrayList<>();
+    if (value instanceof Iterable<?> iterable) {
+      for (Object item : iterable) {
+        items.add(item);
+      }
+    } else if (value != null && value.getClass().isArray()) {
+      int length = java.lang.reflect.Array.getLength(value);
+      for (int index = 0; index < length; index += 1) {
+        items.add(java.lang.reflect.Array.get(value, index));
+      }
+    }
+    for (int index = 0; index < Math.min(4, items.size()); index += 1) {
+      result[3 - index] = items.get(index);
+    }
+    if (!hasAnyStack(result)) {
+      fillArmorFromInventory(player, result);
+    }
+    cachedArmorItems = result;
+    return cachedArmorItems;
+  }
+
+  private static boolean cachedTargetInReach(Object client) {
+    long now = System.currentTimeMillis();
+    if (now >= nextTargetLookupMs) {
+      nextTargetLookupMs = now + 50L;
+      cachedTargetInReach = hasTargetInReach(client);
+    }
+    return cachedTargetInReach;
+  }
+
+  private static Object[] armorItemsFromEquipmentSlots(Object player) {
+    Object[] result = new Object[] { null, null, null, null };
+    result[0] = itemByEquipmentSlot(player, "HEAD", 5);
+    result[1] = itemByEquipmentSlot(player, "CHEST", 4);
+    result[2] = itemByEquipmentSlot(player, "LEGS", 3);
+    result[3] = itemByEquipmentSlot(player, "FEET", 2);
+    return result;
+  }
+
+  private static Object itemByEquipmentSlot(Object player, String slotName, int fallbackOrdinal) {
+    Object slot = equipmentSlot(slotName, fallbackOrdinal);
+    if (slot == null) {
+      return null;
+    }
+    for (String methodName : new String[] { "getItemBySlot", "getEquippedStack", "method_6118" }) {
+      Object stack = invokeCompatibleOneArg(player, methodName, slot);
+      if (stack != null) {
+        return stack;
+      }
+    }
+    return null;
+  }
+
+  private static Object equipmentSlot(String slotName, int fallbackOrdinal) {
+    for (String className : new String[] { "net.minecraft.world.entity.EquipmentSlot", "net.minecraft.entity.EquipmentSlot", "net.minecraft.class_1304" }) {
+      try {
+        Class<?> type = Class.forName(className);
+        Object[] constants = type.getEnumConstants();
+        if (constants == null) {
+          continue;
+        }
+        for (Object constant : constants) {
+          if (constant instanceof Enum<?> enumValue && slotName.equalsIgnoreCase(enumValue.name())) {
+            return constant;
+          }
+          String text = String.valueOf(constant);
+          if (text.toLowerCase(java.util.Locale.ROOT).contains(slotName.toLowerCase(java.util.Locale.ROOT))) {
+            return constant;
+          }
+        }
+        if (fallbackOrdinal >= 0 && fallbackOrdinal < constants.length) {
+          return constants[fallbackOrdinal];
+        }
+      } catch (Throwable ignored) {
+        // Try the next namespace.
+      }
+    }
+    return null;
+  }
+
+  private static boolean hasAnyStack(Object[] stacks) {
+    for (Object stack : stacks) {
+      if (stack != null && !isEmptyStack(stack)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static void fillArmorFromInventory(Object player, Object[] result) {
+    Object inventory = invokeAny(player, "getInventory", "method_31548");
+    if (inventory == null) {
+      inventory = getAnyField(player, "inventory", "field_7514");
+    }
+    Object armor = getAnyField(inventory, "armor", "armorItems", "field_7548");
+    java.util.List<Object> items = new java.util.ArrayList<>();
+    if (armor instanceof java.util.List<?> list) {
+      for (Object item : list) {
+        items.add(item);
+      }
+    } else if (armor instanceof Iterable<?> iterable) {
+      for (Object item : iterable) {
+        items.add(item);
+      }
+    } else if (armor != null && armor.getClass().isArray()) {
+      int length = java.lang.reflect.Array.getLength(armor);
+      for (int index = 0; index < length; index += 1) {
+        items.add(java.lang.reflect.Array.get(armor, index));
+      }
+    }
+    for (int index = 0; index < Math.min(4, items.size()); index += 1) {
+      result[3 - index] = items.get(index);
+    }
+  }
+
+  private static boolean drawItemStack(Object graphics, Object stack, int x, int y, int size) {
+    if (stack == null || isEmptyStack(stack)) {
+      return false;
+    }
+    String[] preferredNames = { "renderItem", "renderFakeItem", "renderGuiItem", "renderItemWithoutEntity", "method_51427", "method_4022" };
+    for (String name : preferredNames) {
+      if (invokeItemRenderMethod(graphics, stack, x, y, name)) {
+        return true;
+      }
+    }
+    for (Method method : allMethods(graphics.getClass())) {
+      String lowerName = method.getName().toLowerCase(java.util.Locale.ROOT);
+      if (lowerName.contains("decor") || lowerName.contains("tooltip") || lowerName.contains("count")) {
+        continue;
+      }
+      if (!lowerName.contains("item") && !lowerName.contains("514") && !lowerName.contains("402")) {
+        continue;
+      }
+      if (invokeItemRenderMethod(graphics, stack, x, y, method)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean invokeItemRenderMethod(Object graphics, Object stack, int x, int y, String name) {
+    for (Method method : allMethods(graphics.getClass())) {
+      if (name.equals(method.getName()) && invokeItemRenderMethod(graphics, stack, x, y, method)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean invokeItemRenderMethod(Object graphics, Object stack, int x, int y, Method method) {
+    try {
+      Class<?>[] types = method.getParameterTypes();
+      // Use only Minecraft's normal GUI item overload. Supplying null defaults to
+      // wider world/entity overloads can make the renderer emit texture warnings.
+      if (types.length != 3 || !types[0].isInstance(stack)
+          || types[1] != Integer.TYPE || types[2] != Integer.TYPE) {
+        return false;
+      }
+      method.setAccessible(true);
+      method.invoke(graphics, stack, Integer.valueOf(x), Integer.valueOf(y));
+      return true;
+    } catch (Throwable ignored) {
+      // Try another compatible item render method.
+    }
+    return false;
+  }
+
+  private static int firstConsecutiveIntPair(Class<?>[] types, int start) {
+    for (int index = Math.max(0, start); index + 1 < types.length; index += 1) {
+      if (types[index] == Integer.TYPE && types[index + 1] == Integer.TYPE) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private static java.util.List<Method> allMethods(Class<?> type) {
+    java.util.List<Method> methods = new java.util.ArrayList<>();
+    for (Method method : type.getMethods()) {
+      methods.add(method);
+    }
+    Class<?> current = type;
+    while (current != null) {
+      for (Method method : current.getDeclaredMethods()) {
+        methods.add(method);
+      }
+      current = current.getSuperclass();
+    }
+    return methods;
+  }
+
+  private static Object invokeCompatibleOneArg(Object target, String methodName, Object argument) {
+    if (target == null || argument == null) {
+      return null;
+    }
+    for (Method method : allMethods(target.getClass())) {
+      if (!methodName.equals(method.getName()) || method.getParameterCount() != 1 || !method.getParameterTypes()[0].isInstance(argument)) {
+        continue;
+      }
+      try {
+        method.setAccessible(true);
+        Object value = method.invoke(target, argument);
+        if (value != null) {
+          return value;
+        }
+      } catch (Throwable ignored) {
+        // Try the next compatible method.
+      }
+    }
+    return null;
+  }
+
+  private static Object defaultValue(Class<?> type) {
+    if (type == Integer.TYPE) return Integer.valueOf(0);
+    if (type == Float.TYPE) return Float.valueOf(0.0F);
+    if (type == Double.TYPE) return Double.valueOf(0.0D);
+    if (type == Boolean.TYPE) return Boolean.FALSE;
+    if (type == Long.TYPE) return Long.valueOf(0L);
+    return null;
+  }
+
+  private static boolean isEmptyStack(Object stack) {
+    Object empty = invokeAny(stack, "isEmpty", "method_7960");
+    return empty instanceof Boolean bool && bool.booleanValue();
+  }
+
+  private static String armorDurabilityText(Object stack) {
+    if (stack == null || isEmptyStack(stack)) {
+      return "--";
+    }
+    int max = safeInvokeInt(stack, "getMaxDamage");
+    if (max <= 0) {
+      max = safeInvokeInt(stack, "method_7936");
+    }
+    int damage = safeInvokeInt(stack, "getDamageValue");
+    if (damage <= 0) {
+      damage = safeInvokeInt(stack, "method_7919");
+    }
+    if (max <= 0) {
+      return "ok";
+    }
+    int remaining = Math.max(0, max - Math.max(0, damage));
+    int percent = Math.max(0, Math.min(100, Math.round((remaining * 100.0F) / Math.max(1, max))));
+    boolean showPercent = OverlaySettings.durabilityPercent("armor");
+    boolean showRemaining = OverlaySettings.durabilityRemaining("armor");
+    if (showPercent && showRemaining) {
+      return percent + "% " + remaining;
+    }
+    if (showPercent) {
+      return percent + "%";
+    }
+    if (showRemaining) {
+      return String.valueOf(remaining);
+    }
+    return "";
+  }
+
+  private static float armorDurabilityRatio(Object stack) {
+    if (stack == null || isEmptyStack(stack)) {
+      return -1.0F;
+    }
+    int max = safeInvokeInt(stack, "getMaxDamage");
+    if (max <= 0) {
+      max = safeInvokeInt(stack, "method_7936");
+    }
+    int damage = safeInvokeInt(stack, "getDamageValue");
+    if (damage <= 0) {
+      damage = safeInvokeInt(stack, "method_7919");
+    }
+    if (max <= 0) {
+      return -1.0F;
+    }
+    int remaining = Math.max(0, max - Math.max(0, damage));
+    return Math.max(0.0F, Math.min(1.0F, remaining / (float) Math.max(1, max)));
+  }
+
+  private static int safeInvokeInt(Object target, String methodName) {
+    try {
+      return invokeInt(target, methodName);
+    } catch (Throwable ignored) {
+      return 0;
+    }
+  }
+
+  private static void roundedFill(Object graphics, int x, int y, int w, int h, int radius, int color) throws ReflectiveOperationException {
+    int r = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
+    if (r <= 1) {
+      fill(graphics, x, y, x + w, y + h, color);
+      return;
+    }
+    fill(graphics, x + r, y, x + w - r, y + h, color);
+    fill(graphics, x, y + r, x + w, y + h - r, color);
+    fill(graphics, x + 1, y + 1, x + r + 1, y + r + 1, color);
+    fill(graphics, x + w - r - 1, y + 1, x + w - 1, y + r + 1, color);
+    fill(graphics, x + 1, y + h - r - 1, x + r + 1, y + h - 1, color);
+    fill(graphics, x + w - r - 1, y + h - r - 1, x + w - 1, y + h - 1, color);
+  }
+
+  private static void drawAdaptiveText(Object graphics, Object font, String text, int x, int y, int color, int size) throws ReflectiveOperationException {
+    drawText(graphics, font, text, x, y, color);
+  }
+
+  private static void drawSocialChatHeads(Object graphics, Object font, Object client) {
+    try {
+      SocialManager.ChatEntry[] entries = SocialManager.recentMessages();
+      if (entries.length == 0) {
+        return;
+      }
+      int baseY = Math.max(20, scaledHeight(client) - 58);
+      int index = 0;
+      for (SocialManager.ChatEntry entry : entries) {
+        int y = baseY - (index * 15);
+        drawHeadBadge(graphics, font, entry.headColor(), entry.name, 4, y);
+        index += 1;
+      }
+    } catch (Throwable ignored) {
+      // Chat badges are optional.
+    }
+  }
+
+  private static void drawHeadBadge(Object graphics, Object font, int headColor, String name, int x, int y) throws ReflectiveOperationException {
+    fill(graphics, x + 1, y + 1, x + 78, y + 13, LauncherTheme.argb(95, 0x000000));
+    fill(graphics, x, y, x + 77, y + 12, LauncherTheme.argb(145, 0x081018));
+    border(graphics, x, y, 77, 12, LauncherTheme.accentArgb(135));
+    drawSkinHead(graphics, headColor, x + 2, y + 2, 8);
+    drawText(graphics, font, fitSocialName(name), x + 13, y + 2, 0xFFFFFFFF);
+  }
+
+  private static void drawSkinHead(Object graphics, int headColor, int x, int y, int size) throws ReflectiveOperationException {
+    int shade = 0xFF000000 | ((headColor >>> 1) & 0x007F7F7F);
+    fill(graphics, x, y, x + size, y + size, headColor);
+    fill(graphics, x, y, x + size, y + 2, shade);
+    fill(graphics, x + 2, y + 3, x + 3, y + 4, 0xFF101010);
+    fill(graphics, x + size - 3, y + 3, x + size - 2, y + 4, 0xFF101010);
+    fill(graphics, x + 3, y + size - 3, x + size - 3, y + size - 2, 0xFF2A1612);
+  }
+
+  private static void drawFriendRequestToast(Object graphics, Object font, Object client) {
+    try {
+      SocialManager.FriendRequest request = SocialManager.newestIncomingRequest();
+      if (request == null) {
+        return;
+      }
+      int screenW = scaledWidth(client);
+      int screenH = scaledHeight(client);
+      int width = Math.min(186, Math.max(142, screenW - 12));
+      int height = 38;
+      int x = Math.max(4, screenW - width - 6);
+      int y = Math.max(18, screenH - height - 6);
+      fill(graphics, x + 1, y + 1, x + width + 1, y + height + 1, LauncherTheme.argb(105, 0x000000));
+      fill(graphics, x, y, x + width, y + height, LauncherTheme.argb(170, 0x081018));
+      border(graphics, x, y, width, height, LauncherTheme.accentArgb(210));
+      drawSkinHead(graphics, request.headColor(), x + 7, y + 8, 13);
+      drawText(graphics, font, fitHudText(font, fitSocialName(request.name) + " wants to be friends", width - 34), x + 25, y + 7, 0xFFFFFFFF);
+      drawText(graphics, font, fitHudText(font, "Open menu: OK / X", width - 82), x + 25, y + 18, LauncherTheme.mutedTextColor());
+      drawCenteredText(graphics, font, "OK", x + width - 52, y + 25, 24, 0xFFFFFFFF);
+      drawCenteredText(graphics, font, "X", x + width - 24, y + 25, 18, 0xFFFFFFFF);
+    } catch (Throwable ignored) {
+      // Toast rendering is optional.
+    }
+  }
+
+  private static int scaledWidth(Object client) {
+    try {
+      Object window = client.getClass().getMethod("getWindow").invoke(client);
+      return ((Number) window.getClass().getMethod("getGuiScaledWidth").invoke(window)).intValue();
+    } catch (Throwable ignored) {
+      try {
+        Object window = client.getClass().getMethod("method_22683").invoke(client);
+        return ((Number) window.getClass().getMethod("method_4486").invoke(window)).intValue();
+      } catch (Throwable alsoIgnored) {
+        return 320;
+      }
+    }
+  }
+
+  private static int scaledHeight(Object client) {
+    try {
+      Object window = client.getClass().getMethod("getWindow").invoke(client);
+      return ((Number) window.getClass().getMethod("getGuiScaledHeight").invoke(window)).intValue();
+    } catch (Throwable ignored) {
+      try {
+        Object window = client.getClass().getMethod("method_22683").invoke(client);
+        return ((Number) window.getClass().getMethod("method_4502").invoke(window)).intValue();
+      } catch (Throwable alsoIgnored) {
+        return 220;
+      }
+    }
+  }
+
+  private static String fitSocialName(String name) {
+    String label = name == null || name.isBlank() ? "X Client" : name;
+    return label.length() <= 10 ? label : label.substring(0, 9) + "~";
+  }
+
+  private static String fitHudText(Object font, String text, int maxWidth) {
+    String label = String.valueOf(text == null ? "" : text);
+    if (maxWidth <= 10) {
+      return "";
+    }
+    while (label.length() > 1 && textWidth(font, label) > maxWidth) {
+      label = label.substring(0, label.length() - 2) + "~";
+    }
+    return label;
+  }
+
+  private static void drawCrosshair(Object graphics, Object client, int color) throws ReflectiveOperationException {
+    Object window = client.getClass().getMethod("getWindow").invoke(client);
+    int centerX = ((Number) window.getClass().getMethod("getGuiScaledWidth").invoke(window)).intValue() / 2;
+    int centerY = ((Number) window.getClass().getMethod("getGuiScaledHeight").invoke(window)).intValue() / 2;
+    int pixel = CrosshairSettings.pixelSize();
+    int scaleNumerator = CrosshairSettings.scaleNumerator();
+    int offset = CrosshairSettings.SIZE / 2;
+    for (int y = 0; y < CrosshairSettings.SIZE; y += 1) {
+      for (int x = 0; x < CrosshairSettings.SIZE; x += 1) {
+        if (CrosshairSettings.isOn(x, y)) {
+          int drawX = centerX + Math.round(((x - offset) * scaleNumerator) / 3.0F) - (pixel / 2);
+          int drawY = centerY + Math.round(((y - offset) * scaleNumerator) / 3.0F) - (pixel / 2);
+          if (CrosshairSettings.scale() >= 3) {
+            fill(graphics, drawX - 1, drawY - 1, drawX + pixel + 1, drawY + pixel + 1, neonGlow(color));
+          }
+          fill(graphics, drawX, drawY, drawX + pixel, drawY + pixel, color);
+        }
+      }
+    }
+  }
+
+  private static boolean isFirstPersonView(Object client) {
+    try {
+      Object options = getAnyField(client, "options", "field_1690");
+      Object cameraType = invokeAny(options, "getCameraType", "getPerspective", "method_31044", "aE", "aH", "aN", "au");
+      if (cameraType == null) {
+        cameraType = getAnyField(options, "cameraType", "perspective", "bV", "bX", "cg");
+      }
+      if (cameraType == null) {
+        return true;
+      }
+      Object firstPerson = invokeAny(cameraType, "isFirstPerson", "method_31034", "a", "b");
+      if (firstPerson instanceof Boolean value) {
+        return value.booleanValue();
+      }
+      String name = cameraType instanceof Enum<?> enumValue ? enumValue.name() : String.valueOf(cameraType);
+      String normalized = name.toLowerCase(java.util.Locale.ROOT);
+      if (normalized.contains("third") || normalized.contains("front")) {
+        return false;
+      }
+      return true;
+    } catch (Throwable ignored) {
+      return true;
+    }
+  }
+
+  private static boolean hasTargetInReach(Object client) {
+    try {
+      Object player = getAnyField(client, "player", "field_1724");
+      if (player == null) {
+        return false;
+      }
+      Object hitResult = getAnyField(client, "hitResult", "field_1765");
+      Object entity = invokeAny(hitResult, "getEntity", "method_17782");
+      boolean fromHitResult = entity != null;
+      if (entity == null) {
+        entity = getAnyField(client, "crosshairPickEntity", "targetedEntity", "field_1692", "field_3213");
+      }
+      if (!isValidTarget(player, entity)) {
+        return false;
+      }
+      double maxReach = targetReach(client);
+      double distance = invokeDistance(player, entity);
+      if (distance >= 0.0D) {
+        return distance <= maxReach + 0.15D;
+      }
+      double squared = distanceSquared(player, entity);
+      if (squared >= 0.0D) {
+        return squared <= (maxReach * maxReach);
+      }
+      return fromHitResult;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static boolean isValidTarget(Object player, Object entity) {
+    if (entity == null || entity == player) {
+      return false;
+    }
+    Object removed = invokeAny(entity, "isRemoved", "method_31481");
+    if (removed instanceof Boolean value && value.booleanValue()) {
+      return false;
+    }
+    Object alive = invokeAny(entity, "isAlive", "method_5805");
+    if (alive instanceof Boolean value && !value.booleanValue()) {
+      return false;
+    }
+    Object spectator = invokeAny(entity, "isSpectator", "method_7325");
+    if (spectator instanceof Boolean value && value.booleanValue()) {
+      return false;
+    }
+    Object attackable = invokeAny(entity, "isAttackable", "isPickable", "method_5732", "method_5863");
+    if (attackable instanceof Boolean value && value.booleanValue()) {
+      return true;
+    }
+    Object health = invokeAny(entity, "getHealth", "method_6032");
+    if (health instanceof Number) {
+      return true;
+    }
+    String className = entity.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+    return className.contains("living") || className.contains("player") || className.contains("mob") || className.contains("class_1309") || className.contains("class_1657");
+  }
+
+  private static double targetReach(Object client) {
+    Object gameMode = getAnyField(client, "gameMode", "interactionManager", "field_1761");
+    Object value = invokeAny(gameMode, "getPickRange", "getReachDistance", "method_2904");
+    if (value instanceof Number number) {
+      return Math.max(3.0D, Math.min(6.0D, number.doubleValue() + 0.25D));
+    }
+    return 5.0D;
+  }
+
+  private static double distanceSquared(Object player, Object entity) {
+    try {
+      double dx = invokeAnyDouble(player, "getX", "method_23317") - invokeAnyDouble(entity, "getX", "method_23317");
+      double dy = invokeAnyDouble(player, "getY", "method_23318") - invokeAnyDouble(entity, "getY", "method_23318");
+      double dz = invokeAnyDouble(player, "getZ", "method_23321") - invokeAnyDouble(entity, "getZ", "method_23321");
+      return (dx * dx) + (dy * dy) + (dz * dz);
+    } catch (Throwable ignored) {
+      return -1.0D;
+    }
+  }
+
+  private static String keyStateLine(Object client) {
+    return state(client, 87, "W") + " " + state(client, 65, "A") + state(client, 83, "S") + " "
+        + state(client, 68, "D") + " " + state(client, 32, "J") + " " + state(client, 340, "SNEAK");
+  }
+
+  private static String state(Object client, int key, String label) {
+    return XLauncherMenuClient.isKeyDown(client, key) ? "[" + label + "]" : label;
+  }
+
+  private static void drawText(Object graphics, Object font, String text, int x, int y, int color) throws ReflectiveOperationException {
+    Method method = graphics.getClass().getMethod("text", font.getClass(), String.class, int.class, int.class, int.class);
+    method.invoke(graphics, font, text, x, y, color);
+  }
+
+  private static void drawCenteredText(Object graphics, Object font, String text, int x, int y, int w, int color) throws ReflectiveOperationException {
+    drawText(graphics, font, text, x + ((w - textWidth(font, text)) / 2), y, color);
+  }
+
+  private static void fill(Object graphics, int x1, int y1, int x2, int y2, int color) throws ReflectiveOperationException {
+    graphics.getClass().getMethod("fill", int.class, int.class, int.class, int.class, int.class).invoke(graphics, x1, y1, x2, y2, color);
+  }
+
+  private static void border(Object graphics, int x, int y, int w, int h, int color) throws ReflectiveOperationException {
+    fill(graphics, x, y, x + w, y + 1, color);
+    fill(graphics, x, y + h - 1, x + w, y + h, color);
+    fill(graphics, x, y, x + 1, y + h, color);
+    fill(graphics, x + w - 1, y, x + w, y + h, color);
+  }
+
+  private static int textWidth(Object font, String text) {
+    try {
+      return ((Number) font.getClass().getMethod("width", String.class).invoke(font, text)).intValue();
+    } catch (Throwable ignored) {
+      try {
+        return ((Number) font.getClass().getMethod("method_1727", String.class).invoke(font, text)).intValue();
+      } catch (Throwable alsoIgnored) {
+        return text.length() * 6;
+      }
+    }
+  }
+
+  private static int neonGlow(int color) {
+    return 0x4A000000 | (color & 0x00FFFFFF);
+  }
+
+  private static int clampInt(int value, int min, int max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static Object clientInstance() {
+    try {
+      return Class.forName("net.minecraft.client.Minecraft").getMethod("getInstance").invoke(null);
+    } catch (Throwable ignored) {
+      try {
+        return Class.forName("net.minecraft.class_310").getMethod("method_1551").invoke(null);
+      } catch (Throwable alsoIgnored) {
+        return null;
+      }
+    }
+  }
+
+  private static Object getField(Object target, String name) throws ReflectiveOperationException {
+    return target.getClass().getField(name).get(target);
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getField(name).get(target);
+      } catch (Throwable ignored) {
+        try {
+          java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable alsoIgnored) {
+          // Try the next known mapping name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeAny(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name).invoke(target);
+      } catch (Throwable ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          return method.invoke(target);
+        } catch (Throwable alsoIgnored) {
+          // Try the next known mapping name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static double invokeAnyDouble(Object target, String... names) throws ReflectiveOperationException {
+    for (String name : names) {
+      try {
+        return ((Number) target.getClass().getMethod(name).invoke(target)).doubleValue();
+      } catch (ReflectiveOperationException ignored) {
+        try {
+          Method method = target.getClass().getDeclaredMethod(name);
+          method.setAccessible(true);
+          return ((Number) method.invoke(target)).doubleValue();
+        } catch (Throwable alsoIgnored) {
+          // Try the next known mapping name.
+        }
+      }
+    }
+    throw new NoSuchMethodException();
+  }
+
+  private static double invokeDistance(Object player, Object entity) {
+    for (String name : new String[] { "distanceTo", "method_5739" }) {
+      for (Method method : player.getClass().getMethods()) {
+        if (!method.getName().equals(name) || method.getParameterCount() != 1 || !method.getParameterTypes()[0].isAssignableFrom(entity.getClass())) {
+          continue;
+        }
+        try {
+          Object value = method.invoke(player, entity);
+          if (value instanceof Number number) {
+            return number.doubleValue();
+          }
+        } catch (Throwable ignored) {
+          // Fall back to coordinate distance.
+        }
+      }
+    }
+    return -1.0D;
+  }
+
+  private static int invokeInt(Object target, String name) throws ReflectiveOperationException {
+    return ((Number) target.getClass().getMethod(name).invoke(target)).intValue();
+  }
+
+  private static double invokeDouble(Object target, String name) throws ReflectiveOperationException {
+    return ((Number) target.getClass().getMethod(name).invoke(target)).doubleValue();
+  }
+}
+`,
+  'dev/xlauncher/client/SocialManager.java': String.raw`
+package dev.xlauncher.client;
+
+import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.awt.image.BufferedImage;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Enumeration;
+import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.imageio.ImageIO;
+
+public final class SocialManager {
+  private static final boolean SOCIAL_DISABLED = false;
+  private static final String MOD_PROTOCOL_VERSION = "1.0.139";
+  private static final String MARKER_PREFIX = "\u2063XC:";
+  private static final Pattern MARKER_PATTERN = Pattern.compile("\u2063XC:[^:\u2063]+:([0-9a-fA-F]{6})\u2063");
+  private static final String REQUEST_PREFIX = "\u2063XCFR:";
+  private static final String INVITE_PREFIX = "\u2063XCINV:";
+  private static final String REQUEST_SUFFIX = "\u2063";
+  private static final Pattern REQUEST_PATTERN = Pattern.compile(REQUEST_PREFIX + "(REQ|ACC|DEN):([0-9a-fA-F-]{32,36}):([0-9a-fA-F-]{32,36}):([A-Za-z0-9_]{1,16})" + REQUEST_SUFFIX);
+  private static final Pattern INVITE_PATTERN = Pattern.compile(INVITE_PREFIX + "([0-9a-fA-F-]{32,36}):([0-9a-fA-F-]{32,36}):([A-Za-z0-9_.-]{1,253}):(\\d{1,5}):([A-Za-z0-9_]{1,16})" + REQUEST_SUFFIX);
+  private static final Pattern SECTION_PATTERN_TEMPLATE = Pattern.compile("\"%s\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+  private static final Pattern ENTRY_PATTERN = Pattern.compile("\\{\\s*\"uuid\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"name\"\\s*:\\s*\"([^\"]*)\"\\s*\\}");
+  private static final int RECENT_LIMIT = 6;
+  private static final long RECENT_MS = 18000L;
+  private static final long REQUEST_MS = 900000L;
+  private static final long SKIN_LOOKUP_RETRY_MS = 900000L;
+  private static final int MAX_SKIN_BYTES = 512 * 1024;
+  private static final int SKIN_HEAD_CACHE_LIMIT = 256;
+  private static final Object LOCK = new Object();
+  private static final Map<UUID, PlayerStatus> onlinePlayers = new LinkedHashMap<>();
+  private static final Map<UUID, String> friends = new LinkedHashMap<>();
+  private static final Map<UUID, String> knownXClients = new LinkedHashMap<>();
+  private static final Map<UUID, Integer> knownNameColors = new LinkedHashMap<>();
+  private static final Map<UUID, Object> skinTextures = new LinkedHashMap<>();
+  private static final Map<UUID, int[]> skinHeadPixels = new LinkedHashMap<>();
+  private static final Map<UUID, Long> skinLookupTimes = new LinkedHashMap<>();
+  private static final Map<UUID, String> pendingSkinLookups = new LinkedHashMap<>();
+  private static final Map<UUID, FriendRequest> incomingRequests = new LinkedHashMap<>();
+  private static final Map<UUID, FriendRequest> outgoingRequests = new LinkedHashMap<>();
+  private static final Map<UUID, WorldInvite> worldInvites = new LinkedHashMap<>();
+  private static final Set<UUID> glowingFriends = new LinkedHashSet<>();
+  private static final List<ChatEntry> recentMessages = new ArrayList<>();
+  private static volatile boolean loaded;
+  private static volatile boolean started;
+  private static volatile boolean skinResolverStarted;
+  private static volatile boolean messageEventsRegistered;
+  private static volatile boolean keepHostedWorldOnline;
+  private static volatile String hostedAddress = "";
+  private static volatile String hostedLanAddress = "";
+  private static volatile int hostedPort;
+  private static volatile String hostStatus = "Eigene Welt noch nicht gehostet.";
+
+  private SocialManager() {
+  }
+
+  static void start() {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (started) {
+      return;
+    }
+    started = true;
+    load();
+    registerMessageEvents();
+    startSkinResolver();
+    Thread watcher = new Thread(SocialManager::watchPlayers, "X Client Social");
+    watcher.setDaemon(true);
+    watcher.start();
+  }
+
+  static PlayerStatus[] players() {
+    if (SOCIAL_DISABLED) {
+      return new PlayerStatus[0];
+    }
+    load();
+    synchronized (LOCK) {
+      long cutoff = System.currentTimeMillis() - 15000L;
+      List<PlayerStatus> result = new ArrayList<>();
+      for (PlayerStatus player : onlinePlayers.values()) {
+        if (player.lastSeenMs >= cutoff) {
+          result.add(player);
+        }
+      }
+      for (Map.Entry<UUID, String> entry : friends.entrySet()) {
+        boolean alreadyVisible = false;
+        for (PlayerStatus player : result) {
+          if (entry.getKey().equals(player.uuid)) {
+            alreadyVisible = true;
+            break;
+          }
+        }
+        if (!alreadyVisible) {
+          requestSkinHeadLookup(entry.getKey(), entry.getValue());
+          result.add(new PlayerStatus(entry.getKey(), entry.getValue(), knownXClients.containsKey(entry.getKey()), true, false, 0L, skinTextures.get(entry.getKey()), skinHeadPixels.get(entry.getKey())));
+        }
+      }
+      return result.stream()
+          .sorted(Comparator
+              .comparing((PlayerStatus player) -> !player.self)
+              .thenComparing((PlayerStatus player) -> !player.friend)
+              .thenComparing((PlayerStatus player) -> !player.xClient)
+              .thenComparing((PlayerStatus player) -> player.name.toLowerCase(java.util.Locale.ROOT)))
+          .toArray(PlayerStatus[]::new);
+    }
+  }
+
+  static ChatEntry[] recentMessages() {
+    if (SOCIAL_DISABLED) {
+      return new ChatEntry[0];
+    }
+    load();
+    synchronized (LOCK) {
+      trimRecentLocked();
+      return recentMessages.toArray(ChatEntry[]::new);
+    }
+  }
+
+  static int xClientCount() {
+    if (SOCIAL_DISABLED) {
+      return 0;
+    }
+    int count = 0;
+    for (PlayerStatus player : players()) {
+      if (player.xClient) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  static int friendCount() {
+    if (SOCIAL_DISABLED) {
+      return 0;
+    }
+    load();
+    synchronized (LOCK) {
+      return friends.size();
+    }
+  }
+
+  static int incomingRequestCount() {
+    if (SOCIAL_DISABLED) {
+      return 0;
+    }
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      return incomingRequests.size();
+    }
+  }
+
+  static FriendRequest[] incomingRequests() {
+    if (SOCIAL_DISABLED) {
+      return new FriendRequest[0];
+    }
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      return incomingRequests.values().stream()
+          .sorted(Comparator.comparingLong((FriendRequest request) -> request.timestampMs).reversed())
+          .toArray(FriendRequest[]::new);
+    }
+  }
+
+  static FriendRequest newestIncomingRequest() {
+    if (SOCIAL_DISABLED) {
+      return null;
+    }
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      FriendRequest newest = null;
+      for (FriendRequest request : incomingRequests.values()) {
+        if (newest == null || request.timestampMs > newest.timestampMs) {
+          newest = request;
+        }
+      }
+      return newest;
+    }
+  }
+
+  static WorldInvite[] worldInvites() {
+    if (SOCIAL_DISABLED) {
+      return new WorldInvite[0];
+    }
+    load();
+    synchronized (LOCK) {
+      trimWorldInvitesLocked();
+      return worldInvites.values().stream()
+          .sorted(Comparator.comparingLong((WorldInvite invite) -> invite.timestampMs).reversed())
+          .toArray(WorldInvite[]::new);
+    }
+  }
+
+  static int worldInviteCount() {
+    if (SOCIAL_DISABLED) {
+      return 0;
+    }
+    load();
+    synchronized (LOCK) {
+      trimWorldInvitesLocked();
+      return worldInvites.size();
+    }
+  }
+
+  static boolean keepHostedWorldOnline() {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    load();
+    return keepHostedWorldOnline;
+  }
+
+  static void toggleKeepHostedWorldOnline() {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    load();
+    synchronized (LOCK) {
+      keepHostedWorldOnline = !keepHostedWorldOnline;
+      saveLocked();
+    }
+  }
+
+  static String hostStatus() {
+    if (SOCIAL_DISABLED) {
+      return "";
+    }
+    refreshHostStatus();
+    return hostStatus;
+  }
+
+  static String hostedAddress() {
+    if (SOCIAL_DISABLED) {
+      return "";
+    }
+    refreshHostStatus();
+    return hostedAddress;
+  }
+
+  static boolean hasHostedWorld() {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    refreshHostStatus();
+    return !hostedAddress.isBlank() && hostedPort > 0;
+  }
+
+  static boolean startOwnWorldHost() {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    Object client = minecraftClient();
+    if (client == null || getAnyField(client, "player", "field_1724") == null) {
+      hostStatus = "Erst eine eigene Welt laden.";
+      return false;
+    }
+    Object server = integratedServer(client);
+    if (server == null) {
+      hostStatus = "Nur Singleplayer-Welten koennen lokal gehostet werden.";
+      return false;
+    }
+    if (!publishIntegratedServer(server, 25565) && !publishIntegratedServer(server, 0)) {
+      hostStatus = "Welt konnte nicht für LAN geöffnet werden.";
+      return false;
+    }
+    int port = serverPort(server);
+    if (port <= 0) {
+      port = 25565;
+    }
+    hostedPort = port;
+    String lanHost = localLanAddress();
+    hostedLanAddress = (lanHost.isBlank() ? "127.0.0.1" : lanHost) + ":" + port;
+    UpnpMapping mapping = tryMapInternetPort(lanHost, port);
+    if (mapping.mapped()) {
+      hostedAddress = mapping.publicAddress();
+      hostStatus = "Internet-Host aktiv: " + hostedAddress;
+    } else {
+      hostedAddress = hostedLanAddress;
+      hostStatus = "LAN aktiv: " + hostedLanAddress + ". Internet: Port " + port + " am Router freigeben oder VPN nutzen.";
+    }
+    return true;
+  }
+
+  static boolean inviteFriend(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    if (uuid == null || !isFriend(uuid)) {
+      hostStatus = "Nur Freunde koennen eingeladen werden.";
+      return false;
+    }
+    if (!hasHostedWorld() && !startOwnWorldHost()) {
+      return false;
+    }
+    String[] address = splitHostedAddress();
+    if (address[0].isBlank() || address[1].isBlank()) {
+      hostStatus = "Host-Adresse fehlt.";
+      return false;
+    }
+    boolean sent = sendInvitePayload(uuid, address[0], address[1]);
+    hostStatus = sent ? "Einladung gesendet: " + hostedAddress : "Einladung konnte nicht gesendet werden.";
+    return sent;
+  }
+
+  static void dismissWorldInvite(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    synchronized (LOCK) {
+      worldInvites.remove(uuid);
+    }
+  }
+
+  static boolean copyWorldInviteAddress(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    WorldInvite invite;
+    synchronized (LOCK) {
+      trimWorldInvitesLocked();
+      invite = worldInvites.get(uuid);
+    }
+    if (invite == null || invite.address().isBlank()) {
+      return false;
+    }
+    try {
+      Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(invite.address()), null);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  static boolean hasIncomingRequest(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    if (uuid == null) {
+      return false;
+    }
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      return incomingRequests.containsKey(uuid);
+    }
+  }
+
+  static boolean hasOutgoingRequest(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return false;
+    }
+    if (uuid == null) {
+      return false;
+    }
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      return outgoingRequests.containsKey(uuid);
+    }
+  }
+
+  static void toggleFriend(UUID uuid, String name) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    if (isFriend(uuid)) {
+      removeFriend(uuid);
+      return;
+    }
+    requestFriend(uuid, name);
+  }
+
+  static void requestFriend(UUID uuid, String name) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    Profile local = localProfile();
+    if (local != null && uuid.equals(local.uuid)) {
+      return;
+    }
+    load();
+    if (hasIncomingRequest(uuid)) {
+      acceptFriendRequest(uuid);
+      return;
+    }
+    boolean shouldSend = false;
+    synchronized (LOCK) {
+      if (friends.containsKey(uuid)) {
+        return;
+      }
+      trimRequestsLocked();
+      if (!outgoingRequests.containsKey(uuid)) {
+        outgoingRequests.put(uuid, requestEntry(uuid, name, System.currentTimeMillis()));
+        shouldSend = true;
+      }
+    }
+    if (shouldSend) {
+      sendFriendPayload("REQ", uuid);
+    }
+  }
+
+  static void acceptFriendRequest(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    FriendRequest request;
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      request = incomingRequests.remove(uuid);
+      if (request == null) {
+        return;
+      }
+      outgoingRequests.remove(uuid);
+      friends.put(uuid, cleanName(request.name));
+      PlayerStatus current = onlinePlayers.get(uuid);
+      if (current != null) {
+        onlinePlayers.put(uuid, current.withName(request.name).withFlags(true, true));
+      }
+      saveLocked();
+    }
+    sendFriendPayload("ACC", uuid);
+    applyFriendGlow(minecraftClient(), null);
+  }
+
+  static void declineFriendRequest(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    FriendRequest request;
+    load();
+    synchronized (LOCK) {
+      trimRequestsLocked();
+      request = incomingRequests.remove(uuid);
+    }
+    if (request != null) {
+      sendFriendPayload("DEN", uuid);
+    }
+  }
+
+  static void removeFriend(UUID uuid) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    load();
+    synchronized (LOCK) {
+      friends.remove(uuid);
+      incomingRequests.remove(uuid);
+      outgoingRequests.remove(uuid);
+      PlayerStatus current = onlinePlayers.get(uuid);
+      if (current != null) {
+        onlinePlayers.put(uuid, current.withFlags(knownXClients.containsKey(uuid), false));
+      }
+      saveLocked();
+    }
+    applyFriendGlow(minecraftClient(), null);
+  }
+
+  private static boolean isFriend(UUID uuid) {
+    load();
+    synchronized (LOCK) {
+      return friends.containsKey(uuid);
+    }
+  }
+
+  static void markXClient(UUID uuid, String name) {
+    markXClient(uuid, name, 0xFFFFFF);
+  }
+
+  static void markXClient(UUID uuid, String name, int nameColor) {
+    if (SOCIAL_DISABLED) {
+      return;
+    }
+    if (uuid == null) {
+      return;
+    }
+    load();
+    synchronized (LOCK) {
+      String safeName = cleanName(name);
+      knownXClients.put(uuid, safeName);
+      knownNameColors.put(uuid, nameColor & 0xFFFFFF);
+      PlayerStatus current = onlinePlayers.get(uuid);
+      if (current != null) {
+        onlinePlayers.put(uuid, current.withName(safeName).withFlags(true, friends.containsKey(uuid)));
+      }
+      saveLocked();
+    }
+  }
+
+  public static boolean isXClient(UUID uuid) {
+    if (uuid == null) return false;
+    Profile local = localProfile();
+    if (local != null && uuid.equals(local.uuid)) return true;
+    synchronized (LOCK) {
+      if (knownXClients.containsKey(uuid)) return true;
+    }
+    return RemoteCosmetics.isXClient(uuid);
+  }
+
+  public static int nameColor(UUID uuid) {
+    Profile local = localProfile();
+    if (uuid != null && local != null && uuid.equals(local.uuid)) return NameTagSettings.color();
+    synchronized (LOCK) {
+      return knownNameColors.getOrDefault(uuid, 0xFFFFFF);
+    }
+  }
+
+  static int headColor(UUID uuid, String name) {
+    int hash = uuid != null ? uuid.hashCode() : cleanName(name).hashCode();
+    int r = 70 + Math.floorMod(hash, 130);
+    int g = 70 + Math.floorMod(hash >> 8, 130);
+    int b = 70 + Math.floorMod(hash >> 16, 130);
+    return 0xFF000000 | (r << 16) | (g << 8) | b;
+  }
+
+  private static void watchPlayers() {
+    while (true) {
+      try {
+        scanOnlinePlayers();
+        // Presence changes do not need sub-second polling. Five seconds keeps
+        // the UI responsive while avoiding repeated reflective player scans.
+        Thread.sleep(5000L);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      } catch (Throwable ignored) {
+        sleepQuietly(3500L);
+      }
+    }
+  }
+
+  private static void scanOnlinePlayers() {
+    Object client = minecraftClient();
+    if (client == null) {
+      return;
+    }
+
+    Map<UUID, PlayerStatus> next = new LinkedHashMap<>();
+    Object localPlayer = getAnyField(client, "player", "field_1724");
+    Profile localProfile = profileFromPlayer(localPlayer);
+    if (localProfile == null) {
+      localProfile = profileFromClientUser(client);
+    }
+    if (localProfile != null) {
+      markXClient(localProfile.uuid, localProfile.name);
+      next.put(localProfile.uuid, status(localProfile.uuid, localProfile.name, localProfile.skinTexture, true, System.currentTimeMillis()));
+    }
+
+    Object connection = getAnyField(localPlayer, "connection", "networkHandler", "field_3944", "field_3944");
+    for (Profile profile : onlineProfiles(connection)) {
+      next.put(profile.uuid, status(profile.uuid, profile.name, profile.skinTexture, false, System.currentTimeMillis()));
+    }
+
+    synchronized (LOCK) {
+      for (Map.Entry<UUID, PlayerStatus> entry : onlinePlayers.entrySet()) {
+        if (!next.containsKey(entry.getKey()) && System.currentTimeMillis() - entry.getValue().lastSeenMs < 15000L) {
+          next.put(entry.getKey(), entry.getValue());
+        }
+      }
+      onlinePlayers.clear();
+      onlinePlayers.putAll(next);
+      trimRecentLocked();
+    }
+    applyFriendGlow(client, localProfile == null ? null : localProfile.uuid);
+  }
+
+  private static PlayerStatus status(UUID uuid, String name, Object skinTexture, boolean localClient, long seenAt) {
+    synchronized (LOCK) {
+      boolean xClient = localClient || knownXClients.containsKey(uuid);
+      boolean friend = friends.containsKey(uuid);
+      String displayName = cleanName(name);
+      if (displayName.isBlank()) {
+        displayName = knownXClients.getOrDefault(uuid, friends.getOrDefault(uuid, "Player"));
+      }
+      Object texture = skinTexture != null ? skinTexture : skinTextures.get(uuid);
+      if (texture != null) {
+        skinTextures.put(uuid, texture);
+      }
+      int[] headPixels = skinHeadPixels.get(uuid);
+      if (headPixels == null || headPixels.length < 64) {
+        requestSkinHeadLookup(uuid, displayName);
+      }
+      return new PlayerStatus(uuid, displayName, xClient, friend, localClient, seenAt, texture, headPixels);
+    }
+  }
+
+  private static List<Profile> onlineProfiles(Object connection) {
+    List<Profile> result = new ArrayList<>();
+    if (connection == null) {
+      return result;
+    }
+
+    for (Method method : connection.getClass().getMethods()) {
+      if (method.getParameterCount() != 0 || !Collection.class.isAssignableFrom(method.getReturnType())) {
+        continue;
+      }
+      try {
+        Object value = method.invoke(connection);
+        if (!(value instanceof Collection<?> collection)) {
+          continue;
+        }
+        int before = result.size();
+        for (Object entry : collection) {
+          Profile profile = profileFromPlayerInfo(entry);
+          if (profile != null && result.stream().noneMatch((existing) -> existing.uuid.equals(profile.uuid))) {
+            result.add(profile);
+          }
+        }
+        if (result.size() > before) {
+          break;
+        }
+      } catch (Throwable ignored) {
+        // Try the next player-list method.
+      }
+    }
+    return result;
+  }
+
+  private static Profile profileFromPlayerInfo(Object entry) {
+    if (entry == null) {
+      return null;
+    }
+    Object profile = invokeAny(entry, "getProfile", "method_2966", "comp_1108");
+    Profile parsed = profileFromGameProfile(profile);
+    return parsed == null ? null : parsed.withSkinTexture(skinTextureFromPlayerInfo(entry));
+  }
+
+  private static Profile profileFromPlayer(Object player) {
+    if (player == null) {
+      return null;
+    }
+    Object profile = invokeAny(player, "getGameProfile", "method_7334");
+    Profile fromProfile = profileFromGameProfile(profile);
+    if (fromProfile != null) {
+      return fromProfile.withSkinTexture(skinTextureFromPlayer(player));
+    }
+    Object uuid = invokeAny(player, "getUUID", "getUuid", "method_5667");
+    Object name = invokeAny(player, "getName", "method_5477");
+    UUID parsedUuid = uuid instanceof UUID ? (UUID) uuid : null;
+    String parsedName = componentText(name);
+    return parsedUuid == null ? null : new Profile(parsedUuid, parsedName, skinTextureFromPlayer(player));
+  }
+
+  private static Profile profileFromClientUser(Object client) {
+    Object user = invokeAny(client, "getUser", "method_1548");
+    if (user == null) {
+      user = getAnyField(client, "user", "field_1726", "session");
+    }
+    if (user == null) {
+      return null;
+    }
+    Object uuid = invokeAny(user, "getProfileId", "getUuid", "getId", "uuid");
+    Object name = invokeAny(user, "getName", "method_1676", "name");
+    UUID parsedUuid = parseUuid(uuid);
+    String parsedName = cleanName(String.valueOf(name == null ? "" : name));
+    return parsedUuid == null ? null : new Profile(parsedUuid, parsedName.isBlank() ? "You" : parsedName, null);
+  }
+
+  private static Profile profileFromGameProfile(Object profile) {
+    if (profile == null) {
+      return null;
+    }
+    Object uuid = invokeAny(profile, "getId");
+    Object name = invokeAny(profile, "getName");
+    if (uuid instanceof UUID id) {
+      return new Profile(id, cleanName(String.valueOf(name == null ? "" : name)), null);
+    }
+    return null;
+  }
+
+  private static Object skinTextureFromPlayerInfo(Object entry) {
+    Object skin = invokeAny(entry, "getSkin", "getSkinTextures", "getSkinLocation", "getSkinTextureLocation", "method_52814", "method_65952", "method_2957");
+    return skinRenderData(skin);
+  }
+
+  private static Object skinTextureFromPlayer(Object player) {
+    Object skin = invokeAny(player, "getSkin", "getSkinTextures", "getSkinTextureLocation", "method_52814", "method_3117");
+    return skinRenderData(skin);
+  }
+
+  private static Object skinRenderData(Object value) {
+    Object texture = extractSkinTexture(value);
+    if (value == null) {
+      return texture;
+    }
+    if (texture == null || texture == value) {
+      return value;
+    }
+    return new Object[] { value, texture };
+  }
+
+  private static Object extractSkinTexture(Object value) {
+    if (value == null) {
+      return null;
+    }
+    String className = value.getClass().getName();
+    if (className.endsWith("ResourceLocation") || className.endsWith("Identifier") || className.endsWith("class_2960")) {
+      return value;
+    }
+    for (String methodName : new String[] { "texture", "getTexture", "skin", "getSkin", "method_55836", "method_52831", "method_53469" }) {
+      Object next = invokeAny(value, methodName);
+      if (next != null && next != value) {
+        Object texture = extractSkinTexture(next);
+        if (texture != null) {
+          return texture;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void startSkinResolver() {
+    if (skinResolverStarted) {
+      return;
+    }
+    skinResolverStarted = true;
+    Thread resolver = new Thread(SocialManager::resolveSkinHeads, "X Client Skin Heads");
+    resolver.setDaemon(true);
+    resolver.start();
+  }
+
+  private static void requestSkinHeadLookup(UUID uuid, String name) {
+    if (uuid == null) {
+      return;
+    }
+    long now = System.currentTimeMillis();
+    synchronized (LOCK) {
+      if (skinHeadPixels.containsKey(uuid) || pendingSkinLookups.containsKey(uuid)) {
+        return;
+      }
+      long lastLookup = skinLookupTimes.getOrDefault(uuid, 0L);
+      if (now - lastLookup < SKIN_LOOKUP_RETRY_MS) {
+        return;
+      }
+      skinLookupTimes.put(uuid, now);
+      pendingSkinLookups.put(uuid, cleanName(name));
+      LOCK.notifyAll();
+    }
+  }
+
+  private static void resolveSkinHeads() {
+    while (true) {
+      UUID uuid = null;
+      String name = "";
+      try {
+        synchronized (LOCK) {
+          while (pendingSkinLookups.isEmpty()) {
+            LOCK.wait(2000L);
+          }
+          Map.Entry<UUID, String> next = pendingSkinLookups.entrySet().iterator().next();
+          uuid = next.getKey();
+          name = next.getValue();
+          pendingSkinLookups.remove(uuid);
+        }
+        int[] pixels = fetchOnlineSkinHead(uuid);
+        if (pixels != null && pixels.length >= 64) {
+          synchronized (LOCK) {
+            skinHeadPixels.put(uuid, pixels);
+            trimSkinHeadCacheLocked();
+            PlayerStatus current = onlinePlayers.get(uuid);
+            if (current != null) {
+              onlinePlayers.put(uuid, current.withSkinHeadPixels(pixels));
+            }
+            FriendRequest incoming = incomingRequests.get(uuid);
+            if (incoming != null) {
+              incomingRequests.put(uuid, incoming.withSkinHeadPixels(pixels));
+            }
+            FriendRequest outgoing = outgoingRequests.get(uuid);
+            if (outgoing != null) {
+              outgoingRequests.put(uuid, outgoing.withSkinHeadPixels(pixels));
+            }
+          }
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      } catch (Throwable ignored) {
+        if (uuid != null) {
+          synchronized (LOCK) {
+            skinLookupTimes.put(uuid, System.currentTimeMillis());
+          }
+        }
+      }
+    }
+  }
+
+  private static void trimSkinHeadCacheLocked() {
+    while (skinHeadPixels.size() > SKIN_HEAD_CACHE_LIMIT) {
+      UUID first = skinHeadPixels.keySet().iterator().next();
+      skinHeadPixels.remove(first);
+    }
+  }
+
+  private static int[] fetchOnlineSkinHead(UUID uuid) {
+    String compactUuid = uuid == null ? "" : uuid.toString().replace("-", "");
+    if (compactUuid.isBlank()) {
+      return null;
+    }
+    String profileJson = fetchText("https://sessionserver.mojang.com/session/minecraft/profile/" + compactUuid + "?unsigned=false");
+    String encodedTextures = extractJsonString(profileJson, "value");
+    if (encodedTextures.isBlank()) {
+      return null;
+    }
+    try {
+      String decoded = new String(Base64.getDecoder().decode(encodedTextures), StandardCharsets.UTF_8);
+      int skinIndex = decoded.indexOf("\"SKIN\"");
+      if (skinIndex < 0) {
+        return null;
+      }
+      String textureUrl = normalizeTextureUrl(extractJsonString(decoded.substring(skinIndex), "url"));
+      return textureUrl.isBlank() ? null : fetchSkinHeadPixels(textureUrl);
+    } catch (RuntimeException ignored) {
+      return null;
+    }
+  }
+
+  private static int[] fetchSkinHeadPixels(String url) {
+    HttpURLConnection connection = null;
+    try {
+      connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+      connection.setConnectTimeout(8000);
+      connection.setReadTimeout(8000);
+      connection.setRequestProperty("Accept", "image/png");
+      connection.setRequestProperty("User-Agent", "X-Client Friends");
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300) {
+        return null;
+      }
+      byte[] skinBytes = connection.getInputStream().readAllBytes();
+      if (skinBytes.length == 0 || skinBytes.length > MAX_SKIN_BYTES) {
+        return null;
+      }
+      BufferedImage image = ImageIO.read(new ByteArrayInputStream(skinBytes));
+      if (image == null || image.getWidth() < 48 || image.getHeight() < 16) {
+        return null;
+      }
+      int[] pixels = new int[64];
+      for (int y = 0; y < 8; y += 1) {
+        for (int x = 0; x < 8; x += 1) {
+          int base = opaque(image.getRGB(8 + x, 8 + y));
+          int overlay = image.getRGB(40 + x, 8 + y);
+          pixels[(y * 8) + x] = blend(base, overlay);
+        }
+      }
+      return pixels;
+    } catch (Throwable ignored) {
+      return null;
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
+  }
+
+  private static String fetchText(String url) {
+    HttpURLConnection connection = null;
+    try {
+      connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+      connection.setConnectTimeout(8000);
+      connection.setReadTimeout(8000);
+      connection.setRequestProperty("Accept", "application/json");
+      connection.setRequestProperty("User-Agent", "X-Client Friends");
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300) {
+        return "";
+      }
+      try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+        StringBuilder body = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null && body.length() < 200000) {
+          body.append(line).append('\n');
+        }
+        return body.toString();
+      }
+    } catch (Throwable ignored) {
+      return "";
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
+  }
+
+  private static String normalizeTextureUrl(String value) {
+    try {
+      URI uri = URI.create(String.valueOf(value == null ? "" : value).trim());
+      if (!"textures.minecraft.net".equalsIgnoreCase(uri.getHost())) {
+        return "";
+      }
+      return new URI("https", uri.getUserInfo(), uri.getHost(), uri.getPort(), uri.getPath(), null, null).toString();
+    } catch (Throwable ignored) {
+      return "";
+    }
+  }
+
+  private static String extractJsonString(String json, String key) {
+    Matcher matcher = Pattern.compile("\"" + Pattern.quote(String.valueOf(key)) + "\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"").matcher(String.valueOf(json == null ? "" : json));
+    return matcher.find() ? unescapeJsonString(matcher.group(1)) : "";
+  }
+
+  private static String unescapeJsonString(String value) {
+    String text = String.valueOf(value == null ? "" : value);
+    StringBuilder builder = new StringBuilder(text.length());
+    boolean escaping = false;
+    for (int index = 0; index < text.length(); index += 1) {
+      char chr = text.charAt(index);
+      if (escaping) {
+        builder.append(switch (chr) {
+          case '"', '\\', '/' -> chr;
+          case 'b' -> '\b';
+          case 'f' -> '\f';
+          case 'n' -> '\n';
+          case 'r' -> '\r';
+          case 't' -> '\t';
+          default -> chr;
+        });
+        escaping = false;
+      } else if (chr == '\\') {
+        escaping = true;
+      } else {
+        builder.append(chr);
+      }
+    }
+    return builder.toString();
+  }
+
+  private static int opaque(int color) {
+    return 0xFF000000 | (color & 0x00FFFFFF);
+  }
+
+  private static int blend(int base, int overlay) {
+    int alpha = (overlay >>> 24) & 0xFF;
+    if (alpha <= 0) {
+      return opaque(base);
+    }
+    if (alpha >= 255) {
+      return opaque(overlay);
+    }
+    int inv = 255 - alpha;
+    int red = ((((overlay >>> 16) & 0xFF) * alpha) + (((base >>> 16) & 0xFF) * inv)) / 255;
+    int green = ((((overlay >>> 8) & 0xFF) * alpha) + (((base >>> 8) & 0xFF) * inv)) / 255;
+    int blue = (((overlay & 0xFF) * alpha) + ((base & 0xFF) * inv)) / 255;
+    return 0xFF000000 | (red << 16) | (green << 8) | blue;
+  }
+
+  private static void applyFriendGlow(Object client, UUID selfUuid) {
+    Set<UUID> friendIds;
+    synchronized (LOCK) {
+      friendIds = new LinkedHashSet<>(friends.keySet());
+    }
+
+    Set<UUID> nextGlowing = new LinkedHashSet<>();
+    for (Object entity : worldPlayers(client)) {
+      Profile profile = profileFromPlayer(entity);
+      if (profile == null || profile.uuid.equals(selfUuid)) {
+        continue;
+      }
+      boolean shouldGlow = friendIds.contains(profile.uuid);
+      if (shouldGlow) {
+        setEntityGlowing(entity, true);
+        nextGlowing.add(profile.uuid);
+      } else {
+        synchronized (LOCK) {
+          if (glowingFriends.contains(profile.uuid)) {
+            setEntityGlowing(entity, false);
+          }
+        }
+      }
+    }
+
+    synchronized (LOCK) {
+      glowingFriends.clear();
+      glowingFriends.addAll(nextGlowing);
+    }
+  }
+
+  private static List<Object> worldPlayers(Object client) {
+    List<Object> result = new ArrayList<>();
+    Object level = getAnyField(client, "level", "world", "field_1687");
+    addPlayerEntities(result, invokeAny(level, "players", "getPlayers", "method_18456", "method_18112"));
+    if (!result.isEmpty()) {
+      return result;
+    }
+
+    for (Method method : level == null ? new Method[0] : level.getClass().getMethods()) {
+      if (method.getParameterCount() != 0) {
+        continue;
+      }
+      Class<?> returnType = method.getReturnType();
+      if (!Collection.class.isAssignableFrom(returnType) && !Iterable.class.isAssignableFrom(returnType) && !returnType.isArray()) {
+        continue;
+      }
+      try {
+        addPlayerEntities(result, method.invoke(level));
+        if (!result.isEmpty()) {
+          return result;
+        }
+      } catch (Throwable ignored) {
+        // Try the next collection-like method.
+      }
+    }
+    return result;
+  }
+
+  private static void addPlayerEntities(List<Object> result, Object value) {
+    if (value == null) {
+      return;
+    }
+    if (value instanceof Iterable<?> iterable) {
+      for (Object entry : iterable) {
+        addPlayerEntity(result, entry);
+      }
+      return;
+    }
+    if (value.getClass().isArray()) {
+      int length = java.lang.reflect.Array.getLength(value);
+      for (int index = 0; index < length; index += 1) {
+        addPlayerEntity(result, java.lang.reflect.Array.get(value, index));
+      }
+    }
+  }
+
+  private static void addPlayerEntity(List<Object> result, Object entity) {
+    if (entity != null && profileFromPlayer(entity) != null && !result.contains(entity)) {
+      result.add(entity);
+    }
+  }
+
+  private static void setEntityGlowing(Object entity, boolean glowing) {
+    if (entity == null) {
+      return;
+    }
+    for (String methodName : new String[] { "setGlowingTag", "setGlowing", "method_5834" }) {
+      if (invokeBooleanSetter(entity, methodName, glowing)) {
+        return;
+      }
+    }
+    for (Method method : entity.getClass().getMethods()) {
+      if (method.getParameterCount() == 1
+          && method.getParameterTypes()[0] == Boolean.TYPE
+          && method.getName().toLowerCase(java.util.Locale.ROOT).contains("glow")) {
+        try {
+          method.invoke(entity, glowing);
+          return;
+        } catch (Throwable ignored) {
+          // Try the next glow-like setter.
+        }
+      }
+    }
+  }
+
+  private static boolean invokeBooleanSetter(Object target, String methodName, boolean value) {
+    try {
+      target.getClass().getMethod(methodName, boolean.class).invoke(target, value);
+      return true;
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static UUID parseUuid(Object value) {
+    if (value instanceof UUID uuid) {
+      return uuid;
+    }
+    String text = String.valueOf(value == null ? "" : value).trim();
+    if (text.isBlank()) {
+      return null;
+    }
+    try {
+      return UUID.fromString(text);
+    } catch (RuntimeException ignored) {
+      String compact = text.replace("-", "");
+      if (!compact.matches("[0-9a-fA-F]{32}")) {
+        return null;
+      }
+      return UUID.fromString(compact.substring(0, 8) + "-" + compact.substring(8, 12) + "-"
+          + compact.substring(12, 16) + "-" + compact.substring(16, 20) + "-" + compact.substring(20));
+    }
+  }
+
+  private static FriendRequest requestEntry(UUID uuid, String name, long timestampMs) {
+    Object texture = skinTextures.get(uuid);
+    PlayerStatus current = onlinePlayers.get(uuid);
+    if (texture == null && current != null) {
+      texture = current.skinTexture();
+    }
+    String safeName = cleanName(name);
+    if (safeName.isBlank() && current != null) {
+      safeName = current.name;
+    }
+    if (safeName.isBlank()) {
+      safeName = "Player";
+    }
+    int[] headPixels = skinHeadPixels.get(uuid);
+    if ((headPixels == null || headPixels.length < 64) && texture == null) {
+      requestSkinHeadLookup(uuid, safeName);
+    }
+    return new FriendRequest(uuid, safeName, timestampMs, texture, headPixels);
+  }
+
+  private static void sendFriendPayload(String type, UUID targetUuid) {
+    Profile local = localProfile();
+    if (local == null || targetUuid == null) {
+      return;
+    }
+    String name = cleanName(local.name);
+    if (name.isBlank()) {
+      name = "Player";
+    }
+    sendHiddenChat(REQUEST_PREFIX + type + ":" + local.uuid + ":" + targetUuid + ":" + name + REQUEST_SUFFIX);
+  }
+
+  private static boolean sendInvitePayload(UUID targetUuid, String host, String port) {
+    Profile local = localProfile();
+    if (local == null || targetUuid == null) {
+      return false;
+    }
+    String name = cleanName(local.name);
+    if (name.isBlank()) {
+      name = "Player";
+    }
+    return sendHiddenChat(INVITE_PREFIX + local.uuid + ":" + targetUuid + ":" + sanitizeHost(host) + ":" + parsePort(port) + ":" + name + REQUEST_SUFFIX);
+  }
+
+  private static void refreshHostStatus() {
+    Object client = minecraftClient();
+    Object server = integratedServer(client);
+    if (server == null) {
+      hostedAddress = "";
+      hostedLanAddress = "";
+      hostedPort = 0;
+      if (hostStatus.startsWith("Internet-Host") || hostStatus.startsWith("LAN aktiv")) {
+        hostStatus = "Eigene Welt noch nicht gehostet.";
+      }
+      return;
+    }
+    int port = serverPort(server);
+    if (port > 0) {
+      hostedPort = port;
+      String host = localLanAddress();
+      String lanAddress = (host.isBlank() ? "127.0.0.1" : host) + ":" + port;
+      if (hostedAddress.isBlank() || hostedAddress.equals(hostedLanAddress)) {
+        hostedAddress = lanAddress;
+        hostStatus = "LAN aktiv: " + hostedAddress + ". Internet: Port " + port + " am Router freigeben oder VPN nutzen.";
+      }
+      hostedLanAddress = lanAddress;
+    }
+  }
+
+  private static Object integratedServer(Object client) {
+    if (client == null) {
+      return null;
+    }
+    Object server = invokeAny(client, "getSingleplayerServer", "getServer", "method_1576");
+    return server != null ? server : getAnyField(client, "singleplayerServer", "integratedServer", "field_1747");
+  }
+
+  private static boolean publishIntegratedServer(Object server, int preferredPort) {
+    if (server == null) {
+      return false;
+    }
+    if (serverPort(server) > 0) {
+      return true;
+    }
+    for (Method method : allMethods(server.getClass())) {
+      if (method.getParameterCount() != 3 || !isBooleanReturn(method)) {
+        continue;
+      }
+      if (!isPublishMethodName(method.getName()) && !hasLanPublishShape(method.getParameterTypes())) {
+        continue;
+      }
+      Object[] args = lanPublishArguments(method.getParameterTypes(), preferredPort);
+      if (args == null) {
+        continue;
+      }
+      try {
+        method.setAccessible(true);
+        Object result = method.invoke(server, args);
+        if (Boolean.TRUE.equals(result) || serverPort(server) > 0) {
+          return true;
+        }
+      } catch (Throwable ignored) {
+        // Try another LAN publishing signature.
+      }
+    }
+    return false;
+  }
+
+  private static boolean isPublishMethodName(String name) {
+    String lower = String.valueOf(name == null ? "" : name).toLowerCase(java.util.Locale.ROOT);
+    return lower.contains("publish") || lower.contains("open") || "method_30611".equals(lower);
+  }
+
+  private static boolean hasLanPublishShape(Class<?>[] types) {
+    boolean hasGameMode = false;
+    boolean hasBoolean = false;
+    boolean hasPort = false;
+    for (Class<?> type : types) {
+      if (type == Boolean.TYPE) {
+        hasBoolean = true;
+      } else if (type == Integer.TYPE) {
+        hasPort = true;
+      } else if (type.isEnum() || type.getName().toLowerCase(java.util.Locale.ROOT).contains("gamemode") || type.getName().toLowerCase(java.util.Locale.ROOT).contains("class_1934")) {
+        hasGameMode = true;
+      }
+    }
+    return hasGameMode && hasBoolean && hasPort;
+  }
+
+  private static Object[] lanPublishArguments(Class<?>[] types, int preferredPort) {
+    Object[] args = new Object[types.length];
+    for (int index = 0; index < types.length; index += 1) {
+      Class<?> type = types[index];
+      if (type == Boolean.TYPE) {
+        args[index] = Boolean.FALSE;
+      } else if (type == Integer.TYPE) {
+        args[index] = Math.max(0, preferredPort);
+      } else {
+        Object mode = firstGameModeValue(type);
+        if (mode == null && !type.isPrimitive()) {
+          mode = null;
+        }
+        args[index] = mode;
+      }
+    }
+    return args;
+  }
+
+  private static Object firstGameModeValue(Class<?> type) {
+    if (type == null) {
+      return null;
+    }
+    if (type.isEnum()) {
+      Object[] constants = type.getEnumConstants();
+      if (constants == null || constants.length == 0) {
+        return null;
+      }
+      for (Object constant : constants) {
+        if ("SURVIVAL".equalsIgnoreCase(String.valueOf(constant))) {
+          return constant;
+        }
+      }
+      return constants[0];
+    }
+    for (String fieldName : new String[] { "SURVIVAL", "DEFAULT_MODE", "field_9215", "field_9216" }) {
+      try {
+        return type.getField(fieldName).get(null);
+      } catch (Throwable ignored) {
+        // Try the next known game mode field.
+      }
+    }
+    return null;
+  }
+
+  private static boolean isBooleanReturn(Method method) {
+    Class<?> type = method.getReturnType();
+    return type == Boolean.TYPE || type == Boolean.class;
+  }
+
+  private static List<Method> allMethods(Class<?> type) {
+    List<Method> methods = new ArrayList<>();
+    while (type != null) {
+      for (Method method : type.getDeclaredMethods()) {
+        methods.add(method);
+      }
+      type = type.getSuperclass();
+    }
+    return methods;
+  }
+
+  private static int serverPort(Object server) {
+    Object value = invokeAny(server, "getPort", "getServerPort", "getLocalPort", "method_30612", "method_3828");
+    int parsed = parsePort(value);
+    if (parsed > 0) {
+      return parsed;
+    }
+    for (String fieldName : new String[] { "port", "publishedPort", "serverPort" }) {
+      parsed = parsePort(getAnyField(server, fieldName));
+      if (parsed > 0) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
+  private static String[] splitHostedAddress() {
+    String address = String.valueOf(hostedAddress == null ? "" : hostedAddress).trim();
+    int separator = address.lastIndexOf(':');
+    if (separator <= 0 || separator >= address.length() - 1) {
+      return new String[] { "", "" };
+    }
+    return new String[] { sanitizeHost(address.substring(0, separator)), String.valueOf(parsePort(address.substring(separator + 1))) };
+  }
+
+  private static String localLanAddress() {
+    try {
+      Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+      while (interfaces.hasMoreElements()) {
+        NetworkInterface networkInterface = interfaces.nextElement();
+        if (!networkInterface.isUp() || networkInterface.isLoopback() || networkInterface.isVirtual()) {
+          continue;
+        }
+        Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+        while (addresses.hasMoreElements()) {
+          InetAddress address = addresses.nextElement();
+          if (address instanceof Inet4Address && !address.isLoopbackAddress() && !address.isLinkLocalAddress()) {
+            return address.getHostAddress();
+          }
+        }
+      }
+    } catch (Throwable ignored) {
+      // Fall back below.
+    }
+    return "";
+  }
+
+  private static UpnpMapping tryMapInternetPort(String lanHost, int port) {
+    String localHost = sanitizeHost(lanHost);
+    if (localHost.isBlank() || port <= 0) {
+      return UpnpMapping.NONE;
+    }
+    UpnpGateway gateway = discoverUpnpGateway();
+    if (gateway == null) {
+      return UpnpMapping.NONE;
+    }
+    String publicIp = upnpExternalIp(gateway);
+    if (!isPublicAddress(publicIp)) {
+      return UpnpMapping.NONE;
+    }
+    if (!upnpAddPortMapping(gateway, localHost, port)) {
+      return UpnpMapping.NONE;
+    }
+    return new UpnpMapping(true, publicIp + ":" + port);
+  }
+
+  private static UpnpGateway discoverUpnpGateway() {
+    String[] searchTargets = {
+        "urn:schemas-upnp-org:service:WANIPConnection:1",
+        "urn:schemas-upnp-org:service:WANPPPConnection:1",
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
+    };
+    for (String target : searchTargets) {
+      UpnpGateway gateway = discoverUpnpGateway(target);
+      if (gateway != null) {
+        return gateway;
+      }
+    }
+    return null;
+  }
+
+  private static UpnpGateway discoverUpnpGateway(String searchTarget) {
+    String request = "M-SEARCH * HTTP/1.1\r\n"
+        + "HOST: 239.255.255.250:1900\r\n"
+        + "MAN: \"ssdp:discover\"\r\n"
+        + "MX: 2\r\n"
+        + "ST: " + searchTarget + "\r\n\r\n";
+    byte[] payload = request.getBytes(StandardCharsets.UTF_8);
+    try (DatagramSocket socket = new DatagramSocket()) {
+      socket.setSoTimeout(1600);
+      socket.send(new DatagramPacket(payload, payload.length, new InetSocketAddress("239.255.255.250", 1900)));
+      long deadline = System.currentTimeMillis() + 2200L;
+      while (System.currentTimeMillis() < deadline) {
+        byte[] buffer = new byte[2048];
+        DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+        try {
+          socket.receive(packet);
+        } catch (SocketTimeoutException timeout) {
+          break;
+        }
+        String response = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+        String location = ssdpHeader(response, "location");
+        UpnpGateway gateway = gatewayFromRootDescription(location);
+        if (gateway != null) {
+          return gateway;
+        }
+      }
+    } catch (Throwable ignored) {
+      return null;
+    }
+    return null;
+  }
+
+  private static String ssdpHeader(String response, String headerName) {
+    String target = String.valueOf(headerName == null ? "" : headerName).toLowerCase(java.util.Locale.ROOT) + ":";
+    for (String line : String.valueOf(response == null ? "" : response).split("\\r?\\n")) {
+      String trimmed = line.trim();
+      if (trimmed.toLowerCase(java.util.Locale.ROOT).startsWith(target)) {
+        return trimmed.substring(target.length()).trim();
+      }
+    }
+    return "";
+  }
+
+  private static UpnpGateway gatewayFromRootDescription(String location) {
+    if (String.valueOf(location == null ? "" : location).isBlank()) {
+      return null;
+    }
+    String xml = fetchHttpText(location, 260000);
+    if (xml.isBlank()) {
+      return null;
+    }
+    String urlBase = tagValue(xml, "URLBase");
+    String base = urlBase.isBlank() ? location : urlBase;
+    Matcher serviceMatcher = Pattern.compile("<service\\b[^>]*>(.*?)</service>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(xml);
+    while (serviceMatcher.find()) {
+      String serviceXml = serviceMatcher.group(1);
+      String serviceType = tagValue(serviceXml, "serviceType");
+      if (!serviceType.contains("WANIPConnection") && !serviceType.contains("WANPPPConnection")) {
+        continue;
+      }
+      String controlUrl = tagValue(serviceXml, "controlURL");
+      String absoluteControlUrl = resolveUrl(base, controlUrl);
+      if (!absoluteControlUrl.isBlank()) {
+        return new UpnpGateway(absoluteControlUrl, serviceType);
+      }
+    }
+    return null;
+  }
+
+  private static String upnpExternalIp(UpnpGateway gateway) {
+    String response = upnpSoap(gateway, "GetExternalIPAddress", "");
+    return sanitizeHost(tagValue(response, "NewExternalIPAddress"));
+  }
+
+  private static boolean upnpAddPortMapping(UpnpGateway gateway, String localHost, int port) {
+    String body = ""
+        + "<NewRemoteHost></NewRemoteHost>"
+        + "<NewExternalPort>" + port + "</NewExternalPort>"
+        + "<NewProtocol>TCP</NewProtocol>"
+        + "<NewInternalPort>" + port + "</NewInternalPort>"
+        + "<NewInternalClient>" + localHost + "</NewInternalClient>"
+        + "<NewEnabled>1</NewEnabled>"
+        + "<NewPortMappingDescription>X Client World</NewPortMappingDescription>"
+        + "<NewLeaseDuration>0</NewLeaseDuration>";
+    String response = upnpSoap(gateway, "AddPortMapping", body);
+    return !response.isBlank();
+  }
+
+  private static String upnpSoap(UpnpGateway gateway, String action, String body) {
+    if (gateway == null || gateway.controlUrl.isBlank() || gateway.serviceType.isBlank()) {
+      return "";
+    }
+    String envelope = "<?xml version=\"1.0\"?>"
+        + "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+        + "<s:Body><u:" + action + " xmlns:u=\"" + gateway.serviceType + "\">"
+        + String.valueOf(body == null ? "" : body)
+        + "</u:" + action + "></s:Body></s:Envelope>";
+    HttpURLConnection connection = null;
+    try {
+      byte[] bytes = envelope.getBytes(StandardCharsets.UTF_8);
+      connection = (HttpURLConnection) URI.create(gateway.controlUrl).toURL().openConnection();
+      connection.setConnectTimeout(2500);
+      connection.setReadTimeout(3500);
+      connection.setRequestMethod("POST");
+      connection.setDoOutput(true);
+      connection.setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"");
+      connection.setRequestProperty("SOAPACTION", "\"" + gateway.serviceType + "#" + action + "\"");
+      connection.setRequestProperty("Content-Length", String.valueOf(bytes.length));
+      connection.getOutputStream().write(bytes);
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300) {
+        return "";
+      }
+      return readConnectionText(connection, 120000);
+    } catch (Throwable ignored) {
+      return "";
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
+  }
+
+  private static String fetchHttpText(String url, int maxChars) {
+    HttpURLConnection connection = null;
+    try {
+      connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+      connection.setConnectTimeout(2500);
+      connection.setReadTimeout(3500);
+      connection.setRequestProperty("Accept", "text/xml,application/xml,text/plain");
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300) {
+        return "";
+      }
+      return readConnectionText(connection, maxChars);
+    } catch (Throwable ignored) {
+      return "";
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
+  }
+
+  private static String readConnectionText(HttpURLConnection connection, int maxChars) throws IOException {
+    try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+      StringBuilder body = new StringBuilder();
+      String line;
+      while ((line = reader.readLine()) != null && body.length() < Math.max(1024, maxChars)) {
+        body.append(line).append('\n');
+      }
+      return body.toString();
+    }
+  }
+
+  private static String tagValue(String xml, String tagName) {
+    Matcher matcher = Pattern.compile("<\\s*" + Pattern.quote(String.valueOf(tagName)) + "\\s*>\\s*(.*?)\\s*</\\s*" + Pattern.quote(String.valueOf(tagName)) + "\\s*>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(String.valueOf(xml == null ? "" : xml));
+    return matcher.find() ? unescapeXml(matcher.group(1).trim()) : "";
+  }
+
+  private static String unescapeXml(String value) {
+    return String.valueOf(value == null ? "" : value)
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&");
+  }
+
+  private static String resolveUrl(String base, String relative) {
+    try {
+      URI baseUri = URI.create(String.valueOf(base == null ? "" : base).trim());
+      return baseUri.resolve(String.valueOf(relative == null ? "" : relative).trim()).toString();
+    } catch (Throwable ignored) {
+      return "";
+    }
+  }
+
+  private static boolean isPublicAddress(String value) {
+    try {
+      InetAddress address = InetAddress.getByName(sanitizeHost(value));
+      if (!(address instanceof Inet4Address) || address.isAnyLocalAddress() || address.isLoopbackAddress()
+          || address.isLinkLocalAddress() || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+        return false;
+      }
+      byte[] raw = address.getAddress();
+      int first = raw[0] & 0xFF;
+      int second = raw[1] & 0xFF;
+      return !(first == 100 && second >= 64 && second <= 127);
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private static String sanitizeHost(String value) {
+    return String.valueOf(value == null ? "" : value).replaceAll("[^A-Za-z0-9_.-]", "").trim();
+  }
+
+  private static int parsePort(Object value) {
+    if (value instanceof Number number) {
+      int port = number.intValue();
+      return port > 0 && port <= 65535 ? port : 0;
+    }
+    try {
+      int port = Integer.parseInt(String.valueOf(value == null ? "" : value).trim());
+      return port > 0 && port <= 65535 ? port : 0;
+    } catch (RuntimeException ignored) {
+      return 0;
+    }
+  }
+
+  private static Profile localProfile() {
+    Object client = minecraftClient();
+    if (client == null) {
+      return null;
+    }
+    Object player = getAnyField(client, "player", "field_1724");
+    Profile profile = profileFromPlayer(player);
+    return profile != null ? profile : profileFromClientUser(client);
+  }
+
+  private static boolean sendHiddenChat(String message) {
+    Object client = minecraftClient();
+    Object player = getAnyField(client, "player", "field_1724");
+    Object connection = getAnyField(player, "connection", "networkHandler", "field_3944");
+    return invokeStringSender(connection, message, "sendChat", "sendChatMessage", "method_45729", "method_3142")
+        || invokeStringSender(player, message, "chat", "sendChat", "sendChatMessage", "method_7353", "method_3142");
+  }
+
+  private static boolean invokeStringSender(Object target, String message, String... names) {
+    if (target == null) {
+      return false;
+    }
+    for (String name : names) {
+      try {
+        target.getClass().getMethod(name, String.class).invoke(target, message);
+        return true;
+      } catch (Throwable ignored) {
+        // Try the next chat sender name.
+      }
+    }
+    for (Method method : target.getClass().getMethods()) {
+      if (method.getParameterCount() != 1 || method.getParameterTypes()[0] != String.class) {
+        continue;
+      }
+      String lower = method.getName().toLowerCase(java.util.Locale.ROOT);
+      if (!lower.contains("chat")) {
+        continue;
+      }
+      try {
+        method.invoke(target, message);
+        return true;
+      } catch (Throwable ignored) {
+        // Try another chat-like sender.
+      }
+    }
+    return false;
+  }
+
+  private static void registerMessageEvents() {
+    if (messageEventsRegistered) {
+      return;
+    }
+    messageEventsRegistered = true;
+    registerMessageEvent("net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents", "MODIFY_CHAT", true);
+    registerMessageEvent("net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents", "ALLOW_CHAT", false);
+    registerMessageEvent("net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents", "CHAT", false);
+    registerMessageEvent("net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents", "GAME", false);
+  }
+
+  private static void registerMessageEvent(String className, String fieldName, boolean outgoing) {
+    try {
+      Object event = Class.forName(className).getField(fieldName).get(null);
+      Object invoker = event.getClass().getMethod("invoker").invoke(event);
+      Class<?> listenerType = listenerInterface(invoker);
+      if (listenerType == null) {
+        return;
+      }
+      InvocationHandler handler = (proxy, method, args) -> {
+        if (method.getDeclaringClass() == Object.class) {
+          return method.invoke(SocialManager.class, args);
+        }
+        if (outgoing && method.getReturnType().equals(String.class) && args != null && args.length > 0 && args[0] instanceof String text) {
+          return tagOutgoingMessage(text);
+        }
+        boolean hiddenMessage = parseIncomingMessage(args);
+        if (method.getReturnType().equals(Boolean.TYPE)) {
+          return !hiddenMessage;
+        }
+        if (method.getReturnType().equals(String.class) && args != null && args.length > 0 && args[0] instanceof String text) {
+          return text;
+        }
+        return null;
+      };
+      Object listener = Proxy.newProxyInstance(listenerType.getClassLoader(), new Class<?>[] { listenerType }, handler);
+      event.getClass().getMethod("register", Object.class).invoke(event, listener);
+    } catch (Throwable ignored) {
+      // Fabric message API names changed across versions; missing hooks only disable auto-detection for that runtime.
+    }
+  }
+
+  private static Class<?> listenerInterface(Object invoker) {
+    if (invoker == null) {
+      return null;
+    }
+    for (Class<?> candidate : invoker.getClass().getInterfaces()) {
+      if (!candidate.getName().startsWith("java.")) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static String tagOutgoingMessage(String message) {
+    String normalized = String.valueOf(message == null ? "" : message);
+    if (normalized.isBlank() || normalized.startsWith("/") || normalized.contains(MARKER_PREFIX) || normalized.contains(REQUEST_PREFIX) || normalized.contains(INVITE_PREFIX)) {
+      return normalized;
+    }
+    return normalized + MARKER_PREFIX + MOD_PROTOCOL_VERSION + ":"
+        + String.format(java.util.Locale.ROOT, "%06X", NameTagSettings.color()) + "\u2063";
+  }
+
+  private static boolean parseIncomingMessage(Object[] args) {
+    if (args == null || args.length == 0) {
+      return false;
+    }
+    String text = "";
+    Profile sender = null;
+    for (Object arg : args) {
+      if (arg == null) {
+        continue;
+      }
+      Profile profile = profileFromGameProfile(arg);
+      if (profile != null) {
+        sender = profile;
+        continue;
+      }
+      String candidateText = componentText(arg);
+      if (candidateText.contains(REQUEST_PREFIX) || candidateText.contains(INVITE_PREFIX)) {
+        text = candidateText;
+      } else if (candidateText.contains(MARKER_PREFIX)) {
+        text = candidateText;
+      } else if (text.isBlank() && !candidateText.isBlank() && candidateText.length() < 512) {
+        text = candidateText;
+      }
+    }
+    if (text.contains(REQUEST_PREFIX) && handleFriendPayload(text, sender)) {
+      return true;
+    }
+    if (text.contains(INVITE_PREFIX) && handleInvitePayload(text, sender)) {
+      return true;
+    }
+    Matcher marker = MARKER_PATTERN.matcher(text);
+    if (!marker.find()) {
+      return false;
+    }
+    if (sender == null) {
+      sender = profileFromChatText(text);
+    }
+    if (sender == null) {
+      return false;
+    }
+    markXClient(sender.uuid, sender.name, Integer.parseInt(marker.group(1), 16));
+    synchronized (LOCK) {
+      recentMessages.add(0, new ChatEntry(sender.uuid, cleanName(sender.name), System.currentTimeMillis()));
+      trimRecentLocked();
+    }
+    return false;
+  }
+
+  private static boolean handleFriendPayload(String text, Profile sender) {
+    Matcher matcher = REQUEST_PATTERN.matcher(String.valueOf(text == null ? "" : text));
+    boolean found = false;
+    while (matcher.find()) {
+      found = true;
+      UUID fromUuid = parseUuid(matcher.group(2));
+      UUID toUuid = parseUuid(matcher.group(3));
+      String type = matcher.group(1);
+      String fromName = cleanName(matcher.group(4));
+      Profile local = localProfile();
+      if (local == null || fromUuid == null || toUuid == null || fromUuid.equals(local.uuid) || !toUuid.equals(local.uuid)) {
+        continue;
+      }
+      if (fromName.isBlank() && sender != null) {
+        fromName = cleanName(sender.name);
+      }
+      if (fromName.isBlank()) {
+        fromName = "Player";
+      }
+      boolean accepted = false;
+      load();
+      synchronized (LOCK) {
+        trimRequestsLocked();
+        knownXClients.put(fromUuid, fromName);
+        if ("REQ".equals(type)) {
+          if (!friends.containsKey(fromUuid)) {
+            incomingRequests.put(fromUuid, requestEntry(fromUuid, fromName, System.currentTimeMillis()));
+          }
+        } else if ("ACC".equals(type)) {
+          outgoingRequests.remove(fromUuid);
+          incomingRequests.remove(fromUuid);
+          friends.put(fromUuid, fromName);
+          accepted = true;
+          saveLocked();
+        } else if ("DEN".equals(type)) {
+          outgoingRequests.remove(fromUuid);
+          incomingRequests.remove(fromUuid);
+        }
+        PlayerStatus current = onlinePlayers.get(fromUuid);
+        if (current != null) {
+          onlinePlayers.put(fromUuid, current.withName(fromName).withFlags(true, friends.containsKey(fromUuid)));
+        }
+      }
+      if (accepted) {
+        applyFriendGlow(minecraftClient(), null);
+      }
+    }
+    return found;
+  }
+
+  private static boolean handleInvitePayload(String text, Profile sender) {
+    Matcher matcher = INVITE_PATTERN.matcher(String.valueOf(text == null ? "" : text));
+    boolean found = false;
+    while (matcher.find()) {
+      found = true;
+      UUID fromUuid = parseUuid(matcher.group(1));
+      UUID toUuid = parseUuid(matcher.group(2));
+      String host = sanitizeHost(matcher.group(3));
+      int port = parsePort(matcher.group(4));
+      String fromName = cleanName(matcher.group(5));
+      Profile local = localProfile();
+      if (local == null || fromUuid == null || toUuid == null || fromUuid.equals(local.uuid) || !toUuid.equals(local.uuid) || host.isBlank() || port <= 0) {
+        continue;
+      }
+      if (fromName.isBlank() && sender != null) {
+        fromName = cleanName(sender.name);
+      }
+      if (fromName.isBlank()) {
+        fromName = "Player";
+      }
+      load();
+      synchronized (LOCK) {
+        knownXClients.put(fromUuid, fromName);
+        worldInvites.put(fromUuid, new WorldInvite(fromUuid, fromName, host, port, System.currentTimeMillis()));
+        trimWorldInvitesLocked();
+      }
+    }
+    return found;
+  }
+
+  private static Profile profileFromChatText(String text) {
+    String clean = text == null ? "" : MARKER_PATTERN.matcher(text).replaceAll("");
+    Matcher angle = Pattern.compile("^\\s*<([^>]{1,32})>").matcher(clean);
+    String name = angle.find() ? angle.group(1) : "";
+    if (name.isBlank()) {
+      Matcher prefix = Pattern.compile("^\\s*([A-Za-z0-9_]{3,16})\\s*:").matcher(clean);
+      if (prefix.find()) {
+        name = prefix.group(1);
+      }
+    }
+    if (name.isBlank()) {
+      return null;
+    }
+    synchronized (LOCK) {
+      for (PlayerStatus player : onlinePlayers.values()) {
+        if (player.name.equalsIgnoreCase(name)) {
+          return new Profile(player.uuid, player.name, player.skinTexture());
+        }
+      }
+    }
+    return null;
+  }
+
+  private static void trimRecentLocked() {
+    long cutoff = System.currentTimeMillis() - RECENT_MS;
+    recentMessages.removeIf((entry) -> entry.timestampMs < cutoff);
+    while (recentMessages.size() > RECENT_LIMIT) {
+      recentMessages.remove(recentMessages.size() - 1);
+    }
+  }
+
+  private static void trimRequestsLocked() {
+    long cutoff = System.currentTimeMillis() - REQUEST_MS;
+    incomingRequests.entrySet().removeIf((entry) -> entry.getValue().timestampMs < cutoff);
+    outgoingRequests.entrySet().removeIf((entry) -> entry.getValue().timestampMs < cutoff);
+  }
+
+  private static void trimWorldInvitesLocked() {
+    long cutoff = System.currentTimeMillis() - REQUEST_MS;
+    worldInvites.entrySet().removeIf((entry) -> entry.getValue().timestampMs < cutoff);
+    while (worldInvites.size() > 4) {
+      UUID first = worldInvites.keySet().iterator().next();
+      worldInvites.remove(first);
+    }
+  }
+
+  private static String componentText(Object component) {
+    if (component == null) {
+      return "";
+    }
+    if (component instanceof String text) {
+      return text;
+    }
+    for (String methodName : new String[] { "getString", "getContents", "getText", "method_10851", "method_54160" }) {
+      try {
+        Object value = component.getClass().getMethod(methodName).invoke(component);
+        if (value != null) {
+          return String.valueOf(value);
+        }
+      } catch (Throwable ignored) {
+        // Try the next common text method.
+      }
+    }
+    return String.valueOf(component);
+  }
+
+  private static Object minecraftClient() {
+    Object official = staticInvoke("net.minecraft.client.Minecraft", "getInstance");
+    if (official != null) {
+      return official;
+    }
+    return staticInvoke("net.minecraft.class_310", "method_1551");
+  }
+
+  private static Object staticInvoke(String className, String methodName) {
+    try {
+      return Class.forName(className).getMethod(methodName).invoke(null);
+    } catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static Object getAnyField(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getField(name).get(target);
+      } catch (Throwable ignored) {
+        try {
+          java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable alsoIgnored) {
+          // Try the next field name.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeAny(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        return target.getClass().getMethod(name).invoke(target);
+      } catch (Throwable ignored) {
+        // Try the next method name.
+      }
+    }
+    return null;
+  }
+
+  private static void load() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    Path path = statePath();
+    if (!Files.exists(path)) {
+      return;
+    }
+    try {
+      String json = Files.readString(path, StandardCharsets.UTF_8);
+      synchronized (LOCK) {
+        readEntries(json, "friends", friends);
+        readEntries(json, "xClients", knownXClients);
+        keepHostedWorldOnline = readBoolean(json, "keepHostedWorldOnline", keepHostedWorldOnline);
+      }
+    } catch (IOException | RuntimeException ignored) {
+      // Social state is optional.
+    }
+  }
+
+  private static void readEntries(String json, String section, Map<UUID, String> target) {
+    Pattern sectionPattern = Pattern.compile(String.format(SECTION_PATTERN_TEMPLATE.pattern(), section), Pattern.DOTALL);
+    Matcher sectionMatcher = sectionPattern.matcher(json);
+    if (!sectionMatcher.find()) {
+      return;
+    }
+    Matcher entryMatcher = ENTRY_PATTERN.matcher(sectionMatcher.group(1));
+    while (entryMatcher.find()) {
+      try {
+        target.put(UUID.fromString(entryMatcher.group(1)), cleanName(unescapeJson(entryMatcher.group(2))));
+      } catch (RuntimeException ignored) {
+        // Skip broken entries.
+      }
+    }
+  }
+
+  private static boolean readBoolean(String json, String key, boolean fallback) {
+    Matcher matcher = Pattern.compile("\"" + Pattern.quote(String.valueOf(key)) + "\"\\s*:\\s*(true|false)", Pattern.CASE_INSENSITIVE).matcher(String.valueOf(json == null ? "" : json));
+    return matcher.find() ? Boolean.parseBoolean(matcher.group(1)) : fallback;
+  }
+
+  private static void saveLocked() {
+    Path path = statePath();
+    try {
+      Files.createDirectories(path.getParent());
+      String json = "{\n"
+          + "  \"friends\": " + entriesJson(friends) + ",\n"
+          + "  \"xClients\": " + entriesJson(knownXClients) + ",\n"
+          + "  \"keepHostedWorldOnline\": " + keepHostedWorldOnline + "\n"
+          + "}\n";
+      Files.writeString(path, json, StandardCharsets.UTF_8);
+    } catch (IOException ignored) {
+      // Settings persistence is optional.
+    }
+  }
+
+  private static String entriesJson(Map<UUID, String> entries) {
+    StringBuilder builder = new StringBuilder("[");
+    boolean first = true;
+    for (Map.Entry<UUID, String> entry : entries.entrySet()) {
+      if (!first) {
+        builder.append(", ");
+      }
+      first = false;
+      builder.append("{\"uuid\":\"").append(entry.getKey()).append("\",\"name\":\"")
+          .append(escapeJson(entry.getValue())).append("\"}");
+    }
+    return builder.append("]").toString();
+  }
+
+  private static Path statePath() {
+    String appData = System.getenv("APPDATA");
+    if (appData == null || appData.isBlank()) {
+      appData = Path.of(System.getProperty("user.home"), "AppData", "Roaming").toString();
+    }
+    return Path.of(appData, ".minecraft-launcher", "x-client-social.json");
+  }
+
+  private static String cleanName(String name) {
+    return String.valueOf(name == null ? "" : name).replaceAll("[^A-Za-z0-9_]", "").trim();
+  }
+
+  private static String escapeJson(String value) {
+    return String.valueOf(value == null ? "" : value).replace("\\", "\\\\").replace("\"", "\\\"");
+  }
+
+  private static String unescapeJson(String value) {
+    return String.valueOf(value == null ? "" : value).replace("\\\"", "\"").replace("\\\\", "\\");
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private record Profile(UUID uuid, String name, Object skinTexture) {
+    Profile withSkinTexture(Object nextSkinTexture) {
+      return nextSkinTexture == null ? this : new Profile(uuid, name, nextSkinTexture);
+    }
+  }
+
+  static final class PlayerStatus {
+    final UUID uuid;
+    final String name;
+    final boolean xClient;
+    final boolean friend;
+    final boolean self;
+    final long lastSeenMs;
+    final Object skinTexture;
+    final int[] skinHeadPixels;
+
+    PlayerStatus(UUID uuid, String name, boolean xClient, boolean friend, boolean self, long lastSeenMs, Object skinTexture, int[] skinHeadPixels) {
+      this.uuid = uuid;
+      this.name = cleanName(name);
+      this.xClient = xClient;
+      this.friend = friend;
+      this.self = self;
+      this.lastSeenMs = lastSeenMs;
+      this.skinTexture = skinTexture;
+      this.skinHeadPixels = skinHeadPixels == null ? new int[0] : skinHeadPixels;
+    }
+
+    int headColor() {
+      return SocialManager.headColor(uuid, name);
+    }
+
+    Object skinTexture() {
+      return skinTexture;
+    }
+
+    int[] skinHeadPixels() {
+      return skinHeadPixels;
+    }
+
+    PlayerStatus withName(String nextName) {
+      return new PlayerStatus(uuid, nextName, xClient, friend, self, lastSeenMs, skinTexture, skinHeadPixels);
+    }
+
+    PlayerStatus withFlags(boolean nextXClient, boolean nextFriend) {
+      return new PlayerStatus(uuid, name, nextXClient, nextFriend, self, lastSeenMs, skinTexture, skinHeadPixels);
+    }
+
+    PlayerStatus withSkinHeadPixels(int[] nextSkinHeadPixels) {
+      return new PlayerStatus(uuid, name, xClient, friend, self, lastSeenMs, skinTexture, nextSkinHeadPixels);
+    }
+  }
+
+  static final class ChatEntry {
+    final UUID uuid;
+    final String name;
+    final long timestampMs;
+
+    ChatEntry(UUID uuid, String name, long timestampMs) {
+      this.uuid = uuid;
+      this.name = cleanName(name);
+      this.timestampMs = timestampMs;
+    }
+
+    int headColor() {
+      return SocialManager.headColor(uuid, name);
+    }
+  }
+
+  static final class FriendRequest {
+    final UUID uuid;
+    final String name;
+    final long timestampMs;
+    final Object skinTexture;
+    final int[] skinHeadPixels;
+
+    FriendRequest(UUID uuid, String name, long timestampMs, Object skinTexture, int[] skinHeadPixels) {
+      this.uuid = uuid;
+      this.name = cleanName(name);
+      this.timestampMs = timestampMs;
+      this.skinTexture = skinTexture;
+      this.skinHeadPixels = skinHeadPixels == null ? new int[0] : skinHeadPixels;
+    }
+
+    int headColor() {
+      return SocialManager.headColor(uuid, name);
+    }
+
+    Object skinTexture() {
+      return skinTexture;
+    }
+
+    int[] skinHeadPixels() {
+      return skinHeadPixels;
+    }
+
+    FriendRequest withSkinHeadPixels(int[] nextSkinHeadPixels) {
+      return new FriendRequest(uuid, name, timestampMs, skinTexture, nextSkinHeadPixels);
+    }
+  }
+
+  static final class WorldInvite {
+    final UUID uuid;
+    final String name;
+    final String host;
+    final int port;
+    final long timestampMs;
+
+    WorldInvite(UUID uuid, String name, String host, int port, long timestampMs) {
+      this.uuid = uuid;
+      this.name = cleanName(name);
+      this.host = sanitizeHost(host);
+      this.port = port;
+      this.timestampMs = timestampMs;
+    }
+
+    String address() {
+      return host.isBlank() || port <= 0 ? "" : host + ":" + port;
+    }
+  }
+
+  private record UpnpGateway(String controlUrl, String serviceType) {
+  }
+
+  private record UpnpMapping(boolean mapped, String publicAddress) {
+    static final UpnpMapping NONE = new UpnpMapping(false, "");
+  }
+}
+`,
+  'dev/xlauncher/client/AutoReconnectManager.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+
+public final class AutoReconnectManager {
+  private static final String STATUS = "Verbindung verloren. Wiederverbindung wird versucht...";
+  private static final long BASE_DELAY_MS = 3000L;
+  private static final long MAX_DELAY_MS = 15000L;
+  private static final int MAX_ATTEMPTS = 12;
+  private static Object lastServerData;
+  private static boolean reconnecting;
+  private static int attempts;
+  private static long nextAttemptMs;
+
+  private AutoReconnectManager() {
+  }
+
+  public static void tick(Object client) {
+    if (client == null) {
+      return;
+    }
+    Object player = fieldValue(client, "player", "field_1724");
+    if (player != null) {
+      Object server = currentServerData(client);
+      if (server != null) {
+        lastServerData = server;
+      }
+      clear();
+      return;
+    }
+    if (!reconnecting || lastServerData == null || attempts >= MAX_ATTEMPTS || System.currentTimeMillis() < nextAttemptMs) {
+      return;
+    }
+    attempts += 1;
+    scheduleNextAttempt();
+    tryReconnect(client);
+  }
+
+  public static void onScreenOpening(Object screen) {
+    if (!isDisconnectedScreen(screen)) {
+      return;
+    }
+    Object client = minecraftClient();
+    Object server = currentServerData(client);
+    if (server != null) {
+      lastServerData = server;
+    }
+    if (lastServerData == null || reconnecting) {
+      return;
+    }
+    reconnecting = true;
+    attempts = 0;
+    nextAttemptMs = System.currentTimeMillis() + BASE_DELAY_MS;
+  }
+
+  public static void drawStatus(Object graphics) {
+    if (!reconnecting || graphics == null) {
+      return;
+    }
+    Object client = minecraftClient();
+    Object screen = fieldValue(client, "screen", "field_1755");
+    if (!isDisconnectedScreen(screen)) {
+      return;
+    }
+    Object font = fieldValue(client, "font", "field_1772");
+    int width = intField(screen, 320, "width", "field_22789");
+    int height = intField(screen, 240, "height", "field_22790");
+    drawCentered(graphics, font, STATUS, width / 2, Math.max(12, height - 30), 0xFFFFFFFF);
+  }
+
+  private static void clear() {
+    reconnecting = false;
+    attempts = 0;
+    nextAttemptMs = 0L;
+  }
+
+  private static void scheduleNextAttempt() {
+    long delay = Math.min(MAX_DELAY_MS, BASE_DELAY_MS + (long) attempts * 2500L);
+    nextAttemptMs = System.currentTimeMillis() + delay;
+  }
+
+  private static void tryReconnect(Object client) {
+    if (client == null || lastServerData == null) {
+      return;
+    }
+    Object parent = fieldValue(client, "screen", "field_1755");
+    Object address = serverAddress(lastServerData);
+    for (String className : new String[] { "net.minecraft.client.gui.screens.ConnectScreen", "net.minecraft.class_412" }) {
+      try {
+        Class<?> connectClass = Class.forName(className);
+        for (Method method : connectClass.getDeclaredMethods()) {
+          if (!Modifier.isStatic(method.getModifiers()) || method.getParameterCount() < 3) {
+            continue;
+          }
+          Object[] args = argsForConnect(method.getParameterTypes(), client, parent, lastServerData, address);
+          if (args == null) {
+            continue;
+          }
+          method.setAccessible(true);
+          method.invoke(null, args);
+          return;
+        }
+      } catch (Throwable ignored) {
+        // Try the next known ConnectScreen mapping.
+      }
+    }
+  }
+
+  private static Object[] argsForConnect(Class<?>[] types, Object client, Object parent, Object serverData, Object address) {
+    Object[] args = new Object[types.length];
+    boolean usedClient = false;
+    boolean usedServer = false;
+    for (int i = 0; i < types.length; i += 1) {
+      Class<?> type = types[i];
+      if (type.isPrimitive()) {
+        args[i] = primitiveDefault(type);
+      } else if (client != null && type.isInstance(client)) {
+        args[i] = client;
+        usedClient = true;
+      } else if (serverData != null && type.isInstance(serverData)) {
+        args[i] = serverData;
+        usedServer = true;
+      } else if (address != null && type.isInstance(address)) {
+        args[i] = address;
+      } else if (parent != null && type.isInstance(parent)) {
+        args[i] = parent;
+      } else {
+        args[i] = null;
+      }
+    }
+    return usedClient && usedServer ? args : null;
+  }
+
+  private static Object primitiveDefault(Class<?> type) {
+    if (type == Boolean.TYPE) {
+      return Boolean.FALSE;
+    }
+    if (type == Integer.TYPE || type == Short.TYPE || type == Byte.TYPE || type == Character.TYPE) {
+      return Integer.valueOf(0);
+    }
+    if (type == Long.TYPE) {
+      return Long.valueOf(0L);
+    }
+    if (type == Float.TYPE) {
+      return Float.valueOf(0.0F);
+    }
+    if (type == Double.TYPE) {
+      return Double.valueOf(0.0D);
+    }
+    return null;
+  }
+
+  private static Object serverAddress(Object serverData) {
+    String address = textValue(invokeNoArgs(serverData, "ip", "address", "getAddress", "method_2954"));
+    if (address.isBlank()) {
+      address = textValue(fieldValue(serverData, "ip", "address", "field_3761"));
+    }
+    if (address.isBlank()) {
+      return null;
+    }
+    for (String className : new String[] { "net.minecraft.client.multiplayer.resolver.ServerAddress", "net.minecraft.class_639" }) {
+      try {
+        Class<?> type = Class.forName(className);
+        for (Method method : type.getDeclaredMethods()) {
+          if (Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 1 && method.getParameterTypes()[0] == String.class) {
+            method.setAccessible(true);
+            return method.invoke(null, address);
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try constructor or next mapping.
+      }
+    }
+    return null;
+  }
+
+  private static Object currentServerData(Object client) {
+    if (client == null) {
+      return null;
+    }
+    Object value = invokeNoArgs(client, "getCurrentServer", "getCurrentServerEntry", "method_1558");
+    if (isServerData(value)) {
+      return value;
+    }
+    value = fieldValue(client, "currentServer", "currentServerData", "serverData", "field_1754");
+    return isServerData(value) ? value : null;
+  }
+
+  private static boolean isServerData(Object value) {
+    if (value == null) {
+      return false;
+    }
+    String name = value.getClass().getName();
+    return name.endsWith(".ServerData") || "net.minecraft.class_642".equals(name) || name.contains("ServerInfo");
+  }
+
+  private static boolean isDisconnectedScreen(Object screen) {
+    if (screen == null) {
+      return false;
+    }
+    String name = screen.getClass().getName();
+    return name.endsWith(".DisconnectedScreen") || name.endsWith(".DisconnectScreen") || "net.minecraft.class_419".equals(name);
+  }
+
+  private static void drawCentered(Object graphics, Object font, String text, int centerX, int y, int color) {
+    if (graphics == null || font == null) {
+      return;
+    }
+    if (invokeDraw(graphics, "centeredText", font, text, centerX, y, color)) {
+      return;
+    }
+    int width = fontWidth(font, text);
+    invokeDraw(graphics, "text", font, text, centerX - (width / 2), y, color);
+    invokeDraw(graphics, "method_25300", font, text, centerX - (width / 2), y, color);
+  }
+
+  private static boolean invokeDraw(Object graphics, String name, Object font, String text, int x, int y, int color) {
+    try {
+      for (Method method : graphics.getClass().getMethods()) {
+        if (method.getName().equals(name) && method.getParameterCount() == 5) {
+          method.invoke(graphics, font, text, Integer.valueOf(x), Integer.valueOf(y), Integer.valueOf(color));
+          return true;
+        }
+      }
+    } catch (Throwable ignored) {
+      // Try the next rendering method.
+    }
+    return false;
+  }
+
+  private static int fontWidth(Object font, String text) {
+    Object value = invokeNoArgs(font, "width", "method_1727");
+    if (value instanceof Number number) {
+      return number.intValue();
+    }
+    try {
+      Method method = font.getClass().getMethod("method_1727", String.class);
+      Object result = method.invoke(font, text);
+      return result instanceof Number number ? number.intValue() : text.length() * 6;
+    } catch (Throwable ignored) {
+      return text.length() * 6;
+    }
+  }
+
+  private static Object minecraftClient() {
+    for (String className : new String[] { "net.minecraft.client.Minecraft", "net.minecraft.class_310" }) {
+      try {
+        Class<?> clientClass = Class.forName(className);
+        for (String methodName : new String[] { "getInstance", "method_1551" }) {
+          try {
+            Method method = clientClass.getMethod(methodName);
+            return method.invoke(null);
+          } catch (Throwable ignored) {
+            // Try next accessor.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try next mapping.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeNoArgs(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        // Try declared method.
+      }
+      try {
+        Method method = target.getClass().getDeclaredMethod(name);
+        method.setAccessible(true);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        // Try next name.
+      }
+    }
+    return null;
+  }
+
+  private static Object fieldValue(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable ignored) {
+          // Try superclass or next field.
+        }
+      }
+    }
+    return null;
+  }
+
+  private static int intField(Object target, int fallback, String... names) {
+    Object value = fieldValue(target, names);
+    return value instanceof Number number ? number.intValue() : fallback;
+  }
+
+  private static String textValue(Object value) {
+    return value == null ? "" : String.valueOf(value).trim();
+  }
+}
+`,
+  'dev/xlauncher/client/OwnNamePrefix.java': String.raw`
+package dev.xlauncher.client;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+public final class OwnNamePrefix {
+  private OwnNamePrefix() {
+  }
+
+  public static Object prefixLocalName(Object entity, Object original) {
+    if (entity == null || original == null || entity != localPlayer()) {
+      return original;
+    }
+    String name = componentText(original);
+    if (name.isBlank() || name.startsWith("X ")) {
+      return original;
+    }
+    Object prefixed = literal("X " + name);
+    return prefixed == null ? original : prefixed;
+  }
+
+  private static Object localPlayer() {
+    Object client = minecraftClient();
+    return fieldValue(client, "player", "field_1724");
+  }
+
+  private static String componentText(Object component) {
+    Object value = invokeNoArgs(component, "getString", "method_10851");
+    String text = value == null ? String.valueOf(component) : String.valueOf(value);
+    return text == null ? "" : text.trim();
+  }
+
+  private static Object literal(String text) {
+    for (String className : new String[] { "net.minecraft.network.chat.Component", "net.minecraft.class_2561" }) {
+      try {
+        Class<?> type = Class.forName(className);
+        for (String methodName : new String[] { "literal", "method_30163" }) {
+          try {
+            Method method = type.getMethod(methodName, String.class);
+            return method.invoke(null, text);
+          } catch (Throwable ignored) {
+            // Try the next literal factory.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next mapping.
+      }
+    }
+    return null;
+  }
+
+  private static Object minecraftClient() {
+    for (String className : new String[] { "net.minecraft.client.Minecraft", "net.minecraft.class_310" }) {
+      try {
+        Class<?> type = Class.forName(className);
+        for (String methodName : new String[] { "getInstance", "method_1551" }) {
+          try {
+            Method method = type.getMethod(methodName);
+            return method.invoke(null);
+          } catch (Throwable ignored) {
+            // Try the next accessor.
+          }
+        }
+      } catch (Throwable ignored) {
+        // Try the next mapping.
+      }
+    }
+    return null;
+  }
+
+  private static Object invokeNoArgs(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      try {
+        Method method = target.getClass().getMethod(name);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        // Try declared method.
+      }
+      try {
+        Method method = target.getClass().getDeclaredMethod(name);
+        method.setAccessible(true);
+        return method.invoke(target);
+      } catch (Throwable ignored) {
+        // Try next name.
+      }
+    }
+    return null;
+  }
+
+  private static Object fieldValue(Object target, String... names) {
+    if (target == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+        try {
+          Field field = type.getDeclaredField(name);
+          field.setAccessible(true);
+          return field.get(target);
+        } catch (Throwable ignored) {
+          // Try superclass or next field.
+        }
+      }
+    }
+    return null;
+  }
+}
+`
+};
+
+const officialSources = {
+  'dev/xlauncher/client/XClientColorPickerScreen.java': String.raw`
+package dev.xlauncher.client;
+
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+
+public final class XClientColorPickerScreen extends Screen {
+  private static final int W=286,H=202,ROW=28;
+  private final Screen parent; private final String target,label; private final boolean allowRainbow;
+  private int red,green,blue,opacity,dragging=-1;
+  public XClientColorPickerScreen(Screen parent,String target,String label,int initial) {
+    this(parent,target,label,initial,true);
+  }
+  public XClientColorPickerScreen(Screen parent,String target,String label,int initial,boolean allowRainbow) {
+    // The panel renders its own context-specific heading. Keeping the base
+    // screen title empty prevents Minecraft from drawing a second title above it.
+    super(Component.literal("")); this.parent=parent; this.target=target; this.label=label; this.allowRainbow=allowRainbow;
+    if(!allowRainbow)XClientColorModes.setRainbow(target,false);
+    int c=XClientColorModes.staticColor(target,initial); red=(c>>16)&255; green=(c>>8)&255; blue=c&255; opacity=XClientColorModes.opacity(target);
