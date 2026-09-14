@@ -18,6 +18,8 @@ test('weather and time are local visual overrides with a full-day time slider', 
   assert.match(source, /static void setTimeTicks\(int value\)[\s\S]*?timeTicks = clampTimeTicks\(value\);/);
   assert.match(source, /double ratio = Math\.max\(0\.0D, Math\.min\(1\.0D, \(mouseX - trackX\) \/ \(double\) trackW\)\);/);
   assert.match(source, /MenuModules\.setTimeTicks\(MenuModules\.MIN_TIME_TICKS \+ \(int\) Math\.round\(ratio \* range\)\);/);
+  assert.match(source, /MenuModules\.setWeatherMode\(index\);\s*XLauncherMenuClient\.setModuleEnabled\(selectedIndex, true\);/);
+  assert.match(source, /MenuModules\.setTimeTicks\([\s\S]*?XLauncherMenuClient\.setModuleEnabled\(selectedIndex, true\);/);
   assert.match(source, /invokeWorldNumber\(level, Long\.valueOf\(MenuModules\.timeTicks\(\)\), "setTimeFromServer"/);
   assert.match(source, /invokeWorldNumber\(level, Float\.valueOf\(rain\), "setRainLevel"/);
   assert.match(source, /invokeWorldNumber\(level, Float\.valueOf\(thunder\), "setThunderLevel"/);

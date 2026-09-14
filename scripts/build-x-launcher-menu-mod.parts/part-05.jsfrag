@@ -2923,7 +2923,7 @@ public final class XLauncherMenuScreen extends Screen {
     for (int index = 0; index < 3; index += 1) {
       if (isInside(mouseX, mouseY, startX + (index * (buttonW + gap)), y + 22, buttonW, 16)) {
         MenuModules.setWeatherMode(index);
-        XLauncherMenuClient.refreshModule(selectedIndex);
+        XLauncherMenuClient.setModuleEnabled(selectedIndex, true);
         return true;
       }
     }
@@ -2944,7 +2944,7 @@ public final class XLauncherMenuScreen extends Screen {
     double ratio = Math.max(0.0D, Math.min(1.0D, (mouseX - trackX) / (double) trackW));
     int range = MenuModules.MAX_TIME_TICKS - MenuModules.MIN_TIME_TICKS;
     MenuModules.setTimeTicks(MenuModules.MIN_TIME_TICKS + (int) Math.round(ratio * range));
-    XLauncherMenuClient.refreshModule(selectedIndex);
+    XLauncherMenuClient.setModuleEnabled(selectedIndex, true);
   }
 
   private boolean handleUpTimerEditorClick(double mouseX, double mouseY, int panelX, int panelY, int panelW) {
