@@ -171,7 +171,7 @@ body, body * { font-weight: 400 !important; }
 :root { --bg: #001015; --text: #edffff; --muted: #9bc8cd; --cyan: #00dfe8; --line: rgba(0, 223, 232, .22); }
 body { background: var(--bg); }
 .glow { display: none; }
-.nav, main, footer { width: min(100% - 48px, 1040px); }
+.nav, main, footer { width: min(100% - 48px, 1280px); }
 .nav { height: 76px; border-color: var(--line); }
 .site-menu-toggle { width: 42px; height: 42px; border-radius: 8px; background: transparent; }
 .site-menu-panel { width: min(440px, 92vw); padding-top: 100px; border-color: var(--line); background: var(--bg); }
@@ -198,6 +198,8 @@ body { background: var(--bg); }
 .actions { gap: 16px; margin-top: 28px; }
 .download { width: auto; min-width: 220px; min-height: 50px; border: 1px solid var(--cyan); border-radius: 6px; color: #001115; background: var(--cyan); box-shadow: none; }
 .download:hover { transform: none; box-shadow: none; }
+.hero .actions .play-now { width: min(360px, 88vw); min-height: 76px; font-size: 1.25rem; }
+.hero .actions .play-now strong { font-size: 1.15rem; }
 .download::after { display: none; }
 .hint { color: #818780; }
 .feature-story { height: auto; }
@@ -222,5 +224,5 @@ footer { border-top: 1px solid var(--line); color: var(--muted); }
   .features { position: static; grid-template-columns: 1fr; padding: 40px 0 72px; }
   .page-feature-card { min-height: 0; }
   .page-main { padding-top: 48px; }
-  .nav, main, footer { width: min(100% - 32px, 1040px); }
+  .nav, main, footer { width: min(100% - 32px, 1280px); }
 }
