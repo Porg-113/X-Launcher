@@ -3,24 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="X Client – der moderne Minecraft Fabric Client für Windows." data-i18n-content="home.meta">
+  <meta name="description" content="X Launcher – der moderne Minecraft Fabric Client für Windows." data-i18n-content="home.meta">
   <meta name="theme-color" content="#00191f">
-  <title data-i18n="home.title">X Client – Startseite</title>
+  <title data-i18n="home.title">X Launcher – Startseite</title>
   <link rel="icon" href="icon.ico">
   <link rel="stylesheet" href="styles.css?v=29">
 </head>
 <body>
-  <div class="glow glow-one"></div>
-  <div class="glow glow-two"></div>
-  <header class="nav">
+<header class="nav">
     <button id="site-menu-toggle" class="site-menu-toggle" type="button" aria-controls="site-menu" aria-expanded="false" aria-label="Menü öffnen">
       <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
     </button>
     <nav class="nav-links" aria-label="Community und Quellcode" data-i18n-aria-label="common.communityNav">
-      <a class="social-link discord" href="https://discord.gg/YRqm22RYxK" target="_blank" rel="noreferrer" aria-label="X Client Discord" title="Discord">
+      <a class="social-link discord" href="https://discord.gg/YRqm22RYxK" target="_blank" rel="noreferrer" aria-label="X Launcher Discord" title="Discord">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.34A16.3 16.3 0 0 0 15.44 4l-.5 1.02a15.2 15.2 0 0 0-5.88 0L8.54 4A16.5 16.5 0 0 0 4.5 5.35C1.93 9.17 1.23 12.9 1.58 16.58a16.7 16.7 0 0 0 4.98 2.5l1.2-1.65a10.8 10.8 0 0 1-1.88-.9l.46-.36c3.63 1.69 7.57 1.69 11.15 0l.47.36c-.6.36-1.24.66-1.89.9l1.2 1.65a16.6 16.6 0 0 0 4.97-2.5c.42-4.27-.72-7.97-2.84-11.24ZM8.68 14.33c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.88 2.23-1.98 2.23Zm6.64 0c-1.09 0-1.98-1-1.98-2.23s.87-2.24 1.98-2.24 2 1.01 1.98 2.24c0 1.23-.87 2.23-1.98 2.23Z"/></svg>
       </a>
-      <a class="social-link youtube" href="https://www.youtube.com/@x-client" target="_blank" rel="noreferrer" aria-label="X Client YouTube" title="YouTube">
+      <a class="social-link youtube" href="https://www.youtube.com/@x-client" target="_blank" rel="noreferrer" aria-label="X Launcher YouTube" title="YouTube">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.12C19.55 3.58 12 3.58 12 3.58s-7.55 0-9.4.5A3 3 0 0 0 .5 6.2 31.2 31.2 0 0 0 0 12a31.2 31.2 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.12c1.85.5 9.4.5 9.4.5s7.55 0 9.4-.5a3 3 0 0 0 2.1-2.12A31.2 31.2 0 0 0 24 12a31.2 31.2 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.26 3.6-6.26 3.6Z"/></svg>
       </a>
       <a class="github-link" href="https://github.com/Porg-113/X-Launcher" target="_blank" rel="noreferrer">GitHub ↗</a>
@@ -30,7 +28,7 @@
   <div id="site-menu" class="site-menu" aria-hidden="true">
     <button class="site-menu-backdrop" type="button" data-menu-close aria-label="Menü schließen" data-i18n-aria-label="common.closeMenu"></button>
     <aside class="site-menu-panel" role="dialog" aria-modal="true" aria-labelledby="site-menu-title" tabindex="-1">
-      <h2 id="site-menu-title" data-i18n="common.menuTitle">Über X Client</h2>
+      <h2 id="site-menu-title" data-i18n="common.menuTitle">Über X Launcher</h2>
       <p class="site-menu-copy" data-i18n="common.menuCopy">Ein schneller, persönlicher Minecraft-Client mit Mods, Profilen, Skins und direktem Spielstart – alles an einem Ort.</p>
       <nav class="site-menu-links" aria-label="Seitennavigation" data-i18n-aria-label="common.siteNav">
         <a href="index.html" aria-current="page" data-menu-close><span>01</span><b data-i18n="common.home">Startseite</b></a>
@@ -57,7 +55,7 @@
   <main id="top">
     <section class="hero reveal">
       <div class="eyebrow"><span></span><b data-i18n="home.eyebrow">Für Windows 10 &amp; 11</b></div>
-      <img class="client-wordmark" src="x-client.png" alt="X Client">
+      <img class="client-wordmark" src="x-client.png" alt="X Launcher">
       <p class="lead" data-i18n="home.lead">Minecraft das ganz dir gehört</p>
       <section class="live-stats" aria-label="Live-Statistiken" data-i18n-aria-label="home.statsLabel">
         <span><strong id="download-count">5</strong><small data-i18n="common.downloads">Downloads</small></span>
@@ -72,124 +70,9 @@
       <p class="hint" data-i18n="home.hint">Kostenlos · 64-Bit · Direkter Download vom offiziellen GitHub Release</p>
     </section>
 
-    <section class="app-preview-section reveal" aria-labelledby="app-preview-title">
-      <div class="app-preview-heading">
-        <div class="eyebrow"><span></span><b data-i18n="preview.eyebrow">Interaktive App-Vorschau</b></div>
-        <h2 id="app-preview-title" data-i18n="preview.title">X Client ausprobieren</h2>
-        <p data-i18n="preview.copy">Entdecke die App – ohne echte Änderungen an deinem PC.</p>
-      </div>
-
-      <iframe id="app-preview" class="launcher-preview-frame" src="launcher-preview.html?v=29" title="Interaktive X Client Launcher-Vorschau" loading="eager" sandbox="allow-scripts allow-same-origin"></iframe>
-
-      <div id="legacy-app-preview" class="demo-app" style="--demo-accent: #00ffff;" hidden aria-hidden="true">
-        <header class="demo-topbar">
-          <div class="demo-brand"><span>X</span><strong>X Client</strong><small data-i18n="preview.demoMode">Demo-Modus</small></div>
-          <button class="demo-account" type="button" aria-expanded="false">
-            <span class="demo-avatar demo-steve-avatar" aria-label="Steve"></span>
-            <span><strong>X Client</strong><small><i></i><b data-i18n="preview.online">Online</b></small></span>
-          </button>
-          <div class="demo-window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
-          <div class="demo-account-card" hidden><span data-i18n="preview.loggedIn">Angemeldet als</span><strong>X Client</strong><small data-i18n="preview.demoAccount">Demo-Konto</small></div>
-        </header>
-
-        <div class="demo-layout">
-          <nav class="demo-sidebar" aria-label="App-Navigation" data-i18n-aria-label="preview.navigation">
-            <button class="is-active" type="button" data-demo-section="dashboard" aria-label="Start" data-i18n-aria-label="preview.home"><svg viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8M3 10l9-8 9 8v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span data-i18n="preview.home">Start</span></button>
-            <button type="button" data-demo-section="mods" aria-label="Mods"><svg viewBox="0 0 24 24"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2M14 2h8v8h-8z"/></svg><span>Mods</span></button>
-            <button type="button" data-demo-section="modrinth" aria-label="Modrinth"><svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></svg><span>Modrinth</span></button>
-            <button type="button" data-demo-section="profiles" aria-label="Profile" data-i18n-aria-label="preview.profiles"><svg viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5m-9 5v10"/></svg><span data-i18n="preview.profiles">Profile</span></button>
-            <button type="button" data-demo-section="servers" aria-label="Server"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg><span>Server</span></button>
-            <button type="button" data-demo-section="skins" aria-label="Skins"><svg viewBox="0 0 24 24"><path d="M16 3a4 4 0 0 1-8 0L3.6 4.5 3 9h3v12h12V9h3l-.6-4.5z"/></svg><span>Skins</span></button>
-            <button type="button" data-demo-section="settings" aria-label="Einstellungen" data-i18n-aria-label="preview.settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.37.28.58.72.6 1.18V13.6h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg><span data-i18n="preview.settings">Einstellungen</span></button>
-          </nav>
-
-          <div class="demo-content">
-            <section class="demo-panel is-active" data-demo-panel="dashboard">
-              <div class="demo-panel-header"><div><small data-i18n="preview.welcome">Willkommen zurück</small><h3>X Client</h3></div><span class="demo-ready"><i></i><b data-i18n="preview.ready">Bereit</b></span></div>
-              <div class="demo-dashboard-grid">
-                <article class="demo-launch-card">
-                  <div class="demo-launch-copy"><span class="demo-kicker">X CLIENT · FABRIC EDITION</span><h4 data-i18n="preview.yourMinecraft">Dein Minecraft</h4><p data-i18n="preview.launchCopy">Profil wählen und direkt loslegen.</p></div>
-                  <div class="demo-steve-stage" aria-label="Steve Skin">
-                    <div class="demo-steve" aria-hidden="true">
-                      <div class="steve-head"><i class="steve-hair"></i><i class="steve-eye steve-eye-left"></i><i class="steve-eye steve-eye-right"></i><i class="steve-nose"></i><i class="steve-mouth"></i></div>
-                      <div class="steve-body"></div><i class="steve-arm steve-arm-left"></i><i class="steve-arm steve-arm-right"></i><i class="steve-leg steve-leg-left"></i><i class="steve-leg steve-leg-right"></i>
-                    </div>
-                  </div>
-                  <div class="demo-launch-controls">
-                    <span class="demo-launch-status"><i></i><b data-i18n="preview.readyToPlay">Bereit zum Spielen</b></span>
-                    <label><span data-i18n="preview.profile">Profil</span><select data-demo-profile><option>Performance · 1.21.4</option><option>Vanilla+ · 1.20.1</option><option>Creative · 1.21.1</option></select></label>
-                    <button class="demo-primary" type="button" data-demo-locked="play"><span data-i18n="preview.play">Minecraft starten</span><b>▶</b></button>
-                  </div>
-                  <div class="demo-meta-strip" aria-hidden="true"><span><b>FABRIC</b><small data-i18n="preview.optimized">Optimiert</small></span><span><b>MODRINTH</b><small data-i18n="preview.integrated">Integriert</small></span><span><b>X CLIENT</b><small data-i18n="preview.ready">Bereit</small></span></div>
-                </article>
-              </div>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="mods">
-              <div class="demo-panel-header"><div><small>FABRIC 1.21.4</small><h3 data-i18n="preview.manageMods">Mods verwalten</h3></div><button class="demo-ghost" type="button" data-demo-check data-i18n="preview.checkAll">Alle prüfen</button></div>
-              <div class="demo-tabs" role="tablist"><button class="is-active" type="button" data-demo-tab="all" data-i18n="preview.all">Alle</button><button type="button" data-demo-tab="performance" data-i18n="preview.performance">Performance</button><button type="button" data-demo-tab="visual" data-i18n="preview.visual">Grafik</button></div>
-              <div class="demo-list">
-                <article class="demo-list-item" data-demo-category="performance"><span class="demo-item-icon">S</span><div><strong>Sodium</strong><small>0.6.13 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
-                <article class="demo-list-item" data-demo-category="visual"><span class="demo-item-icon">I</span><div><strong>Iris Shaders</strong><small>1.8.8 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
-                <article class="demo-list-item" data-demo-category="performance"><span class="demo-item-icon">L</span><div><strong>Lithium</strong><small>0.14.8 · Fabric</small></div><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button><button class="demo-icon-button" type="button" data-demo-locked="delete" aria-label="Löschen">×</button></article>
-              </div>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="modrinth">
-              <div class="demo-panel-header"><div><small>DISCOVER</small><h3>Modrinth</h3></div></div>
-              <div class="demo-search"><input type="search" data-demo-search placeholder="Mods suchen …" data-i18n-placeholder="preview.searchMods"><button class="demo-primary" type="button" data-demo-search-button data-i18n="preview.search">Suchen</button></div>
-              <div class="demo-list demo-search-results">
-                <article class="demo-list-item" data-search-name="sodium performance fps"><span class="demo-item-icon">S</span><div><strong>Sodium</strong><small data-i18n="preview.performanceMod">Performance-Mod</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
-                <article class="demo-list-item" data-search-name="iris shader graphics"><span class="demo-item-icon">I</span><div><strong>Iris Shaders</strong><small data-i18n="preview.shaderSupport">Shader-Unterstützung</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
-                <article class="demo-list-item" data-search-name="mod menu settings"><span class="demo-item-icon">M</span><div><strong>Mod Menu</strong><small data-i18n="preview.modSettings">Mod-Einstellungen</small></div><button class="demo-small-primary" type="button" data-demo-locked="install" data-i18n="preview.install">Installieren</button></article>
-              </div>
-              <p class="demo-empty" hidden data-i18n="preview.noResults">Keine Ergebnisse gefunden.</p>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="profiles">
-              <div class="demo-panel-header"><div><small data-i18n="preview.saved">GESPEICHERT</small><h3 data-i18n="preview.profiles">Profile</h3></div><div class="demo-header-actions"><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.import">Importieren</button><button class="demo-primary" type="button" data-demo-locked="create" data-i18n="preview.create">Erstellen</button></div></div>
-              <div class="demo-card-grid" data-demo-select-group>
-                <button class="demo-select-card is-selected" type="button"><small>1.21.4</small><strong>Performance</strong><span>12 Mods · Fabric</span></button>
-                <button class="demo-select-card" type="button"><small>1.20.1</small><strong>Vanilla+</strong><span>8 Mods · Fabric</span></button>
-                <button class="demo-select-card" type="button"><small>1.21.1</small><strong>Creative</strong><span>5 Mods · Fabric</span></button>
-              </div>
-              <button class="demo-text-action" type="button" data-demo-locked="transfer" data-i18n="preview.export">Ausgewähltes Profil exportieren</button>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="servers">
-              <div class="demo-panel-header"><div><small>FAVORITEN</small><h3>Server</h3></div><button class="demo-primary" type="button" data-demo-locked="create" data-i18n="preview.addServer">Server hinzufügen</button></div>
-              <div class="demo-server-list" data-demo-select-group>
-                <button class="demo-server-card is-selected" type="button"><span class="demo-server-icon">H</span><div><strong>Hypixel</strong><small>mc.hypixel.net</small></div><b><i></i>42K</b></button>
-                <button class="demo-server-card" type="button"><span class="demo-server-icon">X</span><div><strong>X Client SMP</strong><small>play.xclient.dev</small></div><b><i></i>18</b></button>
-              </div>
-              <div class="demo-server-detail"><small data-i18n="preview.selectedServer">Ausgewählter Server</small><strong data-demo-server-name>Hypixel</strong><span data-i18n="preview.serverReady">Verbindung bereit</span><button type="button" data-demo-locked="play" data-i18n="preview.join">Beitreten</button></div>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="skins">
-              <div class="demo-panel-header"><div><small data-i18n="preview.collection">SAMMLUNG</small><h3>Skins</h3></div><div class="demo-header-actions"><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.import">Importieren</button><button class="demo-ghost" type="button" data-demo-locked="transfer" data-i18n="preview.exportShort">Exportieren</button></div></div>
-              <div class="demo-skin-layout">
-                <div class="demo-skin-preview"><div class="demo-steve demo-steve-small" aria-hidden="true"><div class="steve-head"><i class="steve-hair"></i><i class="steve-eye steve-eye-left"></i><i class="steve-eye steve-eye-right"></i><i class="steve-nose"></i><i class="steve-mouth"></i></div><div class="steve-body"></div><i class="steve-arm steve-arm-left"></i><i class="steve-arm steve-arm-right"></i><i class="steve-leg steve-leg-left"></i><i class="steve-leg steve-leg-right"></i></div><strong data-demo-skin-name>Steve</strong><small data-i18n="preview.activeSkin">Aktiver Skin</small></div>
-                <div class="demo-skin-grid" data-demo-select-group><button class="demo-skin-card is-selected" type="button" data-skin-name="Steve" data-skin-color="#00ffff"><span class="demo-steve-face"></span><b>Steve</b></button><button class="demo-skin-card" type="button" data-skin-name="Purple Alex" data-skin-color="#a855f7"><span style="--skin:#a855f7"></span><b>Purple Alex</b></button><button class="demo-skin-card" type="button" data-skin-name="Lime Runner" data-skin-color="#8cff66"><span style="--skin:#8cff66"></span><b>Lime Runner</b></button></div>
-              </div>
-            </section>
-
-            <section class="demo-panel" data-demo-panel="settings">
-              <div class="demo-panel-header"><div><small>X CLIENT</small><h3 data-i18n="preview.settings">Einstellungen</h3></div></div>
-              <div class="demo-settings-grid">
-                <article><small data-i18n="preview.appearance">DARSTELLUNG</small><h4 data-i18n="preview.accentColor">Akzentfarbe</h4><div class="demo-color-row"><button class="is-active" type="button" data-demo-color="#00ffff" style="--choice:#00ffff" aria-label="Cyan"></button><button type="button" data-demo-color="#a855f7" style="--choice:#a855f7" aria-label="Violett"></button><button type="button" data-demo-color="#8cff66" style="--choice:#8cff66" aria-label="Grün"></button></div></article>
-                <article><small data-i18n="preview.behavior">VERHALTEN</small><label class="demo-setting-row"><span data-i18n="preview.animations">Animationen</span><button class="demo-switch is-on" type="button" role="switch" aria-checked="true" data-demo-motion><i></i></button></label><label class="demo-setting-row"><span data-i18n="preview.sounds">Sounds</span><button class="demo-switch is-on" type="button" role="switch" aria-checked="true"><i></i></button></label></article>
-                <article><small>PERFORMANCE</small><h4>RAM</h4><input type="range" min="2" max="16" value="6" step="1" data-demo-memory><strong><span data-demo-memory-output>6</span> GB</strong></article>
-              </div>
-            </section>
-          </div>
-        </div>
-        <div class="demo-toast" role="status" aria-live="polite"></div>
-      </div>
-    </section>
-
   </main>
 
-  <footer><span>© 2026 X Client</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
+  <footer><span>© 2026 X Launcher</span><span data-i18n="common.disclaimer">Nicht mit Mojang oder Microsoft verbunden.</span></footer>
   <script src="download.js?v=29"></script>
 </body>
 </html>
