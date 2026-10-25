@@ -262,3 +262,10 @@ body::-webkit-scrollbar { display: none; }
   .site-menu-footer { padding-top: 12px; }
   .language-picker { margin-top: 10px; padding-top: 10px; }
 }
+/* Larger menu typography */
+.github-link { font-size: 2rem; }
+.site-menu-panel h2 { font-size: clamp(3.2rem, 8vw, 4rem); }
+.site-menu-links a { font-size: 2rem; }
+.site-menu-external a { font-size: 1.44rem; }
+.language-picker { font-size: 1.56rem; }
+.language-picker select { min-width: 160px; }
