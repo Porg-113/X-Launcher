@@ -118,7 +118,7 @@ strong, b, h1, h2, h3, h4, h5, h6, .eyebrow, .live-stats small, .github-link, .s
 .install-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 58px; }
 .install-steps article { padding: 25px; border-top: 1px solid var(--line); }
 .install-steps span { color: var(--cyan); font-family: "Minecraft Website", monospace; font-size: .68rem; }
-.install-steps h2 { margin: 17px 0 10px; font-size: 1.15rem; }
+.install-steps h2 { margin: 17px 0 10px; font-size: 1.25rem; }
 .install-steps p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.6; }
 .closing { text-align: center; border: 1px solid var(--line); border-radius: 24px; padding: 75px 20px; background: radial-gradient(circle at 50% 120%, rgba(0, 255, 255, .2), transparent 58%); }
 .closing p { color: var(--muted); }
@@ -171,7 +171,7 @@ body, body * { font-weight: 400 !important; }
 :root { --bg: #001015; --text: #edffff; --muted: #9bc8cd; --cyan: #00dfe8; --line: rgba(0, 223, 232, .22); }
 body { background: var(--bg); }
 .glow { display: none; }
-.nav, main, footer { width: min(100% - 48px, 1280px); }
+.nav, main, footer { width: min(100% - 48px, 1440px); }
 .nav { height: 76px; border-color: var(--line); }
 .site-menu-toggle { width: 42px; height: 42px; border-radius: 8px; background: transparent; }
 .site-menu-panel { width: min(440px, 92vw); padding-top: 100px; border-color: var(--line); background: var(--bg); }
@@ -198,8 +198,8 @@ body { background: var(--bg); }
 .actions { gap: 16px; margin-top: 28px; }
 .download { width: auto; min-width: 220px; min-height: 50px; border: 1px solid var(--cyan); border-radius: 6px; color: #001115; background: var(--cyan); box-shadow: none; }
 .download:hover { transform: none; box-shadow: none; }
-.hero .actions .play-now { width: min(360px, 88vw); min-height: 76px; font-size: 1.25rem; }
-.hero .actions .play-now strong { font-size: 1.15rem; }
+.hero .actions .play-now { width: min(440px, 88vw); min-height: 88px; font-size: 1.35rem; }
+.hero .actions .play-now strong { font-size: 1.25rem; }
 .download::after { display: none; }
 .hint { color: #818780; }
 .feature-story { height: auto; }
@@ -224,5 +224,5 @@ footer { border-top: 1px solid var(--line); color: var(--muted); }
   .features { position: static; grid-template-columns: 1fr; padding: 40px 0 72px; }
   .page-feature-card { min-height: 0; }
   .page-main { padding-top: 48px; }
-  .nav, main, footer { width: min(100% - 32px, 1280px); }
+  .nav, main, footer { width: min(100% - 32px, 1440px); }
 }
