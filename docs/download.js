@@ -303,7 +303,17 @@ if (downloadCount || activePlayerCount) {
 }
 
 if (primary) {
-  primary.addEventListener("click", () => {
+  primary.addEventListener("click", (event) => {
+    if (!event.isTrusted) return;
+
+    let targetUrl;
+    try {
+      targetUrl = new URL(primary.href);
+    } catch (_) {
+      return;
+    }
+    if (!targetUrl.pathname.toLowerCase().endsWith(".exe")) return;
+
     void hitCounter(downloadCounterKey).catch(() => {});
   });
 }
