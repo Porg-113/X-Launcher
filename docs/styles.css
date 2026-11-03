@@ -108,7 +108,7 @@ em { font-style: normal; color: var(--accent); }
 .release-facts dd { margin: 0; font-size: clamp(16px, 2vw, 21px); font-weight: 550; letter-spacing: -.025em; color: var(--text); }
 .file-detail { color: #8ca7b5; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .download-actions { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 17px; }
-.download-installer { width: min(100%, 340px); min-height: 56px; }
+.download-actions .download-installer { width: min(100%, 480px); min-height: 76px; padding: 20px 28px; font-size: 20px; font-weight: 650; border-radius: 8px; }
 .release-notes { font-size: 12px; color: #bed3dd; text-decoration: underline; text-decoration-color: #46616e; text-underline-offset: 5px; }
 .release-notes:hover { color: var(--accent); text-decoration-color: var(--accent); }
 .download-panel .download-status { margin: 27px 0 0; max-width: 560px; font-size: 11px; line-height: 1.7; color: #8ca7b5; }

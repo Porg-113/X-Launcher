@@ -15,7 +15,7 @@ function renderRelease() {
   const panel = document.querySelector('.download-panel');
   if (releaseState.asset) {
     button.href = releaseState.asset.browser_download_url;
-    button.textContent = language === 'de' ? 'Windows-Installer herunterladen' : 'Download Windows installer';
+    button.textContent = 'Download';
     if (version) version.textContent = releaseState.tag;
     if (size) size.textContent = `${(releaseState.asset.size / 1024 / 1024).toFixed(0)} MiB`;
     if (panel) panel.dataset.releaseState = 'ready';
