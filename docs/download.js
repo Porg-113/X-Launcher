@@ -12,11 +12,11 @@ function renderRelease() {
   if (!button || !info || !releaseState) return;
   if (releaseState.asset) {
     button.href = releaseState.asset.browser_download_url;
-    button.textContent = language === 'de' ? 'Windows-Installer herunterladen ↓' : 'Download Windows installer ↓';
+    button.textContent = language === 'de' ? 'Windows-Installer herunterladen' : 'Download Windows installer';
     info.textContent = `${releaseState.tag} · ${(releaseState.asset.size / 1024 / 1024).toFixed(0)} MB · Windows x64`;
   } else {
     button.href = repository + '/releases';
-    button.textContent = language === 'de' ? 'Releases auf GitHub ansehen ↗' : 'View releases on GitHub ↗';
+    button.textContent = language === 'de' ? 'Releases auf GitHub ansehen' : 'View releases on GitHub';
     info.textContent = language === 'de' ? 'Kein aktueller Installer verifiziert. Bitte prüfe die verfügbaren Releases auf GitHub.' : 'No current installer verified. Please check the available releases on GitHub.';
   }
 }
