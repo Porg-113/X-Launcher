@@ -97,11 +97,7 @@ em { font-style: normal; color: var(--accent); }
 .split > div:last-child { padding: 26px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); }
 .split h3 { margin-bottom: 15px; }.split p { margin-bottom: 26px; font-size: 14px; }
 .download-panel { width: 100%; max-width: 960px; margin-inline: auto; padding: clamp(28px, 5vw, 60px); display: flex; flex-direction: column; align-items: center; text-align: center; background: #0a151c; border: 1px solid #2b4653; border-radius: 12px; box-shadow: 0 18px 60px #0003; }
-.download-platform { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1px solid #28424f; background: #0f2029; color: #b1d3df; font-size: 12px; border-radius: 6px; }
-.download-platform svg { color: var(--accent); }
-.download-panel h2 { margin-top: 26px; font-size: clamp(1.7rem, 3vw, 2.65rem); }
-.download-panel .download-description { max-width: 550px; margin-top: 18px; font-size: 14px; line-height: 1.85; }
-.release-facts { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 34px 0; padding: 23px 0; border-block: 1px solid var(--line); }
+.release-facts { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 32px; padding: 0 0 24px; border-bottom: 1px solid var(--line); }
 .release-facts > div { min-width: 0; padding-inline: 10px; }
 .release-facts > div + div { border-left: 1px solid var(--line); }
 .release-facts dt { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
@@ -146,11 +142,10 @@ footer p { font-size: 11px; }footer > div { display: flex; justify-content: cent
   .section-heading { gap: 14px; margin-bottom: 28px; }.section-heading .eyebrow { font-size: 9px; }
   .split > div:first-child { padding: 0 0 12px; }.split > div:last-child { padding: 24px; }
   .page-intro { padding: 55px 0 40px; }.page-intro h1 { font-size: clamp(2.2rem, 9vw, 3.3rem); }
-  .release-facts { margin-block: 27px; padding-block: 19px; }
+  .release-facts { margin: 0 0 26px; padding: 0 0 20px; }
   .release-facts > div { padding-inline: 5px; }
   .file-detail { display: block; font-size: 10px; }
   .download-panel { padding-inline: 20px; }
-  .download-panel .download-description { font-size: 13px; }
   .requirements { padding: 24px; }.requirements div { grid-template-columns: 1fr; gap: 8px; }
   .callout { margin-block: 40px; }.button { min-width: 0; padding: 14px 18px; font-size: 12px; }
   footer > div { gap: 14px 20px; } summary { font-size: 14px; }
