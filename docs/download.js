@@ -10,11 +10,20 @@ function renderRelease() {
   const button = document.querySelector('#download');
   const info = document.querySelector('#release-info');
   if (!button || !info || !releaseState) return;
+  const version = document.querySelector('#release-version');
+  const size = document.querySelector('#release-size');
+  const panel = document.querySelector('.download-panel');
   if (releaseState.asset) {
     button.href = releaseState.asset.browser_download_url;
     button.textContent = language === 'de' ? 'Windows-Installer herunterladen' : 'Download Windows installer';
-    info.textContent = `${releaseState.tag} · ${(releaseState.asset.size / 1024 / 1024).toFixed(0)} MB · Windows x64`;
+    if (version) version.textContent = releaseState.tag;
+    if (size) size.textContent = `${(releaseState.asset.size / 1024 / 1024).toFixed(0)} MiB`;
+    if (panel) panel.dataset.releaseState = 'ready';
+    info.textContent = language === 'de' ? 'Download direkt aus dem aktuellen GitHub Release.' : 'Download directly from the latest GitHub release.';
   } else {
+    if (version) version.textContent = '—';
+    if (size) size.textContent = '—';
+    if (panel) panel.dataset.releaseState = 'unavailable';
     button.href = repository + '/releases';
     button.textContent = language === 'de' ? 'Releases auf GitHub ansehen' : 'View releases on GitHub';
     info.textContent = language === 'de' ? 'Kein aktueller Installer verifiziert. Bitte prüfe die verfügbaren Releases auf GitHub.' : 'No current installer verified. Please check the available releases on GitHub.';
