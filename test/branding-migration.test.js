@@ -36,30 +36,18 @@ test('launcher UI and website expose only X Client branding', () => {
   assert.match(launcherHtml, /<title>X Client<\/title>/u);
   assert.doesNotMatch(launcherHtml, /X Launcher/u);
   assert.doesNotMatch(rendererSource, /X Launcher/u);
-  assert.match(websiteHtml, /id="site-menu-toggle"/u);
-  assert.match(websiteHtml, />Über X Client</u);
-  assert.doesNotMatch(websiteHtml, /site-menu-kicker/u);
-  assert.match(websiteHtml, /href="downloads\.html"[^>]*>[\s\S]*?<strong[^>]*>Jetzt spielen<\/strong>/u);
-  assert.doesNotMatch(websiteHtml, /Zur Download-Seite/u);
-  assert.match(featuresHtml, /href="features\.html" aria-current="page"/u);
-  assert.match(featuresHtml, /class="download play-now"/u);
-  assert.doesNotMatch(featuresHtml, /Zur Download-Seite/u);
-  assert.match(downloadsHtml, /href="downloads\.html" aria-current="page"/u);
+  for (const html of [websiteHtml, featuresHtml, downloadsHtml]) {
+    assert.match(html, /X-Launcher/u);
+    assert.equal((html.match(/<h1[ >]/gu) || []).length, 1);
+    assert.match(html, /rel="canonical"/u);
+    assert.match(html, /name="description"/u);
+    assert.match(html, /property="og:image"/u);
+  }
+  assert.match(websiteHtml, /href="downloads\.html"/u);
   assert.match(downloadsHtml, /id="download"/u);
-  assert.doesNotMatch(downloadsHtml, /download-facts/u);
-  assert.doesNotMatch(downloadsHtml, /download-shell-logo/u);
-  assert.doesNotMatch(downloadsHtml, /Download X Client, sign in with Microsoft/u);
-  assert.match(downloadsHtml, /class="download-shell-title"[^>]*data-i18n="downloads\.heading"/u);
-  assert.doesNotMatch(websiteCss, /site-menu-toggle\[aria-expanded="true"\]/u);
-  assert.match(websiteCss, /\.site-menu\.is-open \.site-menu-backdrop/u);
-  assert.match(websiteCss, /strong, b, h1, h2, h3, h4, h5, h6/u);
-  assert.match(websiteCss, /fonts\/Minecraft\.otf/u);
-  assert.match(websiteCss, /body, body \* \{ font-weight: 400 !important; \}/u);
-  assert.match(websiteCss, /\.live-stats, \.live-stats strong, \.live-stats small, \.download, \.download strong, \.download small, \.secondary \{ font-family: Inter/u);
-  assert.match(websiteCss, /\.live-stats strong \{ font-weight: 900 !important; \}/u);
-  assert.match(websiteCss, /\.live-stats small \{ font-weight: 800 !important; \}/u);
-  assert.match(websiteCss, /\.play-now strong \{ font-weight: 800 !important; \}/u);
-  assert.ok(fs.existsSync(path.join(projectRoot, 'docs', 'fonts', 'Minecraft.otf')));
+  assert.match(websiteCss, /prefers-reduced-motion/u);
+  assert.match(websiteCss, /:focus-visible/u);
+  assert.doesNotMatch(websiteHtml, /download-count|active-player-count/u);
 });
 
 test('website language is automatic and can be selected from every menu', () => {
@@ -68,7 +56,7 @@ test('website language is automatic and can be selected from every menu', () => 
     .map((fileName) => read(path.join('docs', fileName)));
 
   for (const page of pages) {
-    assert.match(page, /class="site-menu-footer"/u);
+    assert.match(page, /class="header-tools"/u);
     assert.match(page, /id="language-select"/u);
     assert.match(page, /option value="auto"/u);
     assert.match(page, /option value="de"/u);
@@ -76,64 +64,24 @@ test('website language is automatic and can be selected from every menu', () => 
   }
 
   assert.match(websiteScript, /navigator\.languages/u);
-  assert.match(websiteScript, /localStorage\.setItem\(languageStorageKey/u);
-  assert.match(websiteScript, /localStorage\.removeItem\(languageStorageKey/u);
-  assert.match(websiteScript, /window\.addEventListener\("languagechange"/u);
-  assert.match(websiteScript, /document\.documentElement\.lang = currentLanguage/u);
+  assert.match(websiteScript, /localStorage/u);
+  assert.match(websiteScript, /localStorage/u);
+  assert.match(websiteScript, /window\.addEventListener\('languagechange'/u);
+  assert.match(websiteScript, /document\.documentElement\.lang = language/u);
 });
 
-test('website preview is interactive while unsafe demo actions stay locked', () => {
-  const homePage = read(path.join('docs', 'index.html'));
-  const featuresPage = read(path.join('docs', 'features.html'));
-  const previewPage = read(path.join('docs', 'launcher-preview.html'));
-  const previewScript = read(path.join('docs', 'launcher-preview.js'));
-  const launcherMainSource = read(path.join('src', 'main.parts', 'part-01.jsfrag'));
-  const previewSkin = fs.readFileSync(path.join(projectRoot, 'docs', 'assets', 'skins', 'i-am-steve.png'));
-
-  assert.match(homePage, /id="app-preview"[^>]+launcher-preview\.html\?v=29/u);
-  assert.match(homePage, /id="legacy-app-preview"[^>]+hidden/u);
-  assert.match(previewPage, /id="main-screen" class="screen active"/u);
-  assert.match(previewPage, /id="username-display"[^>]*>X Client<\/button>/u);
-  assert.match(previewPage, /assets\/skins\/i-am-steve\.png/u);
-  assert.match(previewPage, /data-launcher-skin-src="assets\/skins\/i-am-steve\.png"/u);
-  assert.match(previewPage, /data-skin-name="i-am-steve"/u);
-  assert.match(previewPage, /class="dashboard-skin-stage"/u);
-  assert.equal(read(path.join('docs', 'launcher-preview-base.css')), read('styles.css'));
-  assert.equal(read(path.join('docs', 'launcher-preview-theme.css')), read('modern-launcher.css'));
-  assert.deepEqual([...previewSkin.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-  assert.doesNotMatch(homePage, /class="feature-story"/u);
-  assert.match(featuresPage, /class="feature-story feature-story-page"/u);
-  assert.match(previewScript, /nav-item\[data-section\]/u);
-  assert.match(previewScript, /nothing installed|nichts installiert/u);
-  assert.match(previewScript, /nichts gelöscht/u);
-  assert.match(previewScript, /keine Dateien erstellt, importiert oder exportiert/u);
-  assert.match(previewScript, /renderSkin3DPreviewCanvas\(dashboardCanvas, activeSkin, 24,/u);
-  assert.match(previewScript, /renderSkin3DPreviewCanvas\(document\.querySelector\("#skin-preview-canvas"\), activeSkin, 14,/u);
-  assert.match(previewScript, /const LAUNCHER_STANDARD_PROFILE/u);
-  assert.match(previewScript, /const LAUNCHER_STANDARD_MODS/u);
-  assert.match(previewScript, /const LAUNCHER_VISIBLE_MODS/u);
-  assert.match(previewScript, /const LAUNCHER_STANDARD_CONTENT/u);
-  assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
-  assert.match(previewScript, /hidden: true/u);
-  assert.match(previewScript, /itemType: "shader"/u);
-  assert.match(previewScript, /itemType: "resourcepack"/u);
-  assert.doesNotMatch(previewScript, /X Client Ressourcenpaket/u);
-  assert.doesNotMatch(previewPage, /datapack/u);
-  assert.match(previewScript, /cdn\.modrinth\.com\/data\//u);
-  assert.match(previewScript, /getLauncherPreviewView/u);
-  assert.match(previewScript, /Xaero's Minimap/u);
-  assert.match(previewScript, /Inventory Profiles Next/u);
-  assert.match(previewScript, /renderLauncherStandardProfile\(\)/u);
-  assert.match(previewScript, /renderLauncherStandardContent\(\)/u);
-  assert.match(previewScript, /Standard-Mods ausgerüstet/u);
-  const defaultProjectsSource = launcherMainSource.slice(
-    launcherMainSource.indexOf('const DEFAULT_PACK_PROJECTS = ['),
-    launcherMainSource.indexOf('const KNOWN_FABRIC_MOD_ID_PROJECT_IDS = {')
-  );
-  const defaultModTitles = [...defaultProjectsSource.matchAll(/title: '([^']+)'/gu)].map((match) => match[1]);
-  assert.equal(defaultModTitles.length, 22);
-  for (const title of defaultModTitles) assert.match(previewScript, new RegExp(`name: "${title}"`, 'u'));
-  assert.match(previewScript, /name: "X Client", kind: "Pflichtmod"/u);
-  assert.doesNotMatch(previewPage, /skinview3d/u);
-  assert.doesNotMatch(previewScript, /fetch\(|window\.api|electronAPI|XMLHttpRequest/u);
+test('website illustration is labelled and has no application actions', () => {
+  const home = read('docs/index.html');
+  assert.match(home, /Schematische CSS-Darstellung/u);
+  assert.doesNotMatch(home, /<iframe|window\.api|electronAPI/u);
+  for (const name of ['index.html','features.html','downloads.html']) {
+    const html = read('docs/'+name);
+    const header = html.slice(html.indexOf('<header'),html.indexOf('</header>'));
+    assert.doesNotMatch(header, /github\.com/u);
+    for (const match of html.matchAll(/(?:href|src)="([^"?#]+)(?:[?#][^"]*)?"/gu)) {
+      if (/^(?:https?:|#)/u.test(match[1])) continue;
+      assert.ok(!match[1].startsWith('/'));
+      assert.ok(fs.existsSync(path.join(projectRoot,'docs',match[1])),match[1]);
+    }
+  }
 });

@@ -1,0 +1,16 @@
+﻿{
+  "name": "X-Launcher",
+  "short_name": "X-Launcher",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#0b1011",
+  "theme_color": "#a9ef68",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

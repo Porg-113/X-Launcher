@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://porg-113.github.io/X-Launcher/sitemap.xml
