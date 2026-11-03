@@ -15,11 +15,16 @@ if (location.protocol === 'http:' || location.protocol === 'https:') {
 }
 
 const repository = 'https://github.com/Porg-113/X-Launcher';
-const languagePicker = document.querySelector('#language-select');
 const translated = [...document.querySelectorAll('[data-en]')].map(element => ({element, de: element.innerHTML, en: element.dataset.en}));
 let language = 'de';
-let languageMode = 'auto';
-function browserLanguage() { return (navigator.languages || [navigator.language]).some(value => /^de\b/i.test(value)) ? 'de' : 'en'; }
+function browserLanguage() {
+  const preferences = [...(navigator.languages || []), navigator.language];
+  for (const preference of preferences) {
+    const supported = /^(de|en)(?:-|$)/i.exec(preference || '');
+    if (supported) return supported[1].toLowerCase();
+  }
+  return 'en';
+}
 let releaseState = null;
 function renderRelease() {
   const button = document.querySelector('#download');
@@ -44,19 +49,13 @@ function renderRelease() {
     info.textContent = language === 'de' ? 'Kein aktueller Installer verifiziert. Bitte prüfe die verfügbaren Releases auf GitHub.' : 'No current installer verified. Please check the available releases on GitHub.';
   }
 }
-function applyLanguage(value) {
-  languageMode = ['de', 'en'].includes(value) ? value : 'auto';
-  language = languageMode === 'auto' ? browserLanguage() : languageMode;
+function applyLanguage() {
+  language = browserLanguage();
   document.documentElement.lang = language;
-  languagePicker.value = languageMode;
   translated.forEach(({element, de, en}) => { element.innerHTML = language === 'en' ? en : de; });
   renderRelease();
 }
-try { applyLanguage(localStorage.getItem('x-client-language') || 'auto'); } catch { applyLanguage('auto'); }
-languagePicker?.addEventListener('change', () => {
-  applyLanguage(languagePicker.value);
-  try { localStorage.setItem('x-client-language', languageMode); } catch { /* Site remains usable without storage. */ }
-});
+applyLanguage();
 if (document.querySelector('#download')) {
   (async () => {
     const controller = new AbortController();
@@ -74,7 +73,7 @@ if (document.querySelector('#download')) {
   })();
 }
 
-window.addEventListener('languagechange', () => { if (languageMode === 'auto') applyLanguage('auto'); });
+window.addEventListener('languagechange', applyLanguage);
 
 // Motion enhances visible content; nothing is hidden while waiting for JavaScript.
 const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');

@@ -26,21 +26,12 @@ a, select, summary { transition: color .2s, background .2s, border-color .2s, tr
 a:hover { color: var(--accent); }
 a:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
 .header, main, footer { width: 100%; margin-inline: auto; padding-inline: var(--gutter); }
-.header { min-height: 96px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 28px; border-bottom: 1px solid var(--line); }
-.header nav { grid-column: 2; display: flex; justify-content: center; gap: clamp(20px, 3vw, 44px); color: var(--muted); font-size: 13px; }
+.header { min-height: 96px; display: flex; justify-content: center; align-items: center; border-bottom: 1px solid var(--line); }
+.header nav { display: flex; justify-content: center; gap: clamp(20px, 3vw, 44px); color: var(--muted); font-size: 13px; }
 .header nav a { position: relative; padding-block: 8px; }
 .header nav a::after { content: ''; position: absolute; bottom: 0; left: 50%; width: 100%; height: 1px; background: var(--accent); transform: translateX(-50%) scaleX(0); transition: transform .25s; }
 .header nav a:hover::after, .header nav a[aria-current]::after { transform: translateX(-50%) scaleX(1); }
 .header nav a[aria-current] { color: var(--text); }
-.header-tools { grid-column: 3; justify-self: end; display: flex; align-items: center; }
-.language { position: relative; display: inline-flex; align-items: center; border-radius: 24px; }
-.language-icon { position: absolute; left: 14px; z-index: 1; color: var(--accent); fill: none; stroke: currentColor; stroke-width: 1.5; pointer-events: none; transition: color .2s, transform .2s; }
-.language select { appearance: none; -webkit-appearance: none; width: 96px; min-height: 44px; padding: 10px 12px 10px 40px; color: #d9eaf0; border: 1px solid #29424f; background: #0b1820; border-radius: 24px; cursor: pointer; font-size: 12px; font-weight: 600; letter-spacing: .035em; }
-.language:hover select { border-color: #4e7d8c; background: #10232c; }
-.language:focus-within select { border-color: var(--accent); }
-.language:hover .language-icon { transform: rotate(12deg); }
-.language select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.language select option { background: #0b1820; color: var(--text); }
 .hero { position: relative; isolation: isolate; display: grid; place-items: center; padding: clamp(70px, 9vw, 142px) 20px clamp(65px, 7vw, 108px); text-align: center; overflow: hidden; }
 .hero-copy { min-width: 0; width: 100%; max-width: 1040px; }
 .eyebrow { color: var(--accent); font-size: 12px; font-weight: 550; letter-spacing: .025em; margin-bottom: 20px; }
@@ -136,11 +127,8 @@ footer p { font-size: 11px; }footer > div { display: flex; justify-content: cent
 @media (min-width: 1700px) { .hero { padding-block: 140px; } .hero h1 { font-size: 9rem; } .card { padding: 40px; } }
 @media (max-width: 1000px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .split { gap: 24px; } .steps { gap: 18px; }.steps li { padding: 24px 18px; } }
 @media (max-width: 620px) {
-  .header { grid-template-columns: minmax(0, 1fr) auto; min-height: 78px; gap: 14px; padding-block: 14px; }
-  .header nav { grid-column: 1; grid-row: 1; justify-content: center; padding: 0; font-size: 11px; gap: 10px; }
-  .header-tools { grid-column: 2; grid-row: 1; }
-  .language select { width: 88px; padding: 10px 10px 10px 36px; }
-  .language-icon { left: 12px; width: 16px; height: 16px; }
+  .header { min-height: 78px; padding-block: 14px; }
+  .header nav { justify-content: center; padding: 0; font-size: 13px; gap: clamp(24px, 6vw, 40px); }
   .hero { padding: 70px 14px 64px; }.hero h1 { font-size: clamp(2.45rem, 12vw, 4.5rem); }
   .hero .eyebrow { font-size: 10px; letter-spacing: .025em; }
   .lead { font-size: 15px; }.hero-tagline { font-size: 1.6rem; }
@@ -161,5 +149,5 @@ footer p { font-size: 11px; }footer > div { display: flex; justify-content: cent
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
-  .card:hover, .primary:hover, .secondary:hover, .language:hover .language-icon { transform: none; }
+  .card:hover, .primary:hover, .secondary:hover { transform: none; }
 }

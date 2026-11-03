@@ -50,24 +50,24 @@ test('launcher retains its brand while the website presents X-Launcher', () => {
   assert.doesNotMatch(websiteHtml, /download-count|active-player-count/u);
 });
 
-test('website language is automatic and can be selected from every menu', () => {
-  const websiteScript = read(path.join('docs', 'download.js'));
-  const pages = ['index.html', 'features.html', 'downloads.html']
-    .map((fileName) => read(path.join('docs', fileName)));
-
-  for (const page of pages) {
-    assert.match(page, /class="header-tools"/u);
-    assert.match(page, /id="language-select"/u);
-    assert.match(page, /option value="auto"/u);
-    assert.match(page, /option value="de"/u);
-    assert.match(page, /option value="en"/u);
+test('website language follows browser preferences without a visible picker', () => {
+  const websiteScript = read('docs/download.js');
+  for (const file of ['index.html', 'features.html', 'downloads.html']) {
+    assert.doesNotMatch(read('docs/' + file), /language-select|language-icon|header-tools/u);
   }
-
-  assert.match(websiteScript, /navigator\.languages/u);
-  assert.match(websiteScript, /localStorage/u);
-  assert.match(websiteScript, /localStorage/u);
-  assert.match(websiteScript, /window\.addEventListener\('languagechange'/u);
-  assert.match(websiteScript, /document\.documentElement\.lang = language/u);
+  assert.doesNotMatch(websiteScript, /localStorage|languagePicker/u);
+  const detection = websiteScript.slice(websiteScript.indexOf('function browserLanguage()'), websiteScript.indexOf('let releaseState'));
+  for (const [languages, fallback, expected] of [
+    [['de-CH', 'en'], 'de-CH', 'de'],
+    [['en-US', 'de'], 'en-US', 'en'],
+    [['fr-CH', 'de-DE'], 'fr-CH', 'de'],
+    [['fr', 'it'], 'fr', 'en'],
+    [[], 'de-AT', 'de']
+  ]) {
+    const actual = require('node:vm').runInNewContext(detection + 'browserLanguage()', { navigator: { languages, language: fallback } });
+    assert.equal(actual, expected);
+  }
+  assert.match(websiteScript, /window\.addEventListener\('languagechange', applyLanguage\)/u);
 });
 
 test('website has cyan accents, detailed features and no application preview', () => {
