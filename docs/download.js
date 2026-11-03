@@ -51,3 +51,35 @@ if (document.querySelector('#download')) {
 }
 
 window.addEventListener('languagechange', () => { if (languageMode === 'auto') applyLanguage('auto'); });
+
+// Motion enhances visible content; nothing is hidden while waiting for JavaScript.
+const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+const runningAnimations = new Set();
+let entranceObserver;
+function animateEntrance(element, delay = 0) {
+  if (motionPreference.matches || !element.animate) return;
+  const animation = element.animate([
+    { opacity: 1, transform: 'translateY(22px)' },
+    { opacity: 1, transform: 'translateY(0)' }
+  ], { duration: 650, delay, easing: 'cubic-bezier(.2,.7,.25,1)', fill: 'backwards' });
+  runningAnimations.add(animation);
+  animation.finished.catch(() => {}).finally(() => runningAnimations.delete(animation));
+}
+if (!motionPreference.matches && 'IntersectionObserver' in window) {
+  document.querySelectorAll('.hero-copy > *, .page-intro > *').forEach((element, index) => animateEntrance(element, index * 75));
+  entranceObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const siblings = [...entry.target.parentElement.children];
+      animateEntrance(entry.target, Math.min(siblings.indexOf(entry.target), 3) * 70);
+      entranceObserver.unobserve(entry.target);
+    });
+  }, { threshold: .08 });
+  document.querySelectorAll('.section-heading, .card, .info-card, .steps li, .callout, .download-panel').forEach(element => entranceObserver.observe(element));
+}
+motionPreference.addEventListener('change', event => {
+  if (!event.matches) return;
+  entranceObserver?.disconnect();
+  runningAnimations.forEach(animation => animation.cancel());
+  runningAnimations.clear();
+});

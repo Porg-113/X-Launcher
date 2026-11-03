@@ -23,7 +23,7 @@ test('application and installer use the X Client brand while preserving upgrade 
   assert.match(installerScript, /Delete "\$SMPROGRAMS\\X Launcher\.lnk"/u);
 });
 
-test('launcher UI and website expose only X Client branding', () => {
+test('launcher retains its brand while the website presents X-Launcher', () => {
   const launcherHtml = read('index.html');
   const rendererSource = ['part-01.jsfrag', 'part-02.jsfrag', 'part-03.jsfrag', 'part-04.jsfrag']
     .map((fileName) => read(path.join('app.parts', fileName)))
@@ -70,18 +70,23 @@ test('website language is automatic and can be selected from every menu', () => 
   assert.match(websiteScript, /document\.documentElement\.lang = language/u);
 });
 
-test('website illustration is labelled and has no application actions', () => {
+test('website has cyan accents, detailed features and no application preview', () => {
   const home = read('docs/index.html');
-  assert.match(home, /Schematische CSS-Darstellung/u);
-  assert.doesNotMatch(home, /<iframe|window\.api|electronAPI/u);
-  for (const name of ['index.html','features.html','downloads.html']) {
-    const html = read('docs/'+name);
-    const header = html.slice(html.indexOf('<header'),html.indexOf('</header>'));
+  const css = read('docs/styles.css');
+  assert.doesNotMatch(home, /<iframe|class="preview"|mock-app|Schematische CSS/u);
+  assert.match(css, /--accent: rgb\(0, 255, 255\)/u);
+  assert.equal((home.match(/class="card"/gu) || []).length, 6);
+  assert.equal((home.match(/class="info-card"/gu) || []).length, 4);
+  assert.equal((home.match(/class="detail-list"/gu) || []).length, 6);
+  assert.match(css, /prefers-reduced-motion/u);
+  for (const file of ['index.html', 'features.html', 'downloads.html']) {
+    const html = read('docs/' + file);
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
     assert.doesNotMatch(header, /github\.com/u);
     for (const match of html.matchAll(/(?:href|src)="([^"?#]+)(?:[?#][^"]*)?"/gu)) {
       if (/^(?:https?:|#)/u.test(match[1])) continue;
       assert.ok(!match[1].startsWith('/'));
-      assert.ok(fs.existsSync(path.join(projectRoot,'docs',match[1])),match[1]);
+      assert.ok(fs.existsSync(path.join(projectRoot, 'docs', match[1])), match[1]);
     }
   }
 });
