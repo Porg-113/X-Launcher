@@ -65,9 +65,10 @@ function cacheBustHtml(html, version) {
 
     const pathname = url.split(/[?#]/, 1)[0];
     const isCacheableAsset = cacheableExtensions.test(pathname);
+    const isPageLink = attribute.toLowerCase() === 'href' && /\.html$/i.test(pathname);
     const isEmbeddedDocument = attribute.toLowerCase() === 'src' && /\.html$/i.test(pathname);
 
-    if (!isCacheableAsset && !isEmbeddedDocument) return match;
+    if (!isCacheableAsset && !isEmbeddedDocument && !isPageLink) return match;
     return `${attribute}=${quote}${withVersion(url, version)}${quote}`;
   });
 }
