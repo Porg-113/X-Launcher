@@ -27,9 +27,15 @@ a:hover { color: var(--accent); }
 a:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
 .header, main, footer { width: 100%; margin-inline: auto; padding-inline: var(--gutter); }
 .header { min-height: 96px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 28px; border-bottom: 1px solid var(--line); }
-.brand { display: inline-flex; align-items: center; gap: 10px; width: fit-content; font-size: 25px; font-weight: 800; letter-spacing: -.05em; white-space: nowrap; }
-.brand span { font-size: 11px; letter-spacing: .2em; font-weight: 650; }
-.brand img { object-fit: contain; }
+.brand { display: inline-flex; align-items: center; gap: 12px; width: fit-content; min-height: 44px; color: var(--text); white-space: nowrap; }
+.brand-mark { display: block; flex: 0 0 auto; overflow: visible; transition: transform .25s; }
+.brand-stroke { fill: var(--accent); }
+.brand-cross { fill: var(--text); transition: fill .25s; }
+.brand-wordmark { font-size: 21px; line-height: 1; font-weight: 650; letter-spacing: -.045em; }
+.brand-hyphen { color: #7896a4; margin-inline: 1px; }
+.brand:hover { color: var(--text); }
+.brand:hover .brand-mark { transform: translateY(-2px); }
+.brand:hover .brand-cross { fill: var(--accent); }
 .header nav { display: flex; justify-content: center; gap: clamp(20px, 3vw, 44px); color: var(--muted); font-size: 13px; }
 .header nav a { position: relative; padding-block: 8px; }
 .header nav a::after { content: ''; position: absolute; bottom: 0; left: 50%; width: 100%; height: 1px; background: var(--accent); transform: translateX(-50%) scaleX(0); transition: transform .25s; }
@@ -120,7 +126,7 @@ footer p { font-size: 11px; }footer > div { display: flex; justify-content: cent
 @media (max-width: 1000px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .split { gap: 24px; } .steps { gap: 18px; }.steps li { padding: 24px 18px; } }
 @media (max-width: 620px) {
   .header { grid-template-columns: 1fr 1fr; min-height: 0; gap: 18px; padding-block: 20px 16px; }
-  .brand { font-size: 23px; }.brand span { font-size: 10px; }
+  .brand { gap: 10px; }.brand-wordmark { font-size: 19px; }.brand-mark { width: 30px; height: 30px; }
   .header nav { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 13px; font-size: 12px; gap: 10px; }
   .hero { padding: 70px 14px 64px; }.hero h1 { font-size: clamp(2.45rem, 12vw, 4.5rem); }
   .hero .eyebrow { font-size: 10px; letter-spacing: .025em; }
@@ -138,5 +144,5 @@ footer p { font-size: 11px; }footer > div { display: flex; justify-content: cent
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
-  .card:hover, .primary:hover, .secondary:hover { transform: none; }
+  .card:hover, .primary:hover, .secondary:hover, .brand:hover .brand-mark { transform: none; }
 }
