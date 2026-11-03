@@ -59,17 +59,28 @@ function withVersion(url, version) {
   return `${pathname}?${query}${fragment}`;
 }
 
-function cacheBustHtml(html, version) {
+const pageRoutes = {
+  'index.html': './',
+  'features.html': 'feature/',
+  'downloads.html': 'download/'
+};
+
+function prepareHtml(html, version, depth = 0) {
   return html.replace(/\b(href|src)=(['\"])([^'\"]+)\2/gi, (match, attribute, quote, url) => {
     if (!isLocalUrl(url)) return match;
 
     const pathname = url.split(/[?#]/, 1)[0];
+    const prefix = '../'.repeat(depth);
+    if (attribute.toLowerCase() === 'href' && pageRoutes[pathname]) {
+      const fragment = url.includes('#') ? url.slice(url.indexOf('#')) : '';
+      return `${attribute}=${quote}${prefix}${pageRoutes[pathname]}${fragment}${quote}`;
+    }
     const isCacheableAsset = cacheableExtensions.test(pathname);
-    const isPageLink = attribute.toLowerCase() === 'href' && /\.html$/i.test(pathname);
     const isEmbeddedDocument = attribute.toLowerCase() === 'src' && /\.html$/i.test(pathname);
 
-    if (!isCacheableAsset && !isEmbeddedDocument && !isPageLink) return match;
-    return `${attribute}=${quote}${withVersion(url, version)}${quote}`;
+    const resolved = prefix + url;
+    const prepared = isCacheableAsset || isEmbeddedDocument ? withVersion(resolved, version) : resolved;
+    return `${attribute}=${quote}${prepared}${quote}`;
   });
 }
 
@@ -83,13 +94,28 @@ async function main() {
     .filter((file) => path.extname(file).toLowerCase() === '.html')
     .map(async (file) => {
       const html = await fs.readFile(file, 'utf8');
-      await fs.writeFile(file, cacheBustHtml(html, version));
+      await fs.writeFile(file, prepareHtml(html, version));
     }));
+
+  for (const [source, route] of Object.entries(pageRoutes)) {
+    if (route === './') continue;
+    const html = await fs.readFile(path.join(sourceDirectory, source), 'utf8');
+    const directory = path.join(outputDirectory, route);
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(path.join(directory, 'index.html'), prepareHtml(html, version, 1));
+    // Preserve old bookmarks, including visitors with JavaScript disabled.
+    const redirect = `<meta http-equiv="refresh" content="0;url=${route}">`;
+    await fs.writeFile(path.join(outputDirectory, source), prepareHtml(html, version).replace('</head>', `${redirect}</head>`));
+  }
 
   console.log(`Website built in site/ (asset version ${version}).`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { prepareHtml };

@@ -1,4 +1,19 @@
 ﻿'use strict';
+// Keep legacy bookmarks working while showing short, canonical page addresses.
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  const currentUrl = new URL(location.href);
+  const legacyPages = { 'index.html': './', 'features.html': 'feature/', 'downloads.html': 'download/' };
+  const legacyTarget = legacyPages[currentUrl.pathname.split('/').pop()];
+  if (legacyTarget) {
+    const target = new URL(legacyTarget, currentUrl);
+    target.hash = currentUrl.hash;
+    location.replace(target.href);
+  } else if (currentUrl.searchParams.has('v')) {
+    currentUrl.searchParams.delete('v');
+    history.replaceState(null, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+  }
+}
+
 const repository = 'https://github.com/Porg-113/X-Launcher';
 const languagePicker = document.querySelector('#language-select');
 const translated = [...document.querySelectorAll('[data-en]')].map(element => ({element, de: element.innerHTML, en: element.dataset.en}));
