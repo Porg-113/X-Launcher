@@ -23,12 +23,12 @@ test('website routes stay short while assets retain cache versions at every dept
   }
 });
 
-test('all three pages show exactly Home, Download and Feature and use clean canonicals', () => {
+test('all three pages show exactly Home, Feature and Download and use clean canonicals', () => {
   for (const [file, route, depth] of [['index.html', '', 0], ['downloads.html', 'download/', 1], ['features.html', 'feature/', 1]]) {
     const source = fs.readFileSync(path.join(__dirname, '../docs', file), 'utf8');
     const html = prepareHtml(source, 'test-release', depth);
     const nav = html.match(/<nav aria-label="Navigation">([\s\S]*?)<\/nav>/u)[1];
-    assert.deepEqual([...nav.matchAll(/<a[^>]*>([^<]+)<\/a>/gu)].map(match => match[1]), ['Home', 'Download', 'Feature']);
+    assert.deepEqual([...nav.matchAll(/<a[^>]*>([^<]+)<\/a>/gu)].map(match => match[1]), ['Home', 'Feature', 'Download']);
     assert.doesNotMatch(nav, /\.html|\?v=/u);
     assert.ok(html.includes('rel="canonical" href="https://porg-113.github.io/X-Launcher/' + route + '"'));
     assert.match(nav, /aria-current="page"/u);
