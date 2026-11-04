@@ -21,7 +21,8 @@
           : t('Unsere Produkte und die verfügbaren Varianten findest du direkt in unserem Printify-Shop.', 'Find our products and available variants directly in our Printify shop.'));
       if (!comingSoon && shopUrl) {
         $('.shop-lead').textContent = t('Finde, was zu dir passt. Entdecke unsere Kollektion im Printify-Shop.', 'Find what suits you. Explore our collection in the Printify shop.');
-        $('#printify-title').textContent = t('Dein nächstes Lieblingsstück.', 'Your next favourite.');
+        $('.collection-status').hidden = true;
+        $('.shop-footnote > span:first-child').textContent = t('Dein Style. Dein X.', 'Your style. Your X.');
         $('#printify-details > p:not(.eyebrow)').textContent = t('Wähle Größe und Farbe in unserem Printify-Shop aus und schließe dort deine Bestellung ab.', 'Choose your size and colour in our Printify shop and complete your order there.');
       }
       document.querySelectorAll('[data-printify-shop-link]').forEach(link => {
@@ -35,6 +36,8 @@
   }
 
   if (config.provider === 'shopify' || config.shopDomain) {
+    $('.shop-main').classList.remove('printify-storefront');
+    $('.collection-status').hidden = true;
     $('#printify-open').hidden = true;
     $('#printify-state-link').hidden = true;
     $('#printify-details').hidden = true;

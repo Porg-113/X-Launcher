@@ -68,3 +68,70 @@ button:not(:disabled) { cursor: pointer; }
 @media (max-width: 760px) { .shop-layout { grid-template-columns: 1fr; }.bag { position: static; }.shop-intro { align-items: start; flex-direction: column; padding-bottom: 32px; gap: 22px; }.shop-lead { font-size: 14px; }.shop-state { min-height: 300px; }.shop-footnote { font-size: 11px; }.shop-footnote > span:last-child { display: none; }.product-heading h3 { font-size: 15px; } }
 @media (max-width: 380px) { .product-grid { grid-template-columns: 1fr; }.header nav { gap: 20px; } }
 @media (prefers-reduced-motion: reduce) { .product-card:hover .product-visual img { transform: none; } }
+
+/* The Printify storefront follows one central axis, with three equal steps below. */
+.shop-page::before { height: 1100px; background: radial-gradient(ellipse at 50% 23%, rgba(var(--accent-rgb), .075), transparent 63%); }
+.printify-storefront { max-width: 1280px; }
+.printify-storefront .shop-intro { flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 28px; padding: 72px 0 64px; }
+.printify-storefront .shop-intro-copy { width: 100%; }
+.printify-storefront .shop-intro .eyebrow { display: flex; align-items: center; justify-content: center; gap: 18px; color: #a4c4ce; font-size: 10px; letter-spacing: .18em; margin-bottom: 24px; }
+.printify-storefront .shop-intro .eyebrow::before, .printify-storefront .shop-intro .eyebrow::after { content: ''; width: 36px; height: 1px; background: #2b5560; }
+.printify-storefront .shop-intro h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .23em; row-gap: 0; font-size: clamp(3rem, 6.5vw, 5.8rem); line-height: 1.1; letter-spacing: -.065em; }
+.printify-storefront .shop-lead { max-width: 480px; margin: 24px auto 0; color: #a1bac7; font-size: 15px; line-height: 1.9; }
+.printify-storefront .shop-open-link { min-width: 220px; min-height: 54px; gap: 20px; border-radius: 8px; }
+.shop-layout.printify-mode { grid-template-columns: minmax(0, 1fr); gap: 0; padding-bottom: 0; }
+.printify-mode .catalog { min-width: 0; }
+.printify-mode .catalog-heading { justify-content: center; gap: 24px; padding: 0; border: 0; margin-bottom: 28px; }
+.printify-mode .catalog-heading::before, .printify-mode .catalog-heading::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.printify-mode .catalog-heading h2 { flex-shrink: 0; color: #b2c8d2; font-size: 13px; font-weight: 500; letter-spacing: .015em; }
+.printify-mode .catalog-label { display: none; }
+.printify-mode .shop-state { position: relative; isolation: isolate; min-height: 390px; padding: 46px 32px; gap: 0; border: 1px solid #24434e; border-radius: 16px; background: radial-gradient(ellipse at 50% 0%, #0d343e75, transparent 67%), #09151b; overflow: hidden; }
+.printify-mode .shop-state::before { content: ''; position: absolute; top: 0; left: 20%; right: 20%; height: 1px; background: linear-gradient(90deg, transparent, #68e8eb99, transparent); }
+.printify-mode .state-mark { position: relative; width: 84px; height: 84px; margin: 0 0 24px; border-radius: 22px; font-size: 40px; line-height: 1; letter-spacing: -.08em; text-indent: -.08em; color: #a7ffff; background: linear-gradient(145deg, #0e2c35, #071920); border: 1px solid #34606c; box-shadow: 0 0 48px #00e6e60a, inset 0 1px #b9ffff0a; }
+.printify-mode .state-mark::before, .printify-mode .state-mark::after { content: ''; position: absolute; top: 50%; width: 76px; height: 1px; background: linear-gradient(90deg, transparent, #2a505c); }
+.printify-mode .state-mark::before { right: calc(100% + 20px); }
+.printify-mode .state-mark::after { left: calc(100% + 20px); transform: rotate(180deg); }
+.collection-status { display: inline-flex; justify-content: center; align-items: center; gap: 7px; font-size: 10px; line-height: 1.5; color: #8cb4bd; margin-bottom: 14px; }
+.collection-status > span:first-child { width: 5px; height: 5px; background: #74d6d7; border-radius: 50%; }
+.printify-mode .shop-state h3 { font-size: clamp(1.7rem, 3.1vw, 2.6rem); line-height: 1.2; letter-spacing: -.045em; }
+.printify-mode .shop-state p { max-width: 410px; margin-top: 16px; font-size: 13px; line-height: 1.9; }
+.printify-mode #printify-state-link { margin-top: 24px; color: #b0dce2; font-size: 12px; text-decoration: underline; text-decoration-color: #3b6672; text-underline-offset: 6px; }
+.printify-mode #printify-state-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.printify-storefront .printify-details { text-align: center; margin: 64px 0 0; padding: 0; background: transparent; border: 0; border-radius: 0; }
+.printify-storefront .printify-details .eyebrow { margin-bottom: 14px; font-size: 9px; letter-spacing: .15em; color: #7ba2b1; }
+.printify-storefront .printify-details h2 { font-size: clamp(1.5rem, 2.8vw, 2.1rem); line-height: 1.2; }
+.printify-storefront .printify-details > p:not(.eyebrow) { max-width: 540px; margin: 14px auto 0; font-size: 13px; }
+.shop-journey { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 20px; padding: 0; margin: 30px 0 0; list-style: none; text-align: center; }
+.shop-journey li { min-width: 0; padding: 26px; background: #0a141a; border: 1px solid var(--line); border-radius: 12px; }
+.journey-top { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 24px; }
+.journey-number { color: #6d929f; font: 11px/1 'Consolas', monospace; letter-spacing: .05em; }
+.journey-top svg { width: 23px; height: 23px; color: #7bc7ce; }
+.shop-journey h3 { font-size: 16px; font-weight: 550; line-height: 1.3; letter-spacing: -.025em; }
+.shop-journey p { margin-top: 12px; font-size: 12px; line-height: 1.9; }
+.printify-storefront .printify-domain { justify-content: center; gap: 10px; width: fit-content; margin: 28px auto 0; padding: 0; border: 0; font-size: 11px; color: #84a7b5; }
+.printify-storefront .printify-domain:hover { color: var(--accent); }
+.printify-storefront .shop-footnote { justify-content: center; margin-top: 52px; padding: 24px 0; border-bottom: 0; font-size: 11px; color: #7995a3; text-align: center; }
+.printify-storefront .shop-footnote > span:last-child { display: none; }
+.shop-page footer { padding-top: 16px; padding-bottom: 38px; gap: 18px; }
+@media (max-width: 900px) {
+  .shop-journey { gap: 14px; }.shop-journey li { padding: 22px; }
+}
+@media (max-width: 620px) {
+  .printify-storefront .shop-intro { padding: 48px 0 44px; gap: 24px; }
+  .printify-storefront .shop-intro .eyebrow { margin-bottom: 20px; font-size: 9px; }
+  .printify-storefront .shop-intro h1 { font-size: clamp(2.7rem, 10.7vw, 4rem); }
+  .printify-storefront .shop-lead { max-width: 350px; font-size: 13px; margin-top: 20px; }
+  .printify-storefront .shop-open-link { min-width: 210px; min-height: 50px; }
+  .printify-mode .catalog-heading { gap: 18px; margin-bottom: 22px; }
+  .printify-mode .shop-state { min-height: 350px; padding: 36px 24px; border-radius: 12px; }
+  .printify-mode .state-mark { width: 70px; height: 70px; border-radius: 19px; font-size: 34px; }
+  .printify-mode .state-mark::before, .printify-mode .state-mark::after { width: 40px; }
+  .printify-mode .shop-state p { font-size: 12px; }
+  .printify-storefront .printify-details { margin-top: 44px; }
+  .printify-storefront .printify-details > p:not(.eyebrow) { max-width: 300px; font-size: 12px; }
+  .shop-journey { grid-template-columns: 1fr; gap: 12px; margin-top: 24px; text-align: center; }
+  .shop-journey li { padding: 24px; }
+  .journey-top { justify-content: center; gap: 16px; margin-bottom: 16px; }
+  .shop-journey p { max-width: 280px; margin-inline: auto; }
+  .printify-storefront .shop-footnote { margin-top: 36px; }
+}
