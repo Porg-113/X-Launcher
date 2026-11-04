@@ -62,7 +62,8 @@ function withVersion(url, version) {
 const pageRoutes = {
   'index.html': './',
   'features.html': 'feature/',
-  'downloads.html': 'download/'
+  'downloads.html': 'download/',
+  'shop.html': 'shop/'
 };
 
 function prepareHtml(html, version, depth = 0) {

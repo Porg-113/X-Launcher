@@ -2,7 +2,7 @@
 // Keep legacy bookmarks working while showing short, canonical page addresses.
 if (location.protocol === 'http:' || location.protocol === 'https:') {
   const currentUrl = new URL(location.href);
-  const legacyPages = { 'index.html': './', 'features.html': 'feature/', 'downloads.html': 'download/' };
+  const legacyPages = { 'index.html': './', 'features.html': 'feature/', 'downloads.html': 'download/', 'shop.html': 'shop/' };
   const legacyTarget = legacyPages[currentUrl.pathname.split('/').pop()];
   if (legacyTarget) {
     const target = new URL(legacyTarget, currentUrl);
