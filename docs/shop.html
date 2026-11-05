@@ -3,95 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shop – X-Client</title>
-  <meta name="description" content="Der X-Client Shop bei Printify. Unsere Kollektion kommt bald. Entdecke künftig unsere Produkte und bestelle direkt im Printify-Shop.">
-  <meta name="theme-color" content="#050c10">
-  <link rel="canonical" href="https://porg-113.github.io/X-Launcher/shop/">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Shop – X-Client">
-  <meta property="og:description" content="Dein Style. Dein X. Entdecke den X-Client Shop.">
-  <meta property="og:url" content="https://porg-113.github.io/X-Launcher/shop/">
-  <meta property="og:image" content="https://porg-113.github.io/X-Launcher/social-card.png">
-  <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="icon.ico">
-  <link rel="apple-touch-icon" href="icon.png">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="shop.css">
-  <script src="download.js" defer></script>
-  <script src="shop-config.js" defer></script>
-  <script src="shop-client.js" defer></script>
-  <script src="shop.js" defer></script>
+  <meta http-equiv="refresh" content="0;url=https://x-client.printify.me/">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="https://x-client.printify.me/">
+  <title>Weiter zum X-Client Shop</title>
+  <script>window.location.replace('https://x-client.printify.me/');</script>
 </head>
-<body class="shop-page">
-  <a class="skip" href="#main"><span data-en="Skip to content">Zum Inhalt</span></a>
-  <header class="header"><nav aria-label="Navigation"><a href="index.html">Home</a><a href="features.html">Feature</a><a href="downloads.html">Download</a><a href="shop.html" aria-current="page">Shop</a></nav></header>
-  <main id="main" class="shop-main printify-storefront">
-    <section class="shop-intro" aria-labelledby="shop-title">
-      <div class="shop-intro-copy">
-        <p class="eyebrow">X-CLIENT / SHOP</p>
-        <h1 id="shop-title"><span data-en="Your style.">Dein Style.</span> <em><span data-en="Your X.">Dein X.</span></em></h1>
-        <p class="shop-lead"><span data-en="Your next favourite look is on its way. Discover the first X-Client collection soon.">Dein nächster Lieblingslook ist unterwegs. Entdecke bald die erste X-Client-Kollektion.</span></p>
-      </div>
-      <a id="printify-open" class="button primary shop-open-link" href="https://x-client.printify.me/" data-printify-shop-link><span data-en="Open shop">Shop öffnen</span><span aria-hidden="true">↗</span></a>
-      <a id="shopify-bag" class="bag-link" href="#warenkorb" hidden><span data-en="Your bag">Dein Warenkorb</span> <span id="bag-count">0</span><span aria-hidden="true">↗</span></a>
-    </section>
-    <div class="shop-layout printify-mode">
-      <section class="catalog" aria-labelledby="catalog-title" aria-busy="false">
-        <div class="catalog-heading"><h2 id="catalog-title"><span data-en="The collection">Die Kollektion</span></h2><span class="catalog-label">X-CLIENT</span></div>
-        <div id="catalog-state" class="shop-state" role="status">
-          <span class="state-mark" aria-hidden="true">X</span>
-          <span class="collection-status"><span aria-hidden="true"></span><span data-en="In the making">In Vorbereitung</span></span>
-          <h3 id="catalog-state-title"><span data-en="The collection is coming soon.">Die Kollektion kommt bald.</span></h3>
-          <p id="catalog-state-description"><span data-en="No products have been published yet. Check back soon.">Aktuell sind noch keine Produkte veröffentlicht. Schau bald wieder vorbei.</span></p>
-          <a id="printify-state-link" class="text-link" href="https://x-client.printify.me/" data-printify-shop-link><span data-en="Visit our Printify shop">Unseren Printify-Shop ansehen</span> ↗</a>
-          <button id="shop-retry" class="button secondary" type="button" hidden><span data-en="Try again">Erneut versuchen</span></button>
-        </div>
-        <div id="product-grid" class="product-grid"></div>
-        <button id="load-more" class="button secondary load-more" type="button" hidden><span data-en="Load more products">Weitere Produkte laden</span></button>
-        <noscript><p class="noscript-message">Unseren Printify-Shop kannst du auch ohne JavaScript über „Shop öffnen“ besuchen. / You can visit our Printify shop without JavaScript using “Open shop”.</p></noscript>
-      </section>
-      <aside id="warenkorb" class="bag" aria-labelledby="bag-title" tabindex="-1" hidden>
-        <div class="bag-heading"><h2 id="bag-title"><span data-en="Your bag">Dein Warenkorb</span></h2><span class="bag-dot" aria-hidden="true"></span></div>
-        <div id="bag-lines"><p class="bag-empty"><span data-en="Still empty. Your next favourite is waiting.">Noch leer. Dein nächstes Lieblingsstück wartet schon.</span></p></div>
-        <div class="bag-summary">
-          <div class="bag-subtotal"><span data-en="Subtotal">Zwischensumme</span><strong id="bag-subtotal">—</strong></div>
-          <p class="bag-note"><span data-en="Shipping, taxes and any discounts are calculated at checkout.">Versand, Steuern und mögliche Rabatte werden an der Kasse berechnet.</span></p>
-          <button id="checkout" class="button primary" type="button" disabled><span data-en="Checkout">Zur Kasse</span><span aria-hidden="true">↗</span></button>
-          <p class="checkout-provider"><span data-en="Payment via Shopify">Bezahlung über Shopify</span></p>
-        </div>
-        <p id="bag-status" class="bag-status" role="status" aria-live="polite" aria-atomic="true"></p>
-      </aside>
-    </div>
-    <section id="printify-details" class="printify-details" aria-labelledby="printify-title">
-      <p class="eyebrow">X-CLIENT × PRINTIFY</p>
-      <h2 id="printify-title"><span data-en="Three steps to your new look.">In drei Schritten zu deinem Look.</span></h2>
-      <p><span data-en="Once the collection launches, it is this easy to order.">Sobald die Kollektion startet, bestellst du ganz einfach.</span></p>
-      <ol class="shop-journey">
-        <li>
-          <div class="journey-top"><span class="journey-number">01</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4 4 2 4-2 5 4-3 4-2-1v9H8v-9l-2 1-3-4 5-4Z"/></svg></div>
-          <h3><span data-en="Find your favourite">Lieblingsstück finden</span></h3>
-          <p><span data-en="Explore the collection and find what suits you.">Entdecke die Kollektion und finde, was zu dir passt.</span></p>
-        </li>
-        <li>
-          <div class="journey-top"><span class="journey-number">02</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--panel)"/><circle cx="15" cy="17" r="3" fill="var(--panel)"/></svg></div>
-          <h3><span data-en="Make it your own">Deinen Look wählen</span></h3>
-          <p><span data-en="Choose your size and colour from the available options.">Wähle Größe und Farbe aus den verfügbaren Varianten.</span></p>
-        </li>
-        <li>
-          <div class="journey-top"><span class="journey-number">03</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="13" rx="2"/><path d="M8 8V6a4 4 0 0 1 8 0v2m-8 5 3 3 5-5"/></svg></div>
-          <h3><span data-en="Place your order">Einfach bestellen</span></h3>
-          <p><span data-en="Complete your purchase directly in our Printify shop.">Schließe deinen Kauf direkt in unserem Printify-Shop ab.</span></p>
-        </li>
-      </ol>
-      <a class="printify-domain" href="https://x-client.printify.me/" data-printify-shop-link>x-client.printify.me <span aria-hidden="true">↗</span></a>
-    </section>
-    <div class="shop-footnote"><span data-en="The next chapter of your style. Coming soon.">Das nächste Kapitel für deinen Style. Bald.</span><span>X-CLIENT</span></div>
-  </main>
-  <footer>
-    <a class="footer-name" href="index.html">X-Client</a>
-    <div id="shop-policies" class="shop-policies"></div>
-    <div><a href="https://github.com/Porg-113/X-Launcher">GitHub</a><a href="https://discord.gg/YRqm22RYxK">Discord</a><a href="https://www.youtube.com/@x-client">YouTube</a></div>
-  </footer>
-</body>
+<body><a href="https://x-client.printify.me/">Zum X-Client Shop / Visit the X-Client shop</a></body>
 </html>

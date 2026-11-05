@@ -105,7 +105,9 @@ async function main() {
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, 'index.html'), prepareHtml(html, version, 1));
     // Preserve old bookmarks, including visitors with JavaScript disabled.
-    const redirect = `<meta http-equiv="refresh" content="0;url=${route}">`;
+    const redirect = /<meta\b[^>]*http-equiv=["']refresh["']/i.test(html)
+      ? ''
+      : `<meta http-equiv="refresh" content="0;url=${route}">`;
     await fs.writeFile(path.join(outputDirectory, source), prepareHtml(html, version).replace('</head>', `${redirect}</head>`));
   }
 
