@@ -15,6 +15,7 @@ if (location.protocol === 'http:' || location.protocol === 'https:') {
 }
 
 const repository = 'https://github.com/Porg-113/X-Launcher';
+const windowsInstallerAssetName = /^(?:X-(?:Launcher|Client)-[\d.]+-x64|X-[\d.]+)\.exe$/i;
 const translated = [...document.querySelectorAll('[data-en]')].map(element => ({element, de: element.innerHTML, en: element.dataset.en}));
 let language = 'de';
 function browserLanguage() {
@@ -43,10 +44,10 @@ function renderRelease() {
   } else {
     if (version) version.textContent = '—';
     if (size) size.textContent = '—';
-    if (panel) panel.dataset.releaseState = 'unavailable';
-    button.href = repository + '/releases';
-    button.textContent = language === 'de' ? 'Releases auf GitHub ansehen' : 'View releases on GitHub';
-    info.textContent = language === 'de' ? 'Kein aktueller Installer verifiziert. Bitte prüfe die verfügbaren Releases auf GitHub.' : 'No current installer verified. Please check the available releases on GitHub.';
+    if (panel) panel.dataset.releaseState = 'fallback';
+    // Keep the direct installer link from the HTML when GitHub's API is unavailable.
+    button.textContent = 'Download';
+    info.textContent = language === 'de' ? 'Die neueste Version konnte nicht abgefragt werden. Download lädt den zuletzt hinterlegten Installer herunter.' : 'Could not check the latest version. Download gets the last known installer.';
   }
 }
 function applyLanguage() {
@@ -65,7 +66,7 @@ if (document.querySelector('#download')) {
       if (!response.ok) throw new Error('Release unavailable');
       const release = await response.json();
       if (release.draft || release.prerelease || !Array.isArray(release.assets)) throw new Error('No stable release');
-      const asset = release.assets.find(asset => /^X-(?:Launcher|Client)-[\d.]+-x64\.exe$/i.test(asset.name) && asset.state === 'uploaded' && asset.size > 0 && typeof asset.browser_download_url === 'string' && asset.browser_download_url.startsWith(repository + '/releases/download/'));
+      const asset = release.assets.find(asset => windowsInstallerAssetName.test(asset.name) && asset.state === 'uploaded' && asset.size > 0 && typeof asset.browser_download_url === 'string' && asset.browser_download_url.startsWith(repository + '/releases/download/'));
       if (!asset) throw new Error('No supported installer');
       releaseState = {asset,tag:release.tag_name};
     } catch { releaseState = {}; }
