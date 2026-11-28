@@ -99,6 +99,13 @@ body.versions-open { overflow: hidden; }
 .platform-list .version-button { --version-a: #74858b; --version-b: #9aa7ab; border-color: rgba(210,225,230,.15); background: #11171a; }
 .platform-list .version-title { background: none; background-clip: border-box; color: #e1e8ea; -webkit-text-fill-color: #e1e8ea; }
 .platform-list .version-button:hover, .platform-list .version-button:focus-visible { border-color: rgba(0,225,240,.55); box-shadow: 0 0 0 1px rgba(0,225,240,.2), 0 0 18px rgba(0,200,220,.12); }
+.platform-list .version-button,
+.platform-list .version-button:hover,
+.platform-list .version-button:focus-visible { --version-a: #9ba2a6; --version-b: #c6cbce; transform: none; border-color: #3a4145; background: #171a1d; box-shadow: none; color: #f0f1f2; }
+.platform-list .version-button:hover { border-color: #9da5a9; background: #202427; }
+.platform-list .version-button:focus-visible { outline: 2px solid #aeb5b9; outline-offset: 3px; }
+.platform-list .version-title { background: none; background-clip: border-box; color: #f0f1f2; -webkit-text-fill-color: #f0f1f2; }
+.platform-list .version-detail { color: #b4b8bb; }
 .platform-error { margin: 15px 0 0; padding: 0; color: #ffb5b8; font-size: 13px; line-height: 1.5; }
 .platform-error:not(:empty) { padding: 12px 14px; border: 1px solid rgba(255,87,104,.55); border-radius: 9px; background: rgba(130,20,37,.22); color: #ff9ea6; }
 .versions-backdrop { animation: versions-overlay-in .22s ease-out both; }
