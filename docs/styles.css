@@ -81,16 +81,6 @@ main { width: 100%; padding-inline: clamp(24px, 7.8vw, 150px); }
 body.versions-open { overflow: hidden; }
 .hero .more-link { padding: 0; border: 0; background: transparent; cursor: pointer; font: inherit; }
 .hero .more-link { position: relative; }
-.versions-hover-preview { position: absolute; top: calc(100% + 12px); left: 0; z-index: 10; width: min(310px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 9px; padding: 16px; border: 1px solid rgba(105,225,255,.34); border-radius: 12px; background: linear-gradient(145deg, rgba(15,28,35,.98), rgba(9,13,18,.98)); box-shadow: 0 16px 42px rgba(0,0,0,.48), 0 0 22px rgba(0,220,255,.12); color: #f2f7f9; text-align: left; opacity: 0; visibility: hidden; transform: translateY(7px); transition: opacity .18s ease, transform .18s ease, visibility .18s; pointer-events: none; }
-.versions-hover-preview > strong { margin-bottom: 2px; font-size: 13px; font-weight: 700; }
-.hover-version { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; padding: 8px 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: rgba(255,255,255,.035); color: #cbd7db; font-size: 12px; }
-.hover-version small { color: #79eddd; font-size: 11px; }
-.hover-macos { color: #d3b5ff; }.hover-linux { color: #88debd; }
-.hover-hint { color: #93a0a6; font-size: 11px; text-align: center; }
-@media (hover: hover) {
-  .hero .more-link:hover .versions-hover-preview,
-  .hero .more-link:focus-visible .versions-hover-preview { opacity: 1; visibility: visible; transform: translateY(0); }
-}
 .button.primary { border: 1px solid rgba(89,255,255,.9); background: linear-gradient(110deg, #00ffff, #53d9ff 55%, #78a4ff); color: #001719; box-shadow: 0 8px 26px rgba(0,210,255,.16); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
 .button.primary:hover { transform: translateY(-2px); border-color: #fff; box-shadow: 0 0 0 1px rgba(0,255,255,.55), 0 0 28px rgba(0,225,255,.38); }
 .versions-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(1,5,8,.66); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
