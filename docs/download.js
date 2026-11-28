@@ -2,7 +2,7 @@
 // Keep legacy bookmarks working while showing short, canonical page addresses.
 if (location.protocol === 'http:' || location.protocol === 'https:') {
   const currentUrl = new URL(location.href);
-  const legacyPages = { 'index.html': './', 'features.html': 'feature/', 'downloads.html': 'download/', 'shop.html': 'https://x-client.printify.me/' };
+  const legacyPages = { 'index.html': './', 'shop.html': 'https://x-client.printify.me/' };
   const legacyTarget = legacyPages[currentUrl.pathname.split('/').pop()];
   if (legacyTarget) {
     const target = new URL(legacyTarget, currentUrl);
@@ -27,6 +27,8 @@ function browserLanguage() {
   return 'en';
 }
 let releaseState = null;
+let pendingLatestDownload = null;
+const latestDownloadButtons = [...document.querySelectorAll('#download, [data-latest-download]')];
 function renderRelease() {
   const button = document.querySelector('#download');
   const info = document.querySelector('#release-info');
@@ -35,8 +37,7 @@ function renderRelease() {
   const size = document.querySelector('#release-size');
   const panel = document.querySelector('.download-panel');
   if (releaseState.asset) {
-    button.href = releaseState.asset.browser_download_url;
-    button.textContent = 'Download';
+    latestDownloadButtons.forEach(downloadButton => { downloadButton.href = releaseState.asset.browser_download_url; });
     if (version) version.textContent = releaseState.tag;
     if (size) size.textContent = `${(releaseState.asset.size / 1024 / 1024).toFixed(0)} MiB`;
     if (panel) panel.dataset.releaseState = 'ready';
@@ -46,8 +47,13 @@ function renderRelease() {
     if (size) size.textContent = '—';
     if (panel) panel.dataset.releaseState = 'fallback';
     // Keep the direct installer link from the HTML when GitHub's API is unavailable.
-    button.textContent = 'Download';
     info.textContent = language === 'de' ? 'Die neueste Version konnte nicht abgefragt werden. Download lädt den zuletzt hinterlegten Installer herunter.' : 'Could not check the latest version. Download gets the last known installer.';
+  }
+  if (pendingLatestDownload) {
+    const downloadButton = pendingLatestDownload;
+    pendingLatestDownload = false;
+    downloadButton.removeAttribute('aria-busy');
+    window.location.assign(downloadButton.href);
   }
 }
 function applyLanguage() {
@@ -57,7 +63,14 @@ function applyLanguage() {
   renderRelease();
 }
 applyLanguage();
-if (document.querySelector('#download')) {
+if (latestDownloadButtons.length) {
+  latestDownloadButtons.forEach(downloadButton => downloadButton.addEventListener('click', event => {
+    if (releaseState === null) {
+      event.preventDefault();
+      pendingLatestDownload = downloadButton;
+      downloadButton.setAttribute('aria-busy', 'true');
+    }
+  }));
   (async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
@@ -75,3 +88,43 @@ if (document.querySelector('#download')) {
 }
 
 window.addEventListener('languagechange', applyLanguage);
+
+const openVersionsButton = document.querySelector('#open-versions');
+const versionsBackdrop = document.querySelector('#versions-backdrop');
+const closeVersionsButton = document.querySelector('#close-versions');
+const platformError = document.querySelector('#platform-error');
+let versionsCloseTimer = null;
+function closeVersions() {
+  if (!versionsBackdrop || versionsBackdrop.hidden) return;
+  versionsBackdrop.classList.add('is-closing');
+  window.clearTimeout(versionsCloseTimer);
+  versionsCloseTimer = window.setTimeout(() => {
+    versionsBackdrop.hidden = true;
+    versionsBackdrop.classList.remove('is-closing');
+    document.body.classList.remove('versions-open');
+    if (platformError) platformError.textContent = '';
+    openVersionsButton?.focus();
+  }, 180);
+}
+openVersionsButton?.addEventListener('click', () => {
+  if (!versionsBackdrop) return;
+  window.clearTimeout(versionsCloseTimer);
+  versionsBackdrop.classList.remove('is-closing');
+  if (platformError) platformError.textContent = '';
+  versionsBackdrop.hidden = false;
+  document.body.classList.add('versions-open');
+  closeVersionsButton?.focus();
+});
+closeVersionsButton?.addEventListener('click', closeVersions);
+versionsBackdrop?.addEventListener('click', event => {
+  if (event.target === versionsBackdrop) closeVersions();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeVersions();
+});
+document.querySelectorAll('[data-platform]').forEach(button => {
+  button.addEventListener('click', () => {
+    if (!platformError) return;
+    platformError.textContent = `Für ${button.dataset.platform} ist derzeit kein X Client-Download verfügbar.`;
+  });
+});

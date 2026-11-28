@@ -14,6 +14,21 @@ const projectRoot = path.resolve(__dirname, '..');
 const sourceDirectory = path.join(projectRoot, 'docs');
 const outputDirectory = path.join(projectRoot, 'site');
 const cacheableExtensions = /\.(?:avif|css|gif|ico|jpe?g|js|otf|png|svg|ttf|webp|woff2?)$/i;
+const excludedWebsitePaths = [
+  'assets/',
+  'fonts/',
+  'vendor/',
+  'icon.png',
+  'x-client.png',
+  'social-card.png',
+  'launcher-preview.html',
+  'launcher-preview.js',
+  'launcher-preview-base.css',
+  'launcher-preview-theme.css',
+  'launcher-language-policy.md',
+  'WINDOWS-DISTRIBUTION-AUDIT.md',
+  'manifest.webmanifest'
+];
 
 async function walk(directory) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -61,8 +76,6 @@ function withVersion(url, version) {
 
 const pageRoutes = {
   'index.html': './',
-  'features.html': 'feature/',
-  'downloads.html': 'download/',
   'shop.html': 'shop/'
 };
 
@@ -88,7 +101,13 @@ function prepareHtml(html, version, depth = 0) {
 async function main() {
   const version = await createVersion();
   await fs.rm(outputDirectory, { recursive: true, force: true });
-  await fs.cp(sourceDirectory, outputDirectory, { recursive: true });
+  await fs.cp(sourceDirectory, outputDirectory, {
+    recursive: true,
+    filter(entryPath) {
+      const relativePath = path.relative(sourceDirectory, entryPath).replace(/\\/g, '/');
+      return !excludedWebsitePaths.some(excluded => relativePath === excluded.replace(/\/$/, '') || relativePath.startsWith(excluded));
+    }
+  });
 
   const files = await walk(outputDirectory);
   await Promise.all(files
